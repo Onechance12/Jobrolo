@@ -1,0 +1,46 @@
+# environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# dependencies
+node_modules/
+
+# builds
+.next/
+.vercel/
+dist/
+build/
+out/
+
+# databases
+db/*.db
+db/*.db-*
+db/*.sqlite
+db/*.sqlite-*
+
+# uploads and private/generated files
+public/uploads/
+storage/
+upload/
+download/
+tool-results/
+
+# logs and cache
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+tsconfig.tsbuildinfo
+.DS_Store
+
+# misc
+skills/
+.zscripts/
+.initial_snapshot.json
+mini-services/
+
+# Agent/internal build logs
+worklog.md
+*.worklog.md

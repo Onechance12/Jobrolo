@@ -1,0 +1,111 @@
+import { db } from './db'
+import { type ChatMessage } from './ai'
+import { buildCommandCenterPrompt, buildChannelPrompt } from './prompts'
+import { runAgentLoop } from './agent-loop'
+import { executeActions } from './actions'
+import type { AiAction, ChannelType, WorkspaceInfo } from './types'
+
+interface ChatJob {
+  id: string; status: 'processing' | 'done' | 'error'
+  thinking: Array<{ text: string; toolCalls?: Array<{ name: string; args: Record<string, unknown> }>; toolResults?: Array<{ name: string; success: boolean; summary: string }> }>
+  heartbeat: string
+  result?: {
+    text: string
+    actionResults: Array<{ action: string; status: string; detail: string; targetChatType?: string }>
+    attachments: Array<{ type: string; name: string; url: string; thumbnailUrl?: string; documentId?: string }>
+    contextType?: string | null
+    contextData?: unknown | null
+    conversationId: string
+  }
+  error?: string
+  createdAt: number
+}
+
+const jobs = new Map<string, ChatJob>()
+setInterval(() => { const now = Date.now(); for (const [id, job] of jobs) if (now - job.createdAt > 600000) jobs.delete(id) }, 60000)
+
+export function createJob(): string {
+  const id = crypto.randomUUID()
+  jobs.set(id, { id, status: 'processing', thinking: [], heartbeat: 'Starting...', createdAt: Date.now() })
+  return id
+}
+
+export function getJob(jobId: string): ChatJob | null { return jobs.get(jobId) || null }
+
+export async function processJob(jobId: string, opts: {
+  message: string; conversationId?: string; businessContext?: string; documentIds?: string[]
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>; workspaceId?: string; chatId?: string
+}): Promise<void> {
+  const job = jobs.get(jobId); if (!job) return
+  const { message, conversationId, businessContext, documentIds = [], history = [], workspaceId, chatId } = opts
+  let heartbeatCount = 0
+  const heartbeatTexts = ['Thinking...', 'Processing...', 'Gathering data...', 'Almost there...', 'Working on it...']
+  const hb = setInterval(() => { const j = jobs.get(jobId); if (!j || j.status !== 'processing') { clearInterval(hb); return } j.heartbeat = heartbeatTexts[heartbeatCount++ % heartbeatTexts.length] }, 2000)
+
+  try {
+    const contractor = await db.contractor.findFirst(); if (!contractor) throw new Error('No contractor')
+    let conversation = conversationId ? await db.conversation.findUnique({ where: { id: conversationId } }) : null
+    if (!conversation) conversation = await db.conversation.create({ data: { contractorId: contractor.id, title: message.slice(0, 50) } })
+
+    if (workspaceId && chatId) {
+      await db.workspaceMessage.create({ data: { chatId, role: 'user', content: message, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
+      await db.workspaceChat.update({ where: { id: chatId }, data: { lastActivity: new Date() } })
+    } else {
+      await db.message.create({ data: { conversationId: conversation.id, role: 'user', content: message, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
+    }
+
+    let systemPrompt: string
+    if (workspaceId && chatId) {
+      const ws = await db.workspace.findUnique({ where: { id: workspaceId }, include: { project: { include: { customer: { select: { id: true, name: true, phone: true, email: true } } } }, customer: { select: { id: true, name: true, phone: true, email: true, address: true } }, subcontractor: { select: { id: true, name: true, company: true, specialty: true, phone: true } } } })
+      const chat = await db.workspaceChat.findFirst({ where: { id: chatId, workspaceId } })
+      if (!ws || !chat) throw new Error('Workspace/chat not found')
+      const recentMemory = await db.workspaceMemory.findMany({ where: { workspaceId }, orderBy: { createdAt: 'desc' }, take: 30 })
+      const otherChats = await db.workspaceChat.findMany({ where: { workspaceId, NOT: { id: chatId } }, select: { id: true, chatType: true } })
+      let crossActivity: Array<{ chatType: string; role: string; content: string; createdAt: string }> = []
+      if (otherChats.length > 0) { const msgs = await Promise.all(otherChats.map(async oc => { const m = await db.workspaceMessage.findMany({ where: { chatId: oc.id }, orderBy: { createdAt: 'desc' }, take: 3, select: { role: true, content: true, createdAt: true } }); return m.map(x => ({ chatType: oc.chatType, role: x.role, content: x.content, createdAt: x.createdAt.toISOString() })) })); crossActivity = msgs.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 15) }
+      let tasks: Array<{ id: string; title: string; status: string; priority: string }> = []
+      if (ws.projectId) tasks = await db.task.findMany({ where: { projectId: ws.projectId }, orderBy: [{ status: 'asc' }, { priority: 'desc' }], take: 20, select: { id: true, title: true, status: true, priority: true } })
+      const workspaceInfo: WorkspaceInfo = { id: ws.id, name: ws.name, type: ws.type as WorkspaceInfo['type'], description: ws.description, color: ws.color, status: ws.status, projectId: ws.projectId, customerId: ws.customerId, subcontractorId: ws.subcontractorId, supplierId: ws.supplierId, chats: [], chatCount: 0, project: ws.project ? { id: ws.project.id, title: ws.project.title, status: ws.project.status, priority: ws.project.priority, address: ws.project.address, value: ws.project.value, customer: ws.project.customer } : null, customer: ws.customer, subcontractor: ws.subcontractor }
+      systemPrompt = buildChannelPrompt({ channelType: chat.chatType as ChannelType, workspace: workspaceInfo, contractorName: contractor.company ?? contractor.name, recentMemory: recentMemory.map(m => ({ category: m.category, content: m.content, createdAt: m.createdAt.toISOString() })), crossChannelActivity: crossActivity, tasks })
+    } else {
+      const workspaces = await db.workspace.findMany({ where: { contractorId: contractor.id, status: 'active' }, include: { chats: { select: { id: true, chatType: true }, orderBy: { chatType: 'asc' } } } })
+      systemPrompt = buildCommandCenterPrompt({ contractorName: contractor.company ?? contractor.name, workspaceMap: workspaces.map(w => ({ id: w.id, name: w.name, type: w.type, chats: w.chats.map(c => ({ chatType: c.chatType, id: c.id })) })) })
+    }
+
+    const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }]
+    if (businessContext && !workspaceId) messages.push({ role: 'system', content: `CURRENT BUSINESS CONTEXT:\n${businessContext}` })
+    for (const h of history.slice(-20)) messages.push({ role: h.role, content: h.content })
+    messages.push({ role: 'user', content: message })
+
+    job.heartbeat = 'Thinking...'
+    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { j.thinking.push({ text: iter.text, toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.error ?? (r.data ? JSON.stringify(r.data).slice(0, 80) : 'ok') })) }); j.heartbeat = iter.text } } } })
+    clearInterval(hb)
+
+    const finalText = loopResult.final.text || '(no response)'
+    const finalContextType = loopResult.final.contextType ?? null
+    const finalContextData = loopResult.final.contextData ?? null
+    const finalActions = (loopResult.final.actions ?? []) as AiAction[]
+    const finalAttachments = loopResult.final.attachments ?? []
+    let actionResults: Array<{ action: string; status: string; detail: string; targetChatType?: string }> = []
+    if (finalActions.length > 0 && workspaceId) {
+      const ws = await db.workspace.findFirst({ where: { contractorId: contractor.id, status: 'active' }, include: { chats: { select: { id: true, chatType: true } } } })
+      const mentionedWs = ws ? (message.toLowerCase().includes(ws.name.toLowerCase().split(' ')[0]) ? ws : null) : null
+      if (mentionedWs) { const sc = mentionedWs.chats.find(c => c.chatType === 'main'); if (sc) actionResults = await executeActions(finalActions, { workspaceId: mentionedWs.id, sourceChatId: chatId ?? sc.id, sourceChatType: (chatId ? (mentionedWs.chats.find(c => c.id === chatId)?.chatType ?? 'main') : 'main') as ChannelType, contractorId: contractor.id }) }
+    }
+
+    if (workspaceId && chatId) {
+      await db.workspaceMessage.create({ data: { chatId, role: 'assistant', content: finalText, contextType: finalContextType, contextData: finalContextData ? JSON.stringify(finalContextData) : null, actionResults: actionResults.length ? JSON.stringify(actionResults) : null, attachments: finalAttachments.length ? JSON.stringify(finalAttachments) : null } })
+      await db.workspaceChat.update({ where: { id: chatId }, data: { lastActivity: new Date() } })
+    } else {
+      await db.message.create({ data: { conversationId: conversation.id, role: 'assistant', content: finalText, contextType: finalContextType, contextData: finalContextData ? JSON.stringify(finalContextData) : null, actionResults: actionResults.length ? JSON.stringify(actionResults) : null, attachments: finalAttachments.length ? JSON.stringify(finalAttachments) : null } })
+      if ((!conversation.title || conversation.title === 'New Chat' || conversation.title === 'Welcome to Jobrolo') && message) await db.conversation.update({ where: { id: conversation.id }, data: { title: message.slice(0, 60), updatedAt: new Date() } })
+      else await db.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } })
+    }
+
+    const j = jobs.get(jobId)
+    if (j) { j.status = 'done'; j.result = { text: finalText, actionResults, attachments: finalAttachments, contextType: finalContextType, contextData: finalContextData, conversationId: conversation.id } }
+  } catch (err) {
+    console.error('[chat-job] failed:', err); clearInterval(hb)
+    const j = jobs.get(jobId); if (j) { j.status = 'error'; j.error = err instanceof Error ? err.message : 'Unknown error' }
+  }
+}

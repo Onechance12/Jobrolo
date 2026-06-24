@@ -1,0 +1,1819 @@
+// Jobrolo — AI Business Operating System for contractors
+// Schema v2: 30+ models — auth, multi-tenant, layered memory, knowledge graph, agent jobs, audit, SaaS
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Contractor {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  company   String?
+  logo      String?
+  // SaaS / billing
+  plan      String   @default("free") // free, pro, business, enterprise
+  status    String   @default("active") // active, suspended, deleted
+  trialEndsAt DateTime?
+  // Soft delete
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  customers      Customer[]
+  projects       Project[]
+  subcontractors Subcontractor[]
+  suppliers      Supplier[]
+  users          User[]
+  estimates      Estimate[]
+  documents      Document[]
+  priceSheets    PriceSheet[]
+  materialItems  MaterialItem[]
+  workspaces     Workspace[]
+  conversations  Conversation[]
+  activities     ProjectActivity[]
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+  agentJobs      AgentJob[]
+  agentLessons   AgentLesson[]
+  customerMemories CustomerMemory[]
+  projectMemories  ProjectMemory[]
+  contractorMemories ContractorMemory[]
+  conversationSummaries ConversationSummary[]
+  entityRelations   EntityRelation[]
+  cronRuns       CronRun[]
+  usageRecords   UsageRecord[]
+  onboardingSession OnboardingSession?
+  insights      Insight[]
+  profile       ContractorProfile?
+}
+
+model User {
+  id              String   @id @default(cuid())
+  contractorId    String
+  name            String
+  email           String   @unique
+  phone           String?
+  role            String   @default("manager") // owner, manager, sales, crew, accounting
+  avatar          String?
+  status          String   @default("active") // active, suspended, invited
+  // Auth
+  passwordHash    String?
+  mfaSecret       String?
+  mfaEnabled      Boolean  @default(false)
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  emailVerifiedAt DateTime?
+  // SECURITY: tokenVersion for session invalidation — increment on password reset/role change
+  tokenVersion     Int      @default(0)
+  // Soft delete
+  deletedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  contractor       Contractor       @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  subContractorId  String?
+  subcontractor    Subcontractor?   @relation(fields: [subContractorId], references: [id])
+  uploadedDocs     Document[]       @relation("UploadedBy")
+  workspaceMembers WorkspaceMember[]
+  createdMemories  WorkspaceMemory[] @relation("MemoryCreator")
+  createdMessages  WorkspaceMessage[] @relation("WorkspaceMessageCreator")
+  auditLogs        AuditLog[]       @relation("AuditActor")
+  apiKeys          ApiKey[]         @relation("ApiKeyOwner")
+  @@index([contractorId, status])
+}
+
+model Customer {
+  id           String   @id @default(cuid())
+  contractorId String
+  name         String
+  email        String?
+  phone        String?
+  address      String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor Contractor     @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  projects   Project[]
+  estimates  Estimate[]
+  documents  Document[]
+  followUps  FollowUp[]
+  noteRecords Note[]
+  workspace  Workspace?
+}
+
+model Project {
+  id           String    @id @default(cuid())
+  contractorId String
+  customerId   String?
+  title        String
+  status       String    @default("active")
+  priority     String    @default("medium")
+  address      String?
+  value        Float?
+  startDate    DateTime?
+  endDate      DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  contractor    Contractor      @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  customer      Customer?       @relation(fields: [customerId], references: [id])
+  tasks         Task[]
+  notes         Note[]
+  inspections   Inspection[]
+  estimates     Estimate[]
+  documents     Document[]
+  quotes        Quote[]
+  followUps     FollowUp[]
+  workspace     Workspace?
+  activities    ProjectActivity[]
+}
+
+model Subcontractor {
+  id           String   @id @default(cuid())
+  contractorId String
+  name         String
+  company      String?
+  email        String?
+  phone        String?
+  specialty    String
+  license      String?
+  insurance    String?
+  status       String   @default("active")
+  rating       Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor Contractor  @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  users      User[]
+  quotes     Quote[]
+  workspace  Workspace?
+}
+
+model Supplier {
+  id           String   @id @default(cuid())
+  contractorId String
+  name         String
+  email        String?
+  phone        String?
+  website      String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor    Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  priceSheets  PriceSheet[]
+  materialItems MaterialItem[]
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  status      String    @default("open")
+  priority    String    @default("medium")
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([projectId, status])
+}
+
+model Note {
+  id          String   @id @default(cuid())
+  projectId   String?
+  customerId  String?
+  content     String
+  type        String   @default("general")
+  isAiGenerated Boolean @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  @@index([projectId])
+}
+
+model Inspection {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  summary     String
+  findings    String
+  photos      String?
+  status      String   @default("scheduled")
+  inspectedAt DateTime
+  createdAt   DateTime @default(now())
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([projectId])
+}
+
+model Estimate {
+  id                String    @id @default(cuid())
+  contractorId      String
+  customerId        String
+  projectId         String?
+  title             String
+  amount            Float
+  status            String    @default("draft")
+  viewCount         Int       @default(0)
+  closingProbability Float?
+  lastViewedAt      DateTime?
+  sentAt            DateTime?
+  signedAt          DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  customer   Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project    Project?    @relation(fields: [projectId], references: [id])
+  documents  Document[]
+  followUps  FollowUp[]
+  @@index([customerId])
+  @@index([projectId])
+}
+
+model Quote {
+  id              String   @id @default(cuid())
+  projectId       String
+  subcontractorId String
+  title           String
+  description     String?
+  amount          Float
+  status          String   @default("draft")
+  validUntil      DateTime?
+  lineItems       String
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subcontractor Subcontractor @relation(fields: [subcontractorId], references: [id])
+  @@index([projectId])
+}
+
+model FollowUp {
+  id           String    @id @default(cuid())
+  customerId   String
+  estimateId   String?
+  projectId    String?
+  type         String    @default("call")
+  reason       String
+  status       String    @default("pending")
+  dueDate      DateTime?
+  completedAt  DateTime?
+  isAiSuggested Boolean  @default(true)
+  createdAt    DateTime  @default(now())
+  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  estimate Estimate? @relation(fields: [estimateId], references: [id])
+  project  Project?  @relation(fields: [projectId], references: [id])
+  @@index([customerId, status])
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  contractorId  String
+  filename      String
+  originalName  String
+  mimeType      String
+  size          Int
+  filePath      String
+  thumbnailPath String?
+  fileType      String   @default("other")
+  aiCategory    String?
+  aiSummary     String?
+  extractedData String?
+  ocrText       String?
+  extractionMethod String?  // pdf_text | pdf_ocr | pdf_hybrid | image_vision | text_direct | docx_text | csv_text
+  // Collaborative extraction fields (v3)
+  embeddedText         String?  // raw text from PDF text layer / TXT / DOCX / CSV
+  visionText           String?  // raw text from OCR / vision provider
+  extractionComparison String?  // JSON: per-method quality, agreement, key field presence
+  extractionConfidence Float?   // 0-100 overall confidence
+  missingDataFlags     String?  // JSON: { claimNumber, policyNumber, carrier, ... } → true if missing
+  conflictFlags        String?  // JSON: { claimNumberMismatch, carrierMismatch, ... } → true if conflict
+  status        String   @default("pending_review")
+  customerId    String?
+  projectId     String?
+  estimateId    String?
+  workspaceId   String?
+  uploadedById  String?
+  createdAt     DateTime @default(now())
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+  project    Project?   @relation(fields: [projectId], references: [id])
+  estimate   Estimate?  @relation(fields: [estimateId], references: [id])
+  workspace  Workspace? @relation(fields: [workspaceId], references: [id])
+  uploadedBy User?      @relation("UploadedBy", fields: [uploadedById], references: [id])
+  scopeAnalysis ScopeAnalysis[]
+  @@index([contractorId, createdAt])
+  @@index([projectId])
+  @@index([workspaceId])
+}
+
+model PriceSheet {
+  id            String   @id @default(cuid())
+  contractorId  String
+  supplierId    String?
+  supplierName  String
+  filename      String
+  originalName  String
+  filePath      String
+  validFrom     DateTime?
+  validUntil    DateTime?
+  notes         String?
+  extractedItems String?
+  aiSummary     String?
+  status        String   @default("processing")
+  createdAt     DateTime @default(now())
+  contractor    Contractor  @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  supplier      Supplier?   @relation(fields: [supplierId], references: [id])
+  materialItems MaterialItem[]
+  @@index([contractorId])
+}
+
+model MaterialItem {
+  id           String   @id @default(cuid())
+  contractorId String
+  priceSheetId String?
+  supplierId   String?
+  name         String
+  description  String?
+  sku          String?
+  category     String   @default("other")
+  unit         String   @default("EA")
+  unitCost     Float
+  createdAt    DateTime @default(now())
+  contractor Contractor  @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  priceSheet PriceSheet? @relation(fields: [priceSheetId], references: [id])
+  supplier   Supplier?   @relation(fields: [supplierId], references: [id])
+  @@index([contractorId])
+  @@index([priceSheetId])
+}
+
+model Conversation {
+  id           String   @id @default(cuid())
+  contractorId String
+  title        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  @@index([contractorId, updatedAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  contextType    String?
+  contextData    String?
+  attachments    String?
+  actionResults  String?
+  createdAt      DateTime @default(now())
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@index([conversationId, createdAt])
+}
+
+model Workspace {
+  id              String   @id @default(cuid())
+  contractorId    String
+  name            String
+  type            String
+  description     String?
+  color           String?
+  status          String   @default("active")
+  projectId       String?  @unique
+  customerId      String?  @unique
+  subcontractorId String?  @unique
+  supplierId      String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  contractor    Contractor      @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  project       Project?        @relation(fields: [projectId], references: [id])
+  customer      Customer?       @relation(fields: [customerId], references: [id])
+  subcontractor Subcontractor?  @relation(fields: [subcontractorId], references: [id])
+  chats         WorkspaceChat[]
+  members       WorkspaceMember[]
+  memories      WorkspaceMemory[]
+  actions       WorkspaceAction[]
+  documents     Document[]
+  @@index([contractorId, type])
+}
+
+model WorkspaceChat {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  chatType     String
+  title        String
+  visibility   String   @default("internal")
+  lastActivity DateTime @default(now())
+  createdAt    DateTime @default(now())
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages  WorkspaceMessage[]
+  @@index([workspaceId, chatType])
+  @@unique([workspaceId, chatType])
+}
+
+model WorkspaceMessage {
+  id            String   @id @default(cuid())
+  chatId        String
+  role          String
+  content       String
+  contextType   String?
+  contextData   String?
+  attachments   String?
+  actionResults String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  chat       WorkspaceChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdBy  User?         @relation("WorkspaceMessageCreator", fields: [createdById], references: [id])
+  @@index([chatId, createdAt])
+}
+
+model WorkspaceMember {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  userId       String
+  role         String   @default("member")
+  permissions  String   @default("read,write")
+  createdAt    DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, userId])
+}
+
+model WorkspaceMemory {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  category     String
+  content      String
+  metadata     String?
+  source       String?  @default("ai")
+  createdById  String?
+  createdAt    DateTime @default(now())
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy  User?     @relation("MemoryCreator", fields: [createdById], references: [id])
+  @@index([workspaceId, category])
+  @@index([workspaceId, createdAt])
+}
+
+model WorkspaceAction {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  type         String
+  status       String   @default("executed")
+  detail       String
+  payload      String
+  sourceChatId String?
+  createdAt    DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, createdAt])
+}
+
+model ProjectActivity {
+  id            String   @id @default(cuid())
+  projectId     String
+  contractorId  String
+  userId        String?
+  activityType  String
+  title         String
+  body          String?
+  metadataJson  String?
+  relatedId     String?
+  relatedType   String?
+  source        String   @default("user")
+  createdAt     DateTime @default(now())
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contractor Contractor  @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([projectId, createdAt])
+  @@index([contractorId, source])
+}
+
+// =============================================================================
+// SCHEMA V2 — Production models: Auth, Multi-tenant, Memory, Agent Jobs, Audit
+// =============================================================================
+
+// --- Auth & API Keys --------------------------------------------------------
+
+model ApiKey {
+  id           String   @id @default(cuid())
+  contractorId String
+  userId       String?
+  name         String   // e.g. "Production server", "Zapier integration"
+  keyHash      String   @unique // SHA-256 of the actual key
+  keyPrefix    String   // first 8 chars for identification
+  scopes       String   @default("read,write") // comma-separated
+  lastUsedAt   DateTime?
+  lastUsedIp   String?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  user         User?       @relation("ApiKeyOwner", fields: [userId], references: [id], onDelete: SetNull)
+  @@index([contractorId])
+  @@index([keyHash])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  contractorId String
+  userId       String?
+  actor        String   // user:email, api:prefix, system, ai
+  action       String   // create, update, delete, login, export, ai_action
+  resourceType String   // customer, project, document, message, etc.
+  resourceId   String?
+  detail       String?  // human-readable
+  metadataJson String?  // structured changes
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  user         User?       @relation("AuditActor", fields: [userId], references: [id])
+  @@index([contractorId, createdAt])
+  @@index([contractorId, resourceType, resourceId])
+  @@index([actor])
+}
+
+// --- Agent Jobs (DB-persisted, replaces in-memory Map) ----------------------
+
+model AgentJob {
+  id            String   @id @default(cuid())
+  contractorId  String
+  type          String   // chat, workspace_chat, doc_analysis, cron
+  status        String   @default("queued") // queued, processing, done, error, cancelled
+  priority      Int      @default(5) // 1 (high) to 10 (low)
+  // Input
+  inputJson     String   // JSON: message, conversationId, workspaceId, chatId, etc.
+  // Output
+  outputJson    String?  // JSON: text, actionResults, attachments
+  // Progress
+  heartbeat     String?
+  thinkingJson  String?  // JSON array of thinking steps
+  error         String?
+  // Relations
+  conversationId String?
+  workspaceId    String?
+  chatId         String?
+  userId         String?
+  // Timing
+  startedAt    DateTime?
+  completedAt  DateTime?
+  expiresAt    DateTime?  // for queued job cleanup
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, status, priority, createdAt])
+  @@index([contractorId, type, createdAt])
+  @@index([status, expiresAt])
+}
+
+// --- Layered Memory System --------------------------------------------------
+
+model CustomerMemory {
+  id           String   @id @default(cuid())
+  contractorId String
+  customerId   String
+  category     String   // preference, history, complaint, compliment, lifecycle, contact_note
+  content      String
+  source       String   @default("ai") // ai, user, system, import
+  confidence   Float    @default(1.0)
+  importance   Int      @default(5) // 1-10
+  metadataJson String?
+  embeddingId  String?  // FK to VectorEmbedding (future)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, customerId, category, createdAt])
+  @@index([contractorId, category])
+}
+
+model ProjectMemory {
+  id           String   @id @default(cuid())
+  contractorId String
+  projectId    String
+  category     String   // decision, milestone, issue, material, schedule, financial, scope
+  content      String
+  source       String   @default("ai")
+  importance   Int      @default(5)
+  metadataJson String?
+  embeddingId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, projectId, category, createdAt])
+  @@index([contractorId, category])
+}
+
+model ContractorMemory {
+  id           String   @id @default(cuid())
+  contractorId String
+  category     String   // policy, preference, pricing_rule, vendor_relation, lesson, default
+  content      String
+  source       String   @default("ai")
+  metadataJson String?
+  embeddingId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, category])
+}
+
+model AgentLesson {
+  id           String   @id @default(cuid())
+  contractorId String
+  agentName    String   // orchestrator, estimator, dispatcher, claims, sales_coach
+  lessonType   String   // success, failure, pattern, preference, correction
+  trigger      String   // situation that triggered the lesson
+  action       String   // what was done
+  outcome      String   // what happened
+  correction   String?  // what should be done next time
+  metadataJson String?
+  createdAt    DateTime @default(now())
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, agentName, lessonType])
+  @@index([contractorId, createdAt])
+}
+
+model ConversationSummary {
+  id             String   @id @default(cuid())
+  contractorId   String
+  conversationId String
+  summary        String
+  keyDecisions   String?  // JSON array
+  actionItems    String?  // JSON array
+  participants   String?  // JSON array
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+  contractor     Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, conversationId])
+  @@index([contractorId, createdAt])
+}
+
+// --- Knowledge Graph --------------------------------------------------------
+
+model EntityRelation {
+  id           String   @id @default(cuid())
+  contractorId String
+  sourceType   String   // customer, project, document, user, supplier, subcontractor, claim, material
+  sourceId     String
+  relationType String   // owns, works_on, references, supplied, employed_by, references_doc, etc.
+  targetType   String
+  targetId     String
+  metadataJson String?
+  confidence   Float    @default(1.0)
+  createdAt    DateTime @default(now())
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@unique([sourceType, sourceId, relationType, targetType, targetId])
+  @@index([contractorId, sourceType, sourceId])
+  @@index([contractorId, targetType, targetId])
+  @@index([contractorId, relationType])
+}
+
+// --- Vector Embeddings (for semantic search) --------------------------------
+
+model VectorEmbedding {
+  id           String   @id @default(cuid())
+  contractorId String
+  entityType   String   // customer_memory, project_memory, document, conversation, agent_lesson
+  entityId     String
+  chunkIndex   Int      @default(0)
+  content      String
+  embedding    String   // JSON array of floats (use pgvector in prod)
+  model        String   @default("text-embedding-3-small")
+  tokenCount   Int?
+  createdAt    DateTime @default(now())
+  @@unique([entityType, entityId, chunkIndex])
+  @@index([contractorId, entityType, entityId])
+  @@index([contractorId, model])
+}
+
+// --- Autonomy / Cron --------------------------------------------------------
+
+model CronRun {
+  id           String   @id @default(cuid())
+  contractorId String
+  jobName      String   // stalled_job_detector, daily_digest, lead_followup
+  status       String   // running, success, error, skipped
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  itemsProcessed Int    @default(0)
+  outputJson   String?
+  error        String?
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, jobName, startedAt])
+  @@index([jobName, status])
+}
+
+// --- SaaS Usage / Quotas ----------------------------------------------------
+
+model UsageRecord {
+  id           String   @id @default(cuid())
+  contractorId String
+  metric       String   // ai_messages, ai_tokens, uploads_bytes, tts_seconds, documents_analyzed
+  count        Int      @default(1)
+  bucket       DateTime // hour bucket (UTC)
+  metadataJson String?
+  createdAt    DateTime @default(now())
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@unique([contractorId, metric, bucket])
+  @@index([contractorId, metric, bucket])
+}
+
+// --- Onboarding Sessions (agent-driven) -------------------------------------
+
+model OnboardingSession {
+  id              String   @id @default(cuid())
+  contractorId    String   @unique
+  userId          String
+  status          String   @default("in_progress") // in_progress, completed, abandoned
+  // Conversation history for the onboarding agent
+  messagesJson    String   @default("[]") // JSON array of { role, content, timestamp }
+  // Detected/collected business intelligence
+  businessProfile String?  // JSON: services, serviceAreas, companySize, roles, software, goals, specialties, processes
+  // Research results from website/company enrichment
+  researchJson    String?  // JSON: { website, description, services, location, social, reviews, teamSize }
+  // Confidence score (0-100) — agent decides when to complete
+  confidence      Int      @default(0)
+  // Tracks which info categories have been covered
+  coveredTopics   String   @default("[]") // JSON array of strings
+  // The detected business type (roofing, restoration, public adjuster, etc.)
+  businessType    String?  // roofing, restoration, public_adjuster, general_contractor, hvac, plumbing, other
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  updatedAt       DateTime @updatedAt
+  contractor      Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, status])
+}
+
+
+// --- Scope Management (line item selection + deductible pool) ----------------
+
+model ScopeAnalysis {
+  id            String   @id @default(cuid())
+  documentId    String   @unique
+  contractorId  String
+  // Source financials from the estimate
+  originalRcv   Float?
+  originalAcv   Float?
+  deductible    Float?
+  depreciation  Float?
+  // Calculated totals after item selection (offsets)
+  selectedRcv   Float   @default(0)
+  selectedAcv   Float   @default(0)
+  excludedRcv   Float   @default(0)
+  excludedAcv   Float   @default(0)
+  // Deductible pool tracking
+  remainingOutOfPocket Float?
+  // Line items with selection state — JSON array
+  lineItemsJson String  @default("[]")
+  // Summary
+  status        String  @default("pending") // pending, in_progress, finalized
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  document      Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  @@index([contractorId, documentId])
+  @@index([documentId])
+}
+
+// --- Operations Radar (Insights) -------------------------------------------
+
+model Insight {
+  id            String   @id @default(cuid())
+  contractorId  String
+  type          String   // observation, risk, opportunity, recommendation, follow_up
+  title         String
+  detail        String
+  confidence    Float    @default(0.7)
+  source        String   // project, customer, document, claim, task, conversation
+  sourceId      String?
+  sourceName    String?
+  // V3: Resolution tracking
+  status        String   @default("active") // active, handled, needs_attention, needs_approval, waiting_customer, waiting_carrier, waiting_internal, resolved, dismissed
+  resolutionDetail String?
+  resolutionActions String? // JSON: ["Updated customer.email", "Created follow-up task cmq..."]
+  // P0 proof fields — required for status=handled
+  actionsTaken      String? // JSON: [{action: "db_update", table: "Customer", recordId: "...", field: "email", before: null, after: "x@y.com"}]
+  recordsUpdated    String? // JSON: [{table: "Customer", id: "...", fields: ["email"]}]
+  sourceIdsUsed     String? // JSON: ["doc_id_1", "doc_id_2"] — which docs were searched/used
+  beforeValue       String? // JSON snapshot of what was missing
+  afterValue        String? // JSON snapshot of what was set
+  feedback      String?
+  dedupKey      String
+  createdAt     DateTime @default(now())
+  resolvedAt    DateTime?
+  dismissedAt   DateTime?
+  updatedAt     DateTime @updatedAt
+  contractor    Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@unique([contractorId, dedupKey])
+  @@index([contractorId, status, type])
+  @@index([contractorId, source, sourceId])
+}
+
+
+
+
+// =============================================================================
+// CONTRACTOR COMPANY PROFILE — Branding, legal defaults, customer-facing identity
+// =============================================================================
+// This profile is the contractor-specific source for generated roof reports,
+// agreements, estimates/proposals, signature pages, and future imported templates.
+// It intentionally belongs to the Contractor tenant and should never be shared
+// across contractors.
+
+model ContractorProfile {
+  id                 String   @id @default(cuid())
+  contractorId       String   @unique
+  companyName        String?
+  legalName          String?
+  displayName        String?
+  logoUrl            String?
+  logoDocumentId     String?
+  addressLine1       String?
+  addressLine2       String?
+  city               String?
+  state              String?
+  postalCode         String?
+  country            String?  @default("US")
+  phone              String?
+  email              String?
+  website            String?
+  licenseNumber      String?
+  insuranceText      String?
+  ownerName          String?
+  publicContactName  String?
+  publicContactTitle String?
+  brandPrimaryColor  String?  @default("#2563EB")
+  brandAccentColor   String?  @default("#06B6D4")
+  brandMode          String   @default("dark") // dark, light, auto
+  defaultTerms       String?
+  paymentInstructions String?
+  warrantyText       String?
+  legalFooter        String?
+  reportDisclaimer   String?
+  contractDisclaimer String?
+  estimateDisclaimer String?
+  metadataJson       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  contractor         Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId])
+}
+
+// =============================================================================
+// JOB PACKET / SOURCE-OF-TRUTH LAYER
+// =============================================================================
+// DocumentLink makes files attachable to any operational record while preserving
+// contractor/project/customer ownership. This is the glue that lets Jobrolo keep
+// every estimate, report photo, signed copy, appointment prep doc, and claim file
+// inside the correct job packet.
+
+model DocumentLink {
+  id           String   @id @default(cuid())
+  contractorId String
+  documentId   String
+  projectId    String?
+  customerId   String?
+  entityType   String   @default("project") // project, appointment, roof_report, generated_document, signature_request, scope_analysis, task, estimate, template
+  entityId     String?
+  role         String   @default("attachment") // source, attachment, signed_copy, inspection_photo, carrier_estimate, supplement, contract, authorization, report_photo, evidence
+  label        String?
+  notes        String?
+  confidence   Float    @default(1.0)
+  source       String   @default("user") // user, ai, upload, system, import
+  metadataJson String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, documentId])
+  @@index([contractorId, entityType, entityId])
+  @@index([contractorId, role])
+}
+
+model ProjectTimelineEvent {
+  id           String   @id @default(cuid())
+  contractorId String
+  projectId    String
+  customerId   String?
+  eventType    String   // document_uploaded, appointment_scheduled, roof_report_created, signature_created, schedule_updated, ai_review, task_created, note_added
+  title        String
+  body         String?
+  relatedType  String?
+  relatedId    String?
+  status       String   @default("active") // active, completed, cancelled, hidden
+  source       String   @default("system") // user, ai, system, import
+  actorUserId  String?
+  metadataJson String?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  @@index([contractorId, projectId, occurredAt])
+  @@index([contractorId, eventType])
+  @@index([contractorId, relatedType, relatedId])
+}
+
+// =============================================================================
+// FIELD OPERATIONS — Scheduling, Roof Reports, Signable Documents
+// =============================================================================
+// These models intentionally use contractorId + resource ids for tenant scoping.
+// They are designed for roofing/claims workflows: inspections, adjuster meetings,
+// production scheduling, roof report generation, and homeowner/contractor signatures.
+
+model Appointment {
+  id              String   @id @default(cuid())
+  contractorId    String
+  projectId       String?
+  customerId      String?
+  title           String
+  type            String   @default("inspection") // inspection, adjuster_meeting, production, material_delivery, walkthrough, call, other
+  status          String   @default("scheduled") // scheduled, completed, cancelled, no_show, rescheduled
+  startTime       DateTime
+  endTime         DateTime
+  location        String?
+  notes           String?
+  attendeesJson   String?  // JSON: homeowner, adjuster, rep, crew, carrier contacts
+  createdById     String?
+  externalProvider String? // google, outlook, jobnimbus, manual
+  externalEventId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, startTime])
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, type, status])
+}
+
+model ProjectSchedule {
+  id                  String   @id @default(cuid())
+  contractorId        String
+  projectId           String
+  stage               String   @default("lead") // lead, inspection_scheduled, inspected, claim_filed, adjuster_meeting_scheduled, waiting_scope, scope_review, supplement_needed, approved, contract_signed, material_ordered, production_scheduled, in_production, final_inspection, invoiced, closed
+  productionStatus    String   @default("not_scheduled") // not_scheduled, scheduled, in_progress, on_hold, completed
+  scheduledStart      DateTime?
+  scheduledEnd        DateTime?
+  crewName            String?
+  materialDeliveryAt  DateTime?
+  permitStatus        String?
+  weatherHold         Boolean  @default(false)
+  notes               String?
+  milestonesJson      String?  // JSON list of operational milestones
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  @@unique([contractorId, projectId])
+  @@index([contractorId, stage])
+  @@index([contractorId, scheduledStart])
+}
+
+model RoofReport {
+  id                     String   @id @default(cuid())
+  contractorId           String
+  projectId              String?
+  customerId             String?
+  title                  String
+  reportNumber           String?
+  status                 String   @default("draft") // draft, ready, shared, finalized, archived
+  mode                   String   @default("inspection") // inspection, adjuster_meeting, homeowner_summary, production_closeout, maintenance, custom
+  summaryTone            String   @default("homeowner") // homeowner, insurance, internal, production
+  inspectionDate         DateTime?
+  inspectorName          String?
+  propertyAddress        String?
+  clientName             String?
+  claimNumber            String?
+  introduction           String?
+  propertyReviewSummary  String?
+  observedConditionsJson String?  // JSON array/string sections
+  recommendationsJson    String?  // JSON array/string sections
+  conclusion             String?
+  disclaimer             String?
+  internalNotes          String?  // never rendered on public share unless explicitly surfaced later
+  photoChecklistJson     String?  // JSON checklist state generated from report mode/photos
+  missingPhotoChecklistJson String? // JSON list of missing recommended photo categories
+  reportPdfPath          String?
+  reportPdfDocumentId    String?
+  shareToken             String?  @unique
+  completedAt            DateTime?
+  finalizedAt            DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  photos                 RoofReportPhoto[]
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, status])
+  @@index([contractorId, mode])
+}
+
+model RoofReportPhoto {
+  id              String   @id @default(cuid())
+  reportId        String
+  contractorId    String
+  documentId      String?
+  imageUrl        String?
+  category        String   @default("other") // front_elevation, roof_overview, shingle_closeup, ridge, valley, pipe_jack, vent, gutter, soft_metal, interior_leak, attic, ceiling, collateral, other
+  area            String?  // front, rear, left, right, north, south, east, west, slope, interior, attic, collateral
+  condition       String?  // hail_indicator, wind_indicator, missing_shingle, creased_shingle, granule_loss, dented_gutter, active_water_entry, no_issue_observed, other
+  severity        String   @default("informational") // informational, monitor, repair_recommended, significant_concern, immediate_attention
+  caption         String?
+  notes           String?
+  tagsJson        String?  // JSON array of tags such as roof_slope, soft_metal, test_square, leak_path
+  aiCaptionStatus String   @default("draft") // draft, ai_suggested, reviewed, locked
+  isIncluded      Boolean  @default(true)
+  isCoverPhoto    Boolean  @default(false)
+  takenAt         DateTime?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  report          RoofReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  @@index([contractorId, reportId])
+  @@index([documentId])
+  @@index([contractorId, category])
+}
+
+model DocumentTemplate {
+  id             String   @id @default(cuid())
+  contractorId   String
+  name           String
+  type           String   @default("work_authorization") // contingency, inspection_authorization, work_authorization, replacement_contract, change_order, completion_certificate, sonscare, custom
+  status         String   @default("active") // active, archived
+  bodyHtml       String
+  variablesJson  String?  // JSON list of required merge fields
+  requiresSignature Boolean @default(true)
+  // Phase 3: contractor-uploaded template intake / OCR conversion
+  sourceUploadId String?
+  sourceDocumentId String?
+  sourceOriginalName String?
+  reviewStatus   String   @default("approved") // uploaded, parsed, needs_review, approved, archived, failed
+  importedFromUpload Boolean @default(false)
+  detectedFieldsJson String?
+  clausesJson    String?
+  signatureFieldsJson String?
+  parseWarningsJson String?
+  approvedAt     DateTime?
+  approvedById   String?
+  archivedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([contractorId, type, status])
+}
+
+
+model DocumentTemplateUpload {
+  id                 String   @id @default(cuid())
+  contractorId       String
+  documentId         String
+  originalName       String
+  templateType       String   @default("custom") // contingency, inspection_authorization, work_authorization, estimate_proposal, change_order, completion_certificate, warranty, custom
+  name               String?
+  status             String   @default("uploaded") // uploaded, processing, parsed, needs_review, approved, archived, failed
+  embeddedText       String?
+  ocrText            String?
+  finalText          String?
+  ocrProvider        String?
+  ocrConfidence      Float?
+  extractionConfidence Float?
+  conflictFlagsJson  String?
+  missingFieldsJson  String?
+  reviewNotesJson    String?
+  detectedTitle      String?
+  detectedType       String?
+  parsedJson         String?
+  templateId         String?
+  error              String?
+  metadataJson       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  parsedAt           DateTime?
+  approvedAt         DateTime?
+  archivedAt         DateTime?
+  @@index([contractorId, status])
+  @@index([contractorId, documentId])
+  @@index([contractorId, templateId])
+  @@index([contractorId, templateType])
+}
+
+model DocumentTemplateField {
+  id             String   @id @default(cuid())
+  contractorId   String
+  templateId     String
+  uploadId       String?
+  fieldKey       String
+  label          String
+  type           String   @default("text") // text, currency, date, checkbox, signature, initials, number, email, phone, address
+  variable       String?
+  required       Boolean  @default(false)
+  defaultValue   String?
+  mappedSource   String?  // company, customer, project, claim, estimate, signer, manual
+  instructions   String?
+  sortOrder      Int      @default(0)
+  metadataJson   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([contractorId, templateId])
+  @@index([contractorId, uploadId])
+  @@index([contractorId, fieldKey])
+}
+
+model DocumentTemplateClause {
+  id             String   @id @default(cuid())
+  contractorId   String
+  templateId     String
+  uploadId       String?
+  title          String?
+  body           String
+  clauseType     String   @default("general") // payment_terms, cancellation, authorization, scope, warranty, signature, disclaimer, general
+  editable       Boolean  @default(true)
+  required       Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  aiNotes        String?
+  metadataJson   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([contractorId, templateId])
+  @@index([contractorId, uploadId])
+  @@index([contractorId, clauseType])
+}
+
+model DocumentTemplateVersion {
+  id             String   @id @default(cuid())
+  contractorId   String
+  templateId     String
+  version        Int      @default(1)
+  status         String   @default("snapshot") // snapshot, approved, archived
+  bodyHtml       String
+  fieldsJson     String?
+  clausesJson    String?
+  changeSummary  String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  @@index([contractorId, templateId, version])
+}
+
+model GeneratedDocument {
+  id               String   @id @default(cuid())
+  contractorId     String
+  templateId       String?
+  projectId        String?
+  customerId       String?
+  title            String
+  type             String   @default("custom")
+  status           String   @default("draft") // draft, sent, signed, declined, expired, voided
+  bodyHtml         String
+  mergedDataJson   String?
+  unsignedPdfPath  String?
+  unsignedPdfDocumentId String?
+  signedPdfPath    String?
+  signedPdfDocumentId String?
+  finalHtmlPath    String?
+  signatureCertificateJson String?
+  finalizedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  signatureRequests SignatureRequest[]
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, type, status])
+}
+
+model SignatureRequest {
+  id             String   @id @default(cuid())
+  contractorId   String
+  generatedDocumentId String
+  projectId      String?
+  customerId     String?
+  title          String
+  status         String   @default("pending") // pending, viewed, signed, declined, expired, voided
+  signerName     String
+  signerEmail    String?
+  signerPhone    String?
+  signatureToken String   @unique
+  signedAt       DateTime?
+  expiresAt      DateTime?
+  signedIp       String?
+  signedUserAgent String?
+  signatureData  String?  // base64/svg/name capture reference
+  auditJson      String?  // JSON event trail
+  signedPdfPath  String?
+  signedPdfDocumentId String?
+  certificateJson String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  generatedDocument GeneratedDocument @relation(fields: [generatedDocumentId], references: [id], onDelete: Cascade)
+  events         SignatureEvent[]
+  @@index([contractorId, status])
+  @@index([contractorId, projectId])
+  @@index([signatureToken])
+}
+
+model SignatureEvent {
+  id                 String   @id @default(cuid())
+  contractorId        String
+  signatureRequestId  String
+  type               String   // created, sent, viewed, signed, declined, expired, voided
+  detail             String?
+  ipAddress          String?
+  userAgent          String?
+  createdAt          DateTime @default(now())
+  signatureRequest   SignatureRequest @relation(fields: [signatureRequestId], references: [id], onDelete: Cascade)
+  @@index([contractorId, signatureRequestId, createdAt])
+}
+
+// =============================================================================
+// FIELD COPILOT / ROLE ROUTING / LOCATION RESOLUTION
+// =============================================================================
+// Field Copilot is a mobile field-mode shell over the same project workspace.
+// These records keep field visits, GPS/photo location confidence, routed action
+// requests, approvals, and role-specific inbox items tied to one job packet and
+// project timeline. Models intentionally use contractorId + resource IDs for
+// tenant scoping and flexible cross-entity routing.
+
+model FieldVisit {
+  id              String   @id @default(cuid())
+  contractorId    String
+  projectId       String?
+  customerId      String?
+  appointmentId   String?
+  type            String   @default("inspection") // inspection, adjuster_meeting, signing, production, canvassing, follow_up, other
+  status          String   @default("planned") // planned, en_route, arrived, started, completed, no_answer, cancelled
+  mode            String   @default("field")
+  title           String?
+  arrivedAt       DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  latitude        Float?
+  longitude       Float?
+  accuracyMeters  Float?
+  notes           String?
+  outcome         String?
+  nextAction      String?
+  createdById     String?
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, appointmentId])
+  @@index([contractorId, createdById, status])
+  @@index([contractorId, type, status])
+}
+
+model FieldLocationPing {
+  id              String   @id @default(cuid())
+  contractorId    String
+  userId          String?
+  projectId       String?
+  customerId      String?
+  appointmentId   String?
+  fieldVisitId    String?
+  documentId      String?
+  canvassingLeadId String?
+  latitude        Float
+  longitude       Float
+  accuracyMeters  Float?
+  source          String   @default("browser_gps") // browser_gps, photo_exif, manual_pin, field_action, upload
+  capturedAt      DateTime @default(now())
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  @@index([contractorId, userId, capturedAt])
+  @@index([contractorId, projectId])
+  @@index([contractorId, fieldVisitId])
+  @@index([contractorId, documentId])
+}
+
+model LocationResolution {
+  id              String   @id @default(cuid())
+  contractorId    String
+  userId          String?
+  documentId      String?
+  projectId       String?
+  customerId      String?
+  appointmentId   String?
+  fieldVisitId    String?
+  canvassingLeadId String?
+  confidence      Float    @default(0)
+  confidenceLabel String   @default("low") // high, medium, low
+  reason          String?
+  source          String   @default("resolver")
+  status          String   @default("suggested") // suggested, confirmed, rejected, auto_attached
+  candidatesJson  String?
+  confirmedAt     DateTime?
+  confirmedById   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, documentId])
+  @@index([contractorId, projectId])
+  @@index([contractorId, userId, createdAt])
+  @@index([contractorId, status])
+}
+
+model ActionRequest {
+  id              String   @id @default(cuid())
+  contractorId    String
+  projectId       String?
+  customerId      String?
+  fieldVisitId    String?
+  appointmentId   String?
+  createdByUserId String?
+  requestedRole   String   @default("project_manager") // crew, project_manager, coordinator, supplier, finance, owner, customer
+  type            String   // material_request, issue_report, approval_needed, schedule_change, signature_needed, customer_care, supplier_order
+  title           String
+  summary         String
+  status          String   @default("pending") // pending, needs_approval, approved, rejected, routed, completed, cancelled
+  priority        String   @default("normal") // low, normal, high, urgent
+  payloadJson     String?
+  dueAt           DateTime?
+  approvedAt      DateTime?
+  approvedById    String?
+  rejectedAt      DateTime?
+  rejectedById    String?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, projectId])
+  @@index([contractorId, requestedRole, status])
+  @@index([contractorId, type, status])
+  @@index([contractorId, createdAt])
+}
+
+model ApprovalRequest {
+  id              String   @id @default(cuid())
+  contractorId    String
+  actionRequestId String
+  approverRole    String   @default("project_manager")
+  approverUserId  String?
+  status          String   @default("pending") // pending, approved, rejected, cancelled
+  decisionNotes   String?
+  decidedAt       DateTime?
+  decidedById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, actionRequestId])
+  @@index([contractorId, approverRole, status])
+  @@index([contractorId, approverUserId, status])
+}
+
+model InboxItem {
+  id              String   @id @default(cuid())
+  contractorId    String
+  projectId       String?
+  customerId      String?
+  userId          String?
+  role            String
+  type            String
+  title           String
+  summary         String?
+  status          String   @default("unread") // unread, read, actioned, archived
+  priority        String   @default("normal")
+  actionRequestId String?
+  relatedType     String?
+  relatedId       String?
+  payloadJson     String?
+  readAt          DateTime?
+  actionedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, role, status])
+  @@index([contractorId, userId, status])
+  @@index([contractorId, projectId])
+  @@index([contractorId, actionRequestId])
+}
+
+
+// =============================================================================
+// PHASE 9 — NOTIFICATIONS / COMMUNICATION DELIVERY
+// =============================================================================
+// InboxItem remains the canonical in-app notification/work card. These models
+// add per-user/role delivery preferences and an outbound communication outbox
+// for email/SMS/digest delivery without duplicating the operational workflow.
+
+model NotificationPreference {
+  id                String   @id @default(cuid())
+  contractorId      String
+  userId            String?
+  role              String?
+  inAppEnabled      Boolean  @default(true)
+  emailEnabled      Boolean  @default(false)
+  smsEnabled        Boolean  @default(false)
+  urgentOnly        Boolean  @default(false)
+  dailyDigest       Boolean  @default(false)
+  mutedTypesJson    String?
+  quietHoursJson    String?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([contractorId, userId])
+  @@index([contractorId, role])
+}
+
+model CommunicationMessage {
+  id                String   @id @default(cuid())
+  contractorId      String
+  userId            String?
+  role              String?
+  projectId         String?
+  customerId        String?
+  inboxItemId       String?
+  actionRequestId   String?
+  channel           String   // email, sms, in_app_digest
+  type              String   // signature_link, signed_pdf, approval_needed, supplier_order, roof_report, digest, manual
+  toAddress         String?
+  subject           String?
+  body              String
+  htmlBody          String?
+  status            String   @default("queued") // queued, skipped, sent, delivered, failed, cancelled
+  priority          String   @default("normal")
+  provider          String   @default("console")
+  providerMessageId String?
+  dedupeKey         String?
+  error             String?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([contractorId, status, channel])
+  @@index([contractorId, inboxItemId])
+  @@index([contractorId, actionRequestId])
+  @@index([contractorId, userId, status])
+  @@index([contractorId, dedupeKey])
+}
+
+model CanvassingSession {
+  id              String   @id @default(cuid())
+  contractorId    String
+  userId          String?
+  title           String?
+  territoryName   String?
+  status          String   @default("active") // active, paused, completed, cancelled
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, userId, status])
+}
+
+model CanvassingLead {
+  id              String   @id @default(cuid())
+  contractorId    String
+  sessionId       String?
+  createdById     String?
+  projectId       String?
+  customerId      String?
+  address         String?
+  latitude        Float?
+  longitude       Float?
+  status          String   @default("new") // new, knocked, interested, follow_up, converted, not_interested, no_answer
+  homeownerName   String?
+  phone           String?
+  notes           String?
+  source          String   @default("field_copilot")
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([contractorId, sessionId])
+  @@index([contractorId, status])
+  @@index([contractorId, projectId])
+}
+
+model CanvassingActivity {
+  id              String   @id @default(cuid())
+  contractorId    String
+  sessionId       String?
+  leadId          String?
+  userId          String?
+  type            String   // knock, photo, note, no_answer, interested, follow_up, converted
+  summary         String
+  latitude        Float?
+  longitude       Float?
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  @@index([contractorId, sessionId])
+  @@index([contractorId, leadId])
+  @@index([contractorId, userId, createdAt])
+}
+
+// =============================================================================
+// PHASE 11.2 — PROPERTY MEMORY / CANVASSING INTELLIGENCE
+// =============================================================================
+// Not every house is a lead or customer. These models let Jobrolo remember
+// property-level canvassing history, roof observations, door attempts, street
+// coverage, and rep game plans without forcing every door into the CRM pipeline.
+// Keep this property/workflow based; avoid sensitive personal profiling.
+
+model PropertyMemory {
+  id                 String   @id @default(cuid())
+  contractorId       String
+  createdById        String?
+  primaryLeadId      String?
+  customerId         String?
+  projectId          String?
+  address            String?
+  normalizedAddress  String?
+  city               String?
+  state              String?
+  postalCode         String?
+  ownerName          String?
+  ownerMailingAddress String?
+  parcelId           String?
+  countyAccountId    String?
+  marketValue        Float?
+  assessedValue      Float?
+  improvementValue   Float?
+  landValue          Float?
+  livingAreaSqft     Int?
+  yearBuilt          Int?
+  bedrooms           Float?
+  bathrooms          Float?
+  stories            Float?
+  ownerOccupiedSignal String?
+  lastEnrichedAt     DateTime?
+  enrichmentStatus   String?  // never_researched, cached, provider, imported, needs_review
+  latitude           Float?
+  longitude          Float?
+  propertyType       String?  // single_family, townhome, condo, commercial, unknown
+  occupancyStatus    String   @default("unknown") // owner_occupied, renter, vacant, unknown
+  solicitationStatus String   @default("ok") // ok, no_soliciting, do_not_knock, gated, unsafe, unknown
+  roofCondition      String   @default("unknown") // unknown, new, good, aged, damaged, tarped, missing_shingles
+  roofAgeSignal      String?
+  damageSignal       String?
+  opportunityScore   Int      @default(0)
+  priority           String   @default("normal") // low, normal, high, hot
+  status             String   @default("watch") // watch, prospect, follow_up, do_not_contact, converted, not_fit
+  lastObservedAt     DateTime?
+  lastKnockedAt      DateTime?
+  nextFollowUpAt     DateTime?
+  summary            String?
+  notes              String?
+  tagsJson           String?
+  dataSourceJson     String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  @@index([contractorId, normalizedAddress])
+  @@index([contractorId, status, priority])
+  @@index([contractorId, primaryLeadId])
+  @@index([contractorId, projectId])
+  @@index([contractorId, lastObservedAt])
+  @@index([contractorId, nextFollowUpAt])
+}
+
+model PropertyObservation {
+  id                String   @id @default(cuid())
+  contractorId      String
+  propertyMemoryId  String
+  canvassingLeadId  String?
+  sessionId         String?
+  userId            String?
+  type              String   // roof_condition, damage_observation, no_soliciting, renter, new_roof, missing_shingles, note, photo
+  title             String
+  summary           String?
+  roofCondition     String?
+  damageSignal      String?
+  severity          String?  // low, moderate, high, unknown
+  confidence        Float?
+  photoDocumentId   String?
+  latitude          Float?
+  longitude         Float?
+  observedAt        DateTime @default(now())
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  @@index([contractorId, propertyMemoryId, observedAt])
+  @@index([contractorId, canvassingLeadId])
+  @@index([contractorId, type])
+}
+
+model DoorAttempt {
+  id                String   @id @default(cuid())
+  contractorId      String
+  propertyMemoryId  String
+  canvassingLeadId  String?
+  sessionId         String?
+  userId            String?
+  outcome           String   // knocked, no_answer, spoke, interested, inspection_set, follow_up, not_interested, renter, no_soliciting, do_not_knock
+  contactName       String?
+  contactRole       String?  // homeowner, renter, neighbor, unknown
+  summary           String?
+  scriptUsed        String?
+  objection         String?
+  nextStep          String?
+  followUpAt        DateTime?
+  latitude          Float?
+  longitude         Float?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+  @@index([contractorId, propertyMemoryId, createdAt])
+  @@index([contractorId, canvassingLeadId])
+  @@index([contractorId, userId, createdAt])
+  @@index([contractorId, outcome])
+}
+
+model StreetMemory {
+  id                String   @id @default(cuid())
+  contractorId      String
+  territoryName     String?
+  streetName        String
+  city              String?
+  state             String?
+  lastWorkedAt      DateTime?
+  lastWorkedById    String?
+  totalDoors        Int      @default(0)
+  totalAttempts     Int      @default(0)
+  conversations     Int      @default(0)
+  inspectionsSet    Int      @default(0)
+  noAnswers         Int      @default(0)
+  doNotKnockCount   Int      @default(0)
+  notes             String?
+  tagsJson          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([contractorId, streetName, city, state])
+  @@index([contractorId, territoryName])
+  @@index([contractorId, lastWorkedAt])
+}
+
+model CanvassingGamePlan {
+  id                  String   @id @default(cuid())
+  contractorId        String
+  userId              String?
+  sessionId           String?
+  title               String
+  territoryName       String?
+  focusMode           String   @default("partner_choice") // fresh_hail, follow_ups, higher_value, easy_conversations, old_damage, close_to_current_jobs
+  energyLevel         String?  // low, medium, high, warmup
+  customerFocus       String?  // property/workflow based opportunity focus, not protected-class profiling
+  timeBudgetMinutes   Int?
+  goalDoors           Int?
+  goalConversations   Int?
+  goalInspections     Int?
+  status              String   @default("draft") // draft, active, completed, archived
+  strategySummary     String?
+  recommendedStart    String?
+  avoidNotes          String?
+  scriptSuggestion    String?
+  kpiSnapshotJson     String?
+  recommendationsJson String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  @@index([contractorId, userId, status])
+  @@index([contractorId, sessionId])
+  @@index([contractorId, territoryName])
+}
+// =============================================================================
+// PHASE 11.3 — ACTIVE PROPERTY RESEARCH / STREET GAME PLANNER
+// =============================================================================
+// These models separate messy on-demand research from long-term PropertyMemory.
+// A research run can pull cached memories, imported rows, external property APIs,
+// and user-provided GPS/street context. Candidates must be confirmed before they
+// become authoritative property memory. Keep all targeting property/workflow based.
+
+model PropertyResearchRun {
+  id                   String   @id @default(cuid())
+  contractorId         String
+  userId               String?
+  mode                 String   @default("approaching_house") // approaching_house, address_lookup, street_game_plan, neighborhood_research
+  status               String   @default("draft") // draft, researching, needs_confirmation, confirmed, failed, archived
+  query                String?
+  requestedAddress     String?
+  normalizedAddress    String?
+  streetNamesJson      String?
+  city                 String?
+  state                String?
+  postalCode           String?
+  latitude             Float?
+  longitude            Float?
+  accuracyMeters       Float?
+  focusMode            String?
+  energyLevel          String?
+  mindset              String?
+  timeBudgetMinutes    Int?
+  goalDoors            Int?
+  goalConversations    Int?
+  goalInspections      Int?
+  resultSummary        String?
+  confidence           Float?
+  selectedCandidateId  String?
+  createdMemoryId      String?
+  providerSummaryJson  String?
+  metadataJson         String?
+  error                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  @@index([contractorId, userId, status])
+  @@index([contractorId, mode, createdAt])
+  @@index([contractorId, normalizedAddress])
+}
+
+model PropertyResearchCandidate {
+  id                   String   @id @default(cuid())
+  contractorId         String
+  researchRunId        String
+  propertyMemoryId     String?
+  address              String?
+  normalizedAddress    String?
+  city                 String?
+  state                String?
+  postalCode           String?
+  ownerName            String?
+  ownerMailingAddress  String?
+  parcelId             String?
+  countyAccountId      String?
+  source               String   @default("jobrolo") // property_memory, imported_data, provider, manual, inferred
+  confidence           Float    @default(0)
+  matchReason          String?
+  latitude             Float?
+  longitude            Float?
+  propertyType         String?
+  marketValue          Float?
+  assessedValue        Float?
+  improvementValue     Float?
+  landValue            Float?
+  livingAreaSqft       Int?
+  yearBuilt            Int?
+  bedrooms             Float?
+  bathrooms            Float?
+  stories              Float?
+  ownerOccupiedSignal  String?  // likely_owner_occupied, likely_rental, unknown
+  roofOpportunityScore Int      @default(0)
+  stormExposureScore   Int      @default(0)
+  followUpScore        Int      @default(0)
+  overallScore         Int      @default(0)
+  status               String   @default("candidate") // candidate, selected, rejected, saved
+  rawJson              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  @@index([contractorId, researchRunId])
+  @@index([contractorId, normalizedAddress])
+  @@index([contractorId, overallScore])
+}
+
+model PropertyEnrichmentSnapshot {
+  id                   String   @id @default(cuid())
+  contractorId         String
+  researchRunId        String?
+  candidateId          String?
+  propertyMemoryId     String?
+  source               String
+  sourceLabel          String?
+  sourceUrl            String?
+  address              String?
+  normalizedAddress    String?
+  ownerName            String?
+  ownerMailingAddress  String?
+  parcelId             String?
+  countyAccountId      String?
+  propertyType         String?
+  marketValue          Float?
+  assessedValue        Float?
+  improvementValue     Float?
+  landValue            Float?
+  livingAreaSqft       Int?
+  yearBuilt            Int?
+  bedrooms             Float?
+  bathrooms            Float?
+  stories              Float?
+  ownerOccupiedSignal  String?
+  confidence           Float    @default(0)
+  rawJson              String?
+  capturedAt           DateTime @default(now())
+  expiresAt            DateTime?
+  @@index([contractorId, propertyMemoryId])
+  @@index([contractorId, normalizedAddress])
+  @@index([contractorId, source, capturedAt])
+}
+
+model StreetResearchRun {
+  id                   String   @id @default(cuid())
+  contractorId         String
+  userId               String?
+  status               String   @default("draft") // draft, researched, active, completed, archived
+  title                String
+  streetNamesJson      String
+  city                 String?
+  state                String?
+  postalCode           String?
+  focusMode            String   @default("partner_choice")
+  energyLevel          String?
+  mindset              String?
+  timeBudgetMinutes    Int?
+  goalDoors            Int?
+  goalConversations    Int?
+  goalInspections      Int?
+  summary              String?
+  recommendedStart     String?
+  avoidNotes           String?
+  scriptSuggestion     String?
+  candidateSummaryJson String?
+  createdGamePlanId    String?
+  metadataJson         String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  @@index([contractorId, userId, status])
+  @@index([contractorId, focusMode])
+}
+
