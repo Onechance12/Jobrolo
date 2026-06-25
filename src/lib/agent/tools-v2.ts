@@ -81,6 +81,48 @@ async function resolveJobTarget(contractorId: string, input: { projectId?: strin
   return { error: 'Which job/project should I attach this to? Operational actions must be tied to a project or customer.' as const }
 }
 
+function normalizeCustomerFileQuery(query: string) {
+  return query
+    .replace(/[’']/g, "'")
+    .replace(/\b(show|pull|get|open|find|lookup|look up|retrieve|only use|saved|database|records|actual|actually|everything|all|what|do|we|have|on|for|client|customer|job|project|packet|profile|file|folder|info|information)\b/gi, ' ')
+    .replace(/\b's\b/gi, ' ')
+    .replace(/[^\p{L}\p{N}@.+\- ]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function customerSearchTerms(query: string) {
+  const normalized = normalizeCustomerFileQuery(query)
+  const raw = query.replace(/[’']/g, "'").trim()
+  const terms = new Set<string>()
+  for (const value of [normalized, raw]) {
+    const trimmed = value.trim()
+    if (trimmed) terms.add(trimmed)
+    for (const part of trimmed.split(/\s+/)) {
+      if (part.length >= 3) terms.add(part)
+    }
+  }
+  return [...terms].slice(0, 8)
+}
+
+function compactDocument(d: { id: string; originalName: string; fileType: string; status: string; mimeType: string; size: number; filePath: string; thumbnailPath: string | null; aiSummary: string | null; customerId: string | null; projectId: string | null; workspaceId: string | null; createdAt: Date }) {
+  return {
+    id: d.id,
+    originalName: d.originalName,
+    fileType: d.fileType,
+    status: d.status,
+    mimeType: d.mimeType,
+    size: d.size,
+    aiSummary: d.aiSummary,
+    customerId: d.customerId,
+    projectId: d.projectId,
+    workspaceId: d.workspaceId,
+    url: toFileUrl(d.filePath),
+    thumbnailUrl: toThumbnailUrl(d.thumbnailPath),
+    createdAt: d.createdAt,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
@@ -416,6 +458,153 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'get_customer_file',
+    description: 'Resolve a customer by name, first/last name, phone, email, or address and return the saved customer file: customer details, projects/jobs, workspaces/chats, documents/photos, notes, tasks, and recent unlinked uploads. Use for "Timothy’s file", "show what is actually saved", "pull the job packet", or "what do we have on this customer".',
+    schema: z.object({ query: z.string().min(1).max(300) }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      const terms = customerSearchTerms(args.query)
+      if (terms.length === 0) return { success: false, data: null, error: 'Customer search query required' }
+
+      const customers = await db.customer.findMany({
+        where: {
+          contractorId,
+          OR: terms.flatMap(term => [
+            { name: { contains: term } },
+            { phone: { contains: term } },
+            { email: { contains: term } },
+            { address: { contains: term } },
+          ]),
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: { id: true, name: true, email: true, phone: true, address: true, notes: true, createdAt: true, updatedAt: true },
+      })
+
+      if (customers.length === 0) {
+        return {
+          success: true,
+          data: {
+            found: false,
+            query: args.query,
+            normalizedQuery: normalizeCustomerFileQuery(args.query),
+            searchedTerms: terms,
+            message: 'No saved customer matched exact, name, phone, email, or address fallback searches.',
+          },
+        }
+      }
+
+      const normalized = normalizeCustomerFileQuery(args.query).toLowerCase()
+      const exact = customers.find(c => c.name.toLowerCase() === normalized || c.email?.toLowerCase() === normalized || c.phone === normalized)
+      const customer = exact ?? customers[0]
+      if (!exact && customers.length > 1) {
+        return {
+          success: true,
+          data: {
+            found: true,
+            needsClarification: true,
+            query: args.query,
+            normalizedQuery: normalizeCustomerFileQuery(args.query),
+            matches: customers.map(c => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, address: c.address })),
+            message: 'Multiple saved customers matched. Ask the user which customer file to open before making changes.',
+          },
+        }
+      }
+
+      const projects = await db.project.findMany({
+        where: { contractorId, customerId: customer.id },
+        orderBy: { updatedAt: 'desc' },
+        take: 20,
+        select: {
+          id: true, title: true, status: true, priority: true, address: true, value: true, createdAt: true, updatedAt: true,
+          workspace: { select: { id: true, name: true, type: true, status: true, chats: { select: { id: true, chatType: true, title: true, visibility: true, lastActivity: true } } } },
+        },
+      })
+      const projectIds = projects.map(p => p.id)
+
+      const [documents, notes, tasks, directWorkspace, documentLinks, recentUnlinkedDocuments] = await Promise.all([
+        db.document.findMany({
+          where: {
+            contractorId,
+            OR: [
+              { customerId: customer.id },
+              ...(projectIds.length ? [{ projectId: { in: projectIds } }] : []),
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { id: true, originalName: true, fileType: true, status: true, mimeType: true, size: true, filePath: true, thumbnailPath: true, aiSummary: true, customerId: true, projectId: true, workspaceId: true, createdAt: true },
+        }),
+        db.note.findMany({
+          where: { OR: [{ customerId: customer.id }, ...(projectIds.length ? [{ projectId: { in: projectIds } }] : [])] },
+          orderBy: { createdAt: 'desc' },
+          take: 30,
+          select: { id: true, projectId: true, customerId: true, type: true, content: true, isAiGenerated: true, createdAt: true },
+        }),
+        projectIds.length ? db.task.findMany({
+          where: { projectId: { in: projectIds } },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { id: true, projectId: true, title: true, description: true, status: true, priority: true, dueDate: true, completedAt: true, createdAt: true },
+        }) : Promise.resolve([]),
+        db.workspace.findFirst({
+          where: { contractorId, customerId: customer.id },
+          select: { id: true, name: true, type: true, status: true, chats: { select: { id: true, chatType: true, title: true, visibility: true, lastActivity: true } } },
+        }),
+        db.documentLink.findMany({
+          where: {
+            contractorId,
+            OR: [
+              { customerId: customer.id },
+              ...(projectIds.length ? [{ projectId: { in: projectIds } }] : []),
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+        db.document.findMany({
+          where: { contractorId, customerId: null, projectId: null, workspaceId: null },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, originalName: true, fileType: true, status: true, mimeType: true, size: true, filePath: true, thumbnailPath: true, aiSummary: true, customerId: true, projectId: true, workspaceId: true, createdAt: true },
+        }),
+      ])
+
+      const photos = documents.filter(d => d.fileType === 'photo' || d.mimeType.startsWith('image/'))
+
+      return {
+        success: true,
+        data: {
+          found: true,
+          query: args.query,
+          normalizedQuery: normalizeCustomerFileQuery(args.query),
+          searchedTerms: terms,
+          customer,
+          counts: {
+            projects: projects.length,
+            documents: documents.length,
+            photos: photos.length,
+            notes: notes.length,
+            tasks: tasks.length,
+            documentLinks: documentLinks.length,
+            recentUnlinkedDocuments: recentUnlinkedDocuments.length,
+          },
+          projects,
+          workspace: directWorkspace,
+          documents: documents.map(compactDocument),
+          photos: photos.map(compactDocument),
+          notes,
+          tasks,
+          documentLinks,
+          recentUnlinkedDocuments: recentUnlinkedDocuments.map(compactDocument),
+          guidance: recentUnlinkedDocuments.length
+            ? 'Some recent uploads are not linked to any customer/project/workspace yet. Do not say they are in this customer file unless a link tool succeeds.'
+            : undefined,
+        },
+      }
+    },
+  },
+  {
     name: 'get_workspace_memory',
     description: 'Get recent memory entries for a workspace. Optional category filter.',
     schema: z.object({ workspaceName: z.string().min(1).max(200), category: z.string().optional() }),
@@ -482,7 +671,6 @@ export const TOOLS: ToolDef[] = [
           address: args.address?.trim() || null,
         },
       })
-
       // Auto-link any uploaded documents to this new customer
       let linkedDocs = 0
       if (ctx.documentIds?.length) {
@@ -491,7 +679,6 @@ export const TOOLS: ToolDef[] = [
           data: { customerId: customer.id },
         }).catch(() => null)
         linkedDocs = result?.count ?? 0
-        console.log(`[tools-v2] create_customer: linked ${linkedDocs} document(s) to ${customer.name}`)
       }
 
       return {
