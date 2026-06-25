@@ -5,9 +5,16 @@ export const runtime = 'nodejs'
 
 type OnboardingMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
 
-function buildProfile(companyName?: string | null) {
+function websiteFromMemory(content?: string | null): string | undefined {
+  const prefix = 'Company website:'
+  if (!content?.startsWith(prefix)) return undefined
+  return content.slice(prefix.length).trim() || undefined
+}
+
+function buildProfile(companyName?: string | null, website?: string | null) {
   return {
     companyName: companyName || undefined,
+    website: website || undefined,
     services: [],
     serviceAreas: [],
     softwareUsed: [],
@@ -16,9 +23,17 @@ function buildProfile(companyName?: string | null) {
   }
 }
 
-function buildGreeting(userName: string, companyName?: string | null): string {
+function buildGreeting(userName: string, companyName?: string | null, website?: string | null): string {
   if (companyName) {
-    return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get ${companyName} set up.\n\nAfter reviewing some information, this is what I was able to gather:\n\n- Company: ${companyName}\n- Account owner: ${userName}\n\nLet me know if any of this needs updating before moving forward. If it looks good, just let me know.`
+    const facts = [
+      `- Company: ${companyName}`,
+      website ? `- Website: ${website}` : null,
+      `- Account owner: ${userName}`,
+    ].filter(Boolean).join('\n')
+    return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get ${companyName} set up.\n\nAfter reviewing some information, this is what I was able to gather:\n\n${facts}\n\nLet me know if any of this needs updating before moving forward. If it looks good, just let me know.`
+  }
+  if (website) {
+    return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get your company profile set up.\n\nI found this website from signup: ${website}. What company name should I use for your workspace?`
   }
   return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get your company profile set up.\n\nWhat is your company website or business name?`
 }
@@ -31,10 +46,18 @@ export async function GET(req: NextRequest) {
   const session = await db.onboardingSession.findUnique({ where: { contractorId: ctx.contractorId } })
 
   if (!session || JSON.parse(session.messagesJson || '[]').length === 0) {
-    const companyName = ctx.contractor.company || ctx.contractor.name || null
+    const websiteMemory = await db.contractorMemory.findFirst({
+      where: {
+        contractorId: ctx.contractorId,
+        content: { startsWith: 'Company website:' },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    const companyName = ctx.contractor.company || null
+    const website = websiteFromMemory(websiteMemory?.content)
     const userName = ctx.user.name || 'there'
-    const confidence = companyName ? 15 : 0
-    const history: OnboardingMessage[] = [{ role: 'assistant', content: buildGreeting(userName, companyName), timestamp: new Date().toISOString() }]
+    const confidence = (companyName ? 15 : 0) + (website ? 5 : 0)
+    const history: OnboardingMessage[] = [{ role: 'assistant', content: buildGreeting(userName, companyName, website), timestamp: new Date().toISOString() }]
 
     console.log(`[onboarding] seeded profile from signup: contractor=${ctx.contractorId}`)
 
@@ -45,7 +68,7 @@ export async function GET(req: NextRequest) {
           userId: ctx.user.id,
           status: 'in_progress',
           messagesJson: JSON.stringify(history),
-          businessProfile: JSON.stringify(buildProfile(companyName)),
+          businessProfile: JSON.stringify(buildProfile(companyName, website)),
           coveredTopics: JSON.stringify(companyName ? ['company_identity'] : []),
           confidence,
         },
@@ -55,7 +78,7 @@ export async function GET(req: NextRequest) {
         where: { id: session.id },
         data: {
           messagesJson: JSON.stringify(history),
-          businessProfile: JSON.stringify(buildProfile(companyName)),
+          businessProfile: JSON.stringify(buildProfile(companyName, website)),
           coveredTopics: JSON.stringify(companyName ? ['company_identity'] : []),
           confidence,
         },
