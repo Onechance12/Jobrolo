@@ -652,24 +652,27 @@ export async function processOnboardingTurn(args: {
   // Recalculate confidence
   const newConfidence = calculateConfidence(profile, coveredTopics)
 
-  // ----- Check for completion (3 paths) -----
+  // ----- Check for completion (4 paths) -----
   let completed = false
 
   // Path 1: AI explicitly said shouldComplete + confidence is high enough + at least 3 turns
   // Path 2: Agent already offered to complete ("ready to set up?") + user confirmed ("yes", "yep", "go ahead")
   // Path 3: Confidence is very high (>= AUTO_COMPLETE_THRESHOLD) + user confirmed + at least 4 turns
+  // Path 4: Confidence reached 100 after enough turns — avoid trapping users in a question loop at 100%
   // (Minimum turn counts prevent premature completion on the first message)
   const userConfirmed = isConfirmation(userMessage)
   const agentOffered = agentOfferedToComplete(history.slice(0, -1)) // exclude the just-added agent message
   const turnCount = history.filter(m => m.role === 'user').length
+  const confidenceComplete = newConfidence >= 100 && turnCount >= 4
 
   if ((aiResponse.shouldComplete && newConfidence >= COMPLETION_THRESHOLD && turnCount >= 3) ||
       (agentOffered && userConfirmed && newConfidence >= COMPLETION_THRESHOLD) ||
-      (userConfirmed && newConfidence >= AUTO_COMPLETE_THRESHOLD && turnCount >= 4)) {
-    console.log(`[onboarding] completing for contractor ${contractorId} (confidence: ${newConfidence}, turns: ${turnCount}, path: ${aiResponse.shouldComplete ? 'ai_flag' : agentOffered ? 'agent_offered+confirm' : 'auto_high_confidence'})`)
+      (userConfirmed && newConfidence >= AUTO_COMPLETE_THRESHOLD && turnCount >= 4) ||
+      confidenceComplete) {
+    console.log(`[onboarding] completing for contractor ${contractorId} (confidence: ${newConfidence}, turns: ${turnCount}, path: ${aiResponse.shouldComplete ? 'ai_flag' : agentOffered ? 'agent_offered+confirm' : confidenceComplete ? 'confidence_100' : 'auto_high_confidence'})`)
 
     // If the AI didn't write a completion message, generate one
-    if (!aiResponse.shouldComplete && agentOffered) {
+    if (!aiResponse.shouldComplete && (agentOffered || confidenceComplete)) {
       aiResponse.message = `Perfect — setting up your Jobrolo workspace now. I've learned your business and I'm ready to go. You'll be in your dashboard in just a moment.`
       // Update the last history message with the completion message
       history[history.length - 1] = { role: 'assistant', content: aiResponse.message, timestamp: new Date().toISOString() }
