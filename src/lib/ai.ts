@@ -97,10 +97,17 @@ async function zaiChatComplete(messages: ChatMessage[], opts: ChatOptions): Prom
 
 async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatOptions): Promise<string> {
   const apiKey = process.env.LLM_API_KEY
-  const baseUrl = process.env.LLM_BASE_URL || 'https://api.openai.com/v1'
+  const baseUrl = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '')
   const model = process.env.LLM_MODEL || 'gpt-4o-mini'
 
   if (!apiKey) throw new Error('LLM_API_KEY not set — cannot use openai-compatible provider')
+
+  console.log('[ai] openai-compatible request', {
+    provider: 'openai-compatible',
+    model,
+    baseUrl,
+    messages: messages.length,
+  })
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -120,13 +127,26 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
     }),
   })
 
+  console.log('[ai] openai-compatible response', {
+    provider: 'openai-compatible',
+    model,
+    status: res.status,
+    ok: res.ok,
+  })
+
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
     throw new Error(`LLM API error ${res.status}: ${errText.slice(0, 200)}`)
   }
 
   const data = await res.json()
-  return data.choices?.[0]?.message?.content ?? ''
+  const content = data.choices?.[0]?.message?.content ?? ''
+  console.log('[ai] openai-compatible response preview', {
+    provider: 'openai-compatible',
+    model,
+    preview: content.slice(0, 500),
+  })
+  return content
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +233,10 @@ async function openaiCompatibleVision(imageUrl: string, prompt: string): Promise
 
 export async function chatComplete(messages: ChatMessage[], opts?: ChatOptions): Promise<string> {
   const provider = getProvider()
+  console.log('[ai] provider selected', {
+    provider,
+    model: provider === 'openai-compatible' ? (process.env.LLM_MODEL || 'gpt-4o-mini') : 'z-ai-default',
+  })
 
   if (provider === 'openai-compatible') {
     return await openaiCompatibleChatComplete(messages, opts || {})
