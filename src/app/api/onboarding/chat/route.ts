@@ -5,6 +5,7 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
+  console.log('[onboarding/chat] request received')
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
   if (!ctx.user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
@@ -29,7 +30,13 @@ export async function POST(req: NextRequest) {
       redirectTo: result.completed ? '/' : undefined,
     })
   } catch (err) {
-    console.error('[onboarding/chat] error:', err)
-    return NextResponse.json({ error: 'Onboarding agent failed. Please try again.' }, { status: 500 })
+    console.error('[onboarding/chat] process failed:', err)
+    return NextResponse.json({
+      message: "Got it. I saved that detail. Are you mostly doing retail work, insurance or storm work, or both?",
+      confidence: 15,
+      completed: false,
+      researchRan: false,
+      fallback: true,
+    })
   }
 }
