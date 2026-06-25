@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (input.documentId) {
     const doc = await db.document.findFirst({ where: { id: input.documentId, contractorId: ctx.contractorId } })
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    imageUrl = toFileUrl(doc.filePath)
+    imageUrl = toFileUrl(doc.filePath) ?? undefined
     await linkDocumentToJobPacket({
       contractorId: ctx.contractorId,
       documentId: doc.id,

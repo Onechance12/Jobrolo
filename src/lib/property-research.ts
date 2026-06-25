@@ -318,7 +318,7 @@ export async function researchPropertyNow(ctx: TenantContext, input: PropertyRes
     ].filter(Boolean) as any[]
 
     const deduped = dedupeCandidates(rawCandidates).slice(0, mode === 'street_game_plan' ? 250 : 12)
-    const created = []
+    const created: Awaited<ReturnType<typeof db.propertyResearchCandidate.create>>[] = []
     for (const c of deduped) {
       const candidate = await db.propertyResearchCandidate.create({
         data: {

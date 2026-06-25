@@ -1592,6 +1592,32 @@ export const TOOLS: ToolDef[] = [
     },
   },
 
+  // ── Orchestrator planning consultant ─────────────────────────────────────
+  {
+    name: 'consult_orchestrator',
+    description: 'Analyze a complex or ambiguous request and produce a structured execution plan with recommended steps, tool suggestions, missing context, and risks. This is a read-only planning tool — it does NOT execute anything, mutate data, or send messages. Use it before coordinating across customers, projects, documents, signatures, property memory, canvassing, and roof reports. Do NOT use it for simple single-step questions.',
+    schema: z.object({
+      userRequest: z.string().min(1).describe('The user request to analyze and plan for'),
+      channelType: z.string().optional().describe('Current channel type (main, customer, crew, etc.)'),
+      entityContext: z.string().optional().describe('Context about the current project, customer, or workspace'),
+    }),
+    allowedChannels: 'all',
+    // Read-only planning tool — no approval needed since it cannot mutate anything
+    requiresApproval: false,
+    execute: async (args, _contractorId, _ctx) => {
+      const { consultOrchestrator } = await import('./orchestrator-adapter')
+      try {
+        const plan = await consultOrchestrator({
+          userRequest: args.userRequest,
+          channelType: args.channelType as ChannelType | undefined,
+          entityContext: args.entityContext,
+        })
+        return { success: true, data: plan }
+      } catch (err) {
+        return { success: false, data: null, error: err instanceof Error ? err.message : 'Orchestrator planning failed' }
+      }
+    },
+  },
 
 ]
 

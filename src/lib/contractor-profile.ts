@@ -34,18 +34,18 @@ export type ContractorProfileInput = {
   metadata?: unknown
 }
 
-function clean(value: string | null | undefined) {
+function clean(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim()
-  return trimmed ? trimmed : null
+  return trimmed ? trimmed : undefined
 }
 
-function cleanUrl(value: string | null | undefined) {
+function cleanUrl(value: string | null | undefined): string | undefined {
   const v = clean(value)
-  if (!v) return null
+  if (!v) return undefined
   if (v.startsWith('/api/storage/')) return v
   if (v.startsWith('/')) return v
   if (/^https?:\/\//i.test(v)) return v
-  return null
+  return undefined
 }
 
 function cleanHex(value: string | null | undefined, fallback: string) {
@@ -133,7 +133,7 @@ export async function upsertContractorProfile(contractorId: string, input: Contr
   if (logoDocumentId) {
     const logoDoc = await db.document.findFirst({ where: { id: logoDocumentId, contractorId }, select: { filePath: true } })
     if (!logoDoc) throw new Error('Logo document not found')
-    logoUrl = toFileUrl(logoDoc.filePath)
+    logoUrl = toFileUrl(logoDoc.filePath) ?? undefined
   }
 
   const data = {

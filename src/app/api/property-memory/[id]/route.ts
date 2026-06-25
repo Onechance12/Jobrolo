@@ -13,23 +13,25 @@ const PatchSchema = z.object({
   tags: z.array(z.string()).optional().nullable(), location: z.object({ lat: z.number().optional().nullable(), lng: z.number().optional().nullable(), latitude: z.number().optional().nullable(), longitude: z.number().optional().nullable(), accuracyMeters: z.number().optional().nullable(), source: z.string().optional().nullable() }).optional().nullable(),
 })
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
-  const result = await getPropertyMemoryContext(ctx, { propertyMemoryId: params.id, limit: 1 })
+  const result = await getPropertyMemoryContext(ctx, { propertyMemoryId: id, limit: 1 })
   if (!result.properties.length) return NextResponse.json({ error: 'Property memory not found' }, { status: 404 })
   return NextResponse.json({ property: result.properties[0], observations: result.observations, attempts: result.attempts })
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const sizeErr = checkBodySize(req)
   if (sizeErr) return sizeErr
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
-  const existing = await db.propertyMemory.findFirst({ where: { id: params.id, contractorId: ctx.contractorId } })
+  const existing = await db.propertyMemory.findFirst({ where: { id, contractorId: ctx.contractorId } })
   if (!existing) return NextResponse.json({ error: 'Property memory not found' }, { status: 404 })
   const parsed = PatchSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
-  const property = await upsertPropertyMemory(ctx, { ...parsed.data, address: parsed.data.address ?? existing.address, dataSource: { source: 'property_memory_patch', propertyMemoryId: params.id } })
+  const property = await upsertPropertyMemory(ctx, { ...parsed.data, address: parsed.data.address ?? existing.address, dataSource: { source: 'property_memory_patch', propertyMemoryId: id } })
   return NextResponse.json({ property })
 }

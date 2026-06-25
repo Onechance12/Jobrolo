@@ -47,7 +47,7 @@ export function FieldEntryStrip({ workspace, onOpenFieldCopilot, onSendPrompt, o
       if (!res.ok) throw new Error('Could not log arrival')
       onFieldEvent?.({
         action: 'arrived',
-        title: `Arrived — ${project.title}`,
+        title: `Arrived — ${project!.title}`,
         summary: location ? 'Arrival logged with GPS and added to the job timeline.' : 'Arrival logged and added to the job timeline.',
         mode: 'field',
       })

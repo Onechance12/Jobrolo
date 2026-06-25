@@ -11,13 +11,14 @@ const Schema = z.object({
   metadata: z.record(z.string(), z.any()).optional().nullable(),
 })
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const sizeErr = checkBodySize(req)
   if (sizeErr) return sizeErr
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
   const parsed = Schema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
-  const observation = await recordPropertyObservation(ctx, { ...parsed.data, propertyMemoryId: params.id })
+  const observation = await recordPropertyObservation(ctx, { ...parsed.data, propertyMemoryId: id })
   return NextResponse.json({ observation }, { status: 201 })
 }

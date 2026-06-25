@@ -519,7 +519,7 @@ async function postWorkspaceEvent(input: { contractorId: string; projectId?: str
 }
 
 async function routeInboxItems(input: { contractorId: string; projectId?: string | null; customerId?: string | null; actionRequestId?: string | null; roles: string[]; type: string; title: string; summary?: string | null; priority?: string; payload?: unknown }) {
-  const created = []
+  const created: Awaited<ReturnType<typeof db.inboxItem.create>>[] = []
   for (const role of input.roles) {
     const item = await db.inboxItem.create({
       data: {
