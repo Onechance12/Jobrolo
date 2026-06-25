@@ -74,9 +74,15 @@ export default function OnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed')
-      const agentMsg: Message = { role: 'assistant', content: data.message, timestamp: new Date().toISOString() }
+      const bodyText = await res.text()
+      let data: { message?: string; confidence?: number; completed?: boolean; error?: string } = {}
+      try {
+        data = bodyText ? JSON.parse(bodyText) : {}
+      } catch {
+        data = { error: bodyText || 'Invalid onboarding response' }
+      }
+      if (!res.ok) throw new Error(data.error || `Onboarding request failed (${res.status})`)
+      const agentMsg: Message = { role: 'assistant', content: data.message ?? 'Got it. Tell me a little more about your business.', timestamp: new Date().toISOString() }
       setMessages(prev => [...prev, agentMsg])
       setConfidence(data.confidence ?? 0)
       if (data.completed) {
@@ -85,7 +91,8 @@ export default function OnboardingPage() {
         setTimeout(() => { router.push('/'); router.refresh() }, 2500)
       }
     } catch (err) {
-      const errMsg: Message = { role: 'assistant', content: 'Sorry, I had trouble with that. Could you try again?', timestamp: new Date().toISOString() }
+      console.error('[onboarding] send error:', err)
+      const errMsg: Message = { role: 'assistant', content: 'I had trouble reaching the onboarding agent. Refresh the page and try again. If it keeps happening, tell me your company name again and we’ll keep setting up manually.', timestamp: new Date().toISOString() }
       setMessages(prev => [...prev, errMsg])
     } finally {
       setSending(false)
@@ -200,7 +207,7 @@ export default function OnboardingPage() {
               placeholder="Tell me about your business…"
               rows={1}
               disabled={sending}
-              className="flex-1 resize-none bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 disabled:opacity-50 max-h-32 min-h-[44px]"
+              className="flex-1 resize-none bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-[16px] leading-6 text-slate-950 caret-slate-950 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 disabled:opacity-50 max-h-32 min-h-[44px]"
               style={{ height: 'auto' }}
               onInput={e => {
                 const ta = e.target as HTMLTextAreaElement
