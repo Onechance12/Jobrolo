@@ -23,14 +23,14 @@ export default function OnboardingPage() {
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await fetch('/api/auth/me')
+        const meRes = await fetch('/api/auth/me', { credentials: 'same-origin' })
         if (!meRes.ok) { router.push('/signup'); return }
         const meData = await meRes.json()
         if (!meData.authenticated) { router.push('/signup'); return }
         if (meData.onboardingComplete) { router.push('/'); return }
 
         // Load existing onboarding conversation
-        const statusRes = await fetch('/api/onboarding/status')
+        const statusRes = await fetch('/api/onboarding/status', { credentials: 'same-origin' })
         if (statusRes.ok) {
           const statusData = await statusRes.json()
           if (statusData.messages?.length > 0) {
@@ -71,6 +71,7 @@ export default function OnboardingPage() {
     try {
       const res = await fetch('/api/onboarding/chat', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
@@ -81,7 +82,15 @@ export default function OnboardingPage() {
       } catch {
         data = { error: bodyText || 'Invalid onboarding response' }
       }
-      if (!res.ok) throw new Error(data.error || `Onboarding request failed (${res.status})`)
+
+      if (!res.ok) {
+        const serverMessage = data.message || data.error || `Onboarding request failed (${res.status})`
+        const errMsg: Message = { role: 'assistant', content: serverMessage, timestamp: new Date().toISOString() }
+        setMessages(prev => [...prev, errMsg])
+        if (res.status === 401) setTimeout(() => router.push('/login'), 1500)
+        return
+      }
+
       const agentMsg: Message = { role: 'assistant', content: data.message ?? 'Got it. Tell me a little more about your business.', timestamp: new Date().toISOString() }
       setMessages(prev => [...prev, agentMsg])
       setConfidence(data.confidence ?? 0)
@@ -92,7 +101,7 @@ export default function OnboardingPage() {
       }
     } catch (err) {
       console.error('[onboarding] send error:', err)
-      const errMsg: Message = { role: 'assistant', content: 'I had trouble reaching the onboarding agent. Refresh the page and try again. If it keeps happening, tell me your company name again and we’ll keep setting up manually.', timestamp: new Date().toISOString() }
+      const errMsg: Message = { role: 'assistant', content: 'I could not reach the onboarding endpoint from this browser. Refresh once and try again. If it keeps happening, check the Render logs for [onboarding/chat].', timestamp: new Date().toISOString() }
       setMessages(prev => [...prev, errMsg])
     } finally {
       setSending(false)
