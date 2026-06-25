@@ -258,9 +258,7 @@ ${availableQuestions || '(all topics covered — move to completion)'}
 Respond as JSON only (no markdown fences):
 {
   "message": "your conversational response (short, 1-3 sentences)",
-  "extractedInfo": {
-    // any new info learned from the user's last message — only include fields you can confidently extract
-  },
+  "extractedInfo": {},
   "newlyCoveredTopics": ["topic1", "topic2"],
   "shouldComplete": false
 }
@@ -279,6 +277,88 @@ function mergeProfile(existing: BusinessProfile, extracted: Partial<BusinessProf
       Object.entries(extracted).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0))
     ),
   }
+}
+
+function extractJsonObject(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const candidate = fenced?.[1]?.trim() || trimmed
+
+  if (candidate.startsWith('{') && candidate.endsWith('}')) return candidate
+
+  const start = candidate.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < candidate.length; i++) {
+    const ch = candidate[i]
+    if (escape) {
+      escape = false
+      continue
+    }
+    if (ch === '\\') {
+      escape = true
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+    if (ch === '{') depth++
+    if (ch === '}') {
+      depth--
+      if (depth === 0) return candidate.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+function normalizeAiResponse(raw: string): { message: string; extractedInfo: Partial<BusinessProfile>; newlyCoveredTopics: string[]; shouldComplete: boolean } {
+  const json = extractJsonObject(raw)
+  if (json) {
+    try {
+      const parsed = JSON.parse(json)
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return {
+          message: parsed.message.trim(),
+          extractedInfo: parsed.extractedInfo && typeof parsed.extractedInfo === 'object' ? parsed.extractedInfo : {},
+          newlyCoveredTopics: Array.isArray(parsed.newlyCoveredTopics) ? parsed.newlyCoveredTopics.filter((t: unknown) => typeof t === 'string') : [],
+          shouldComplete: Boolean(parsed.shouldComplete),
+        }
+      }
+      console.warn('[onboarding] AI JSON missing message', {
+        keys: parsed && typeof parsed === 'object' ? Object.keys(parsed) : [],
+      })
+    } catch (err) {
+      console.warn('[onboarding] AI JSON parse failed:', err instanceof Error ? err.message : String(err))
+    }
+  } else {
+    console.warn('[onboarding] AI JSON object not found')
+  }
+
+  const fallbackText = raw
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim()
+
+  if (fallbackText) {
+    console.warn('[onboarding] using non-JSON AI text response', {
+      preview: fallbackText.slice(0, 500),
+    })
+    return {
+      message: fallbackText.slice(0, 1000),
+      extractedInfo: {},
+      newlyCoveredTopics: [],
+      shouldComplete: false,
+    }
+  }
+
+  throw new Error('AI returned empty or unusable onboarding response')
 }
 
 // ---------------------------------------------------------------------------
@@ -528,9 +608,8 @@ export async function processOnboardingTurn(args: {
       { role: 'user', content: userMessage },
     ], { temperature: 0.4, maxTokens: 800 })
 
-    let cleaned = raw.trim()
-    if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
-    aiResponse = JSON.parse(cleaned)
+    console.log('[onboarding] AI raw response preview:', raw.slice(0, 500))
+    aiResponse = normalizeAiResponse(raw)
   } catch (err) {
     console.error('[onboarding] AI call failed:', err)
     aiResponse = {
