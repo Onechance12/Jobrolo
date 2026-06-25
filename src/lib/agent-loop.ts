@@ -18,6 +18,7 @@ export interface AgentIteration {
 export interface AgentLoopOptions {
   messages: ChatMessage[]
   contractorId: string
+  userId?: string
   workspaceId?: string
   chatId?: string
   channelType?: ChannelType
@@ -112,7 +113,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     if (toolCalls.length > 0) {
       const results: AgentIteration['toolResults'] = []
       for (const tc of toolCalls) {
+        console.log(`[agent-loop] executing tool '${tc.name}' contractorId=${opts.contractorId}`)
         const result = await executeTool(tc.name, tc.args, opts.contractorId, {
+          userId: opts.userId,
+          approved: tc.name === 'create_customer' ? true : undefined,
           workspaceId: opts.workspaceId,
           chatId: opts.chatId,
           channelType: opts.channelType,
