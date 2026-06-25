@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('[onboarding/chat] process failed:', err)
     return NextResponse.json({
-      message: "Got it. I saved that detail. Are you mostly doing retail work, insurance or storm work, or both?",
+      message: "Got it. I’m having trouble with the onboarding brain right now, but we can keep going. Are you mostly doing retail work, insurance/storm work, or both?",
       confidence: 15,
       completed: false,
       researchRan: false,
