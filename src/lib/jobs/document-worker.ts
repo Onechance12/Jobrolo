@@ -110,6 +110,7 @@ function buildDocumentReviewProfile(input: {
   const documentType =
     lower.includes('price') ? 'price_sheet' :
     lower.includes('scope') ? 'scope_of_loss' :
+    lower.includes('carrier_letter') || lower.includes('carrier letter') || lower.includes('settlement') ? 'carrier_letter' :
     lower.includes('estimate') ? 'carrier_estimate' :
     lower.includes('claim') ? 'insurance_claim_doc' :
     lower.includes('contract') ? 'contract' :
@@ -152,6 +153,20 @@ function buildDocumentReviewProfile(input: {
       quantities: rows.length > 0 && !rowHas('quantity'),
       unitPrices: rows.length > 0 && !rowHas('unitPrice'),
       totals: rows.length > 0 && !rowHas('total') && !rowHas('rcv') && !hasValue(data.totalAmount) && !hasValue(claimInfo.rcv),
+    }
+  } else if (documentType === 'carrier_letter') {
+    expectedFields = ['insured/customer', 'carrier', 'claim number', 'date of loss', 'settlement/payment amount', 'deductible if stated', 'summary/key instructions']
+    const claimInfo = data.claimInfo ?? {}
+    const amounts = Array.isArray(data.dollarAmounts) ? data.dollarAmounts : []
+    const keyInfo = Array.isArray(data.keyInfo) ? data.keyInfo : []
+    missingDataFlags = {
+      insuredOrCustomer: !hasValue(data.customer?.name) && !hasValue(data.customerName) && !hasValue(data.insuredName) && !hasValue(claimInfo.insured),
+      carrier: !hasValue(claimInfo.carrier) && !hasValue(data.carrier),
+      claimNumber: !hasValue(claimInfo.claimNumber) && !hasValue(data.claimNumber),
+      dateOfLoss: !hasValue(claimInfo.dateOfLoss) && !hasValue(data.dateOfLoss),
+      paymentAmount: !hasValue(claimInfo.rcv) && !hasValue(claimInfo.acv) && !hasValue(claimInfo.total) && amounts.length === 0,
+      deductible: false,
+      summaryOrInstructions: !hasValue(data.summary) && keyInfo.length === 0,
     }
   } else if (documentType === 'carrier_estimate' || documentType === 'insurance_claim_doc') {
     expectedFields = ['insured/customer', 'property address', 'carrier', 'claim number', 'date of loss', 'deductible', 'RCV/total', 'ACV if present', 'depreciation if present', 'trade/category', 'line items', 'quantities', 'unit prices', 'totals']

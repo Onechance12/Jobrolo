@@ -1,6 +1,19 @@
 import { inferTrade, inferCategory } from './scope-parser'
 
-export interface AbcSupplyItem { name: string; manufacturer?: string; productLine?: string; category: string; unit: string; unitPrice: number; alternateUnit?: string; alternateUnitPrice?: number }
+export interface AbcSupplyItem {
+  name: string
+  sku?: string
+  manufacturer?: string
+  productLine?: string
+  category: string
+  unit: string
+  unitPrice: number
+  alternateUnit?: string
+  alternateUnitPrice?: number
+  quantity?: number
+  extendedPrice?: number
+  sourceLineNumber?: string
+}
 
 // Roofing-specific synonyms — when a user searches for one term, also match these
 export const ROOFING_SYNONYMS: Record<string, string[]> = {
@@ -25,11 +38,11 @@ export const ROOFING_SYNONYMS: Record<string, string[]> = {
 // Expanded category keywords — pipe jacks go in "Pipe Flashing" not "Sealants"
 const CATEGORY_KEYWORDS: Array<{ name: string; keywords: string[] }> = [
   { name: 'Shingles', keywords: ['tamko', 'gaf ', 'certainteed', 'atlas', 'owens', 'iko', 'malarkey', 'elk', 'landmark', 'pinnacle', 'royal sovereign', 'timberline', 'heritage', 'designer', 'presidential', 'highland'] },
-  { name: 'Underlayment', keywords: ['felt', 'underlayment', 'synthetic', 'tiger paw', 'ice and water', 'ice & water', 'iws', 'mulehide', 'weatherwatch', 'storm guard', 'leak barrier'] },
+  { name: 'Underlayment', keywords: ['felt', 'underlayment', 'synthetic', 'undrl', 'ice and water', 'ice & water', 'ice & wtr', 'iws', 'mulehide', 'weatherwatch', 'storm guard', 'leak barrier'] },
   { name: 'Starter', keywords: ['starter', 'pro start', 'prostart', 'startermatch', 'weatherblocker'] },
   { name: 'Hip & Ridge', keywords: ['hip', 'ridge', 'timbertex', 'z ridge', 'cobra', 'ridglass'] },
-  { name: 'Drip Edge', keywords: ['drip', 'edging'] },
-  { name: 'Pipe Flashing', keywords: ['lead jack', 'bullet boot', 'pipe boot', 'pipe jack', 'roof jack', '3 in 1', '3-in-1', 'auto caulk', 'storm collar', 'lead boot', 'neoprene', 'epdm'] },
+  { name: 'Drip Edge', keywords: ['drip', 'edging', 'roof edge', 'rf edge', 'nrea'] },
+  { name: 'Pipe Flashing', keywords: ['lead jack', 'bullet boot', 'pipe boot', 'pipe jack', 'roof jack', '3 in 1', '3-in-1', '3n1', 'base flash', 'auto caulk', 'storm collar', 'lead boot', 'neoprene', 'epdm'] },
   { name: 'Flashing', keywords: ['flashing', 'valley', 'step flashing', 'base flashing', 'counter flashing', 'versa cap', 'gravel guard', 'cap flashing', 'chimney'] },
   { name: 'Ventilation', keywords: ['vent', 'turbine', 'exhaust', 'intake', 'ridge vent', 'static vent', 'power vent', 'airvent', 'lomanco', 'cobra'] },
   { name: 'Fasteners', keywords: ['nail', 'screw', 'coil', 'cap nail', 'staple', 'fastener'] },
@@ -126,6 +139,69 @@ export function parseAbcSupplyPriceList(text: string): AbcSupplyItem[] {
   }
   
   return items
+}
+
+export function parseQxoBidProposalPriceList(text: string): AbcSupplyItem[] {
+  const items: AbcSupplyItem[] = []
+  if (!/bid proposal|new con pricing|qxo|branch number/i.test(text)) return items
+
+  const normalized = text
+    .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
+    .replace(/Page\s+\d+\s+of\s+\d+/gi, ' ')
+    .trim()
+
+  const rowPattern = /(?:^|\s)(\d{1,4})\s+(\d+(?:\.\d+)?)\s+([A-Z]{1,5})\s+(?:([A-Z]{1,5})\s+)?(\d+(?:\.\d{2,4}))\s+(?:\d+(?:\.\d{2,4})\s+)?(\d+(?:\.\d{2}))\s+(.+?)(?=\s+\d{1,4}\s+\d+(?:\.\d+)?\s+[A-Z]{1,5}\s+(?:[A-Z]{1,5}\s+)?\d+(?:\.\d{2,4})\s+(?:\d+(?:\.\d{2,4})\s+)?\d+(?:\.\d{2})\s+|$)/g
+  let match: RegExpExecArray | null
+  while ((match = rowPattern.exec(normalized)) !== null) {
+    const [, lineNumber, quantityRaw, quantityUnit, priceUnitRaw, unitPriceRaw, extendedRaw, descriptionRaw] = match
+    const unit = (priceUnitRaw || quantityUnit || 'EA').toUpperCase()
+    const quantity = Number(quantityRaw)
+    const unitPrice = Number(unitPriceRaw)
+    const extendedPrice = Number(extendedRaw)
+    const cleanDescription = cleanQxoDescription(descriptionRaw)
+    if (!cleanDescription || cleanDescription.length < 4) continue
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) continue
+
+    const sku = extractQxoSku(cleanDescription)
+    const name = stripQxoSku(cleanDescription)
+    items.push({
+      name,
+      sku,
+      category: categorize(name),
+      unit,
+      unitPrice,
+      quantity: Number.isFinite(quantity) ? quantity : undefined,
+      extendedPrice: Number.isFinite(extendedPrice) ? extendedPrice : undefined,
+      sourceLineNumber: lineNumber,
+    })
+  }
+
+  return items
+}
+
+function cleanQxoDescription(value: string) {
+  return value
+    .replace(/\s+(?:Total|Subtotal|Grand Total|Terms|Signature|Accepted By)\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractQxoSku(value: string) {
+  const match = value.match(/\b((?=[A-Z0-9-]*\d)[A-Z0-9-]{5,})\b/)
+  return match?.[1]
+}
+
+function stripQxoSku(value: string) {
+  return value
+    .replace(/\b(?=[A-Z0-9-]*\d)[A-Z0-9-]{5,}\b/g, '')
+    .replace(/\b\d+BDL\/SQ\b/gi, '')
+    .replace(/\b\d+SQ\/RL\b/gi, '')
+    .replace(/\b\d+(?:RL|CTN|BDL|SQ|PC|EA)?\/(?:PALLET|PLT|TL|CTN)\b/gi, '')
+    .replace(/\s*"(?:FORMER NAME|FORMERLY)[^"]*"/gi, '')
+    .replace(/\bFORMERLY\s+\d+\s+\w+\s+PER\s+\w+\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export interface XactimateLineItem { lineNumber: string; description: string; quantity: number | null; unit: string; unitPrice: number | null; rcv: number | null; depreciation: number | null; acv: number | null; trade: string; category: string }

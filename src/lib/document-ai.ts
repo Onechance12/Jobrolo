@@ -12,7 +12,7 @@ import { readStoredFile } from '@/lib/storage'
 import { analyzeImage } from './ai'
 import { extractPdfText, truncateForAI } from './pdf'
 import { chatComplete, type ChatOptions, type VisionOptions } from './ai'
-import { parseAbcSupplyPriceList, parseXactimateLineItems } from './specialized-parsers'
+import { parseAbcSupplyPriceList, parseQxoBidProposalPriceList, parseXactimateLineItems } from './specialized-parsers'
 import { parseScope } from './scope-parser'
 import { extractEntities, mergeEntities, type ExtractedEntities } from './document/entity-extractor'
 import { analyzeScopeIntelligence, serializeForStorage, type ScopeIntelligenceResult } from './scope-intelligence'
@@ -25,7 +25,7 @@ export interface DocumentAnalysis {
   summary: string
   category: string
   extractedData: Record<string, unknown>
-  materialItems?: Array<{ name: string; sku?: string; category?: string; unit?: string; unitCost: number; manufacturer?: string; productLine?: string; alternateUnit?: string; alternateUnitPrice?: number }>
+  materialItems?: Array<{ name: string; sku?: string; category?: string; unit?: string; unitCost: number; manufacturer?: string; productLine?: string; alternateUnit?: string; alternateUnitPrice?: number; quantity?: number; extendedPrice?: number; sourceLineNumber?: string }>
   lineItems?: Array<{ code?: string; description: string; quantity: number | null; unit: string | null; unitPrice: number | null; total: number | null }>
   claimInfo?: { claimNumber?: string; policyNumber?: string; dateOfLoss?: string; adjuster?: string; insured?: string; property?: string; total?: number; carrier?: string; deductible?: number; rcv?: number; acv?: number; depreciation?: number; mortgageCompany?: string; adjusterPhone?: string; adjusterEmail?: string }
   detectedCustomer?: { name?: string; email?: string | null; phone?: string | null; address?: string }
@@ -66,12 +66,31 @@ export function detectDocumentType(text: string, filename: string): string {
   if (ln.includes('denial')) return 'carrier_letter'
   if (ln.includes('carrier') && ln.includes('letter')) return 'carrier_letter'
 
+  // Price sheets / supplier bids must be detected before generic insurance
+  // phrases. Supplier PDFs often contain "unit price" and proposal metadata but
+  // should never be reviewed as homeowner claim documents.
+  if (l.includes('customer price list') || l.includes('bid proposal')) return 'price_sheet'
+  if (l.includes('abc supply') && l.includes('unit price')) return 'price_sheet'
+  if (l.includes('qxo') && l.includes('pricing')) return 'price_sheet'
+  if (l.includes('new con pricing') || l.includes('bid number')) return 'price_sheet'
+  if (l.includes('effective date:') && l.includes('unit price') && !l.includes('insured:')) return 'price_sheet'
+
   // Content-based detection (insurance docs)
-  if (l.includes('insured:') && l.includes('claim number:')) return 'estimate'
-  if (l.includes('type of loss:') && l.includes('adjuster')) return 'estimate'
-  if (l.includes('price list:') && l.includes('date of loss:')) return 'estimate'
+  // Estimate / scope signals that usually mean line items or estimating detail.
   if (l.includes('xactimate') || l.includes('restoration/service/remodel')) return 'estimate'
+  if (l.includes('price list:') && l.includes('date of loss:')) return 'estimate'
+  if (l.includes('type of loss:') && l.includes('adjuster')) return 'estimate'
+  if (l.includes('description quantity') && (l.includes('rcv') || l.includes('unit price'))) return 'estimate'
   if (l.includes('scope of loss') || l.includes('less deductible')) return 'scope_of_loss'
+
+  // Carrier settlement / claim letters. These can contain claim number,
+  // insured, deductible, ACV/settlement amounts, etc. but no repair line items.
+  if (l.includes('your claim settlement') || l.includes('breakdown of your settlement')) return 'carrier_letter'
+  if (l.includes('total amount payable now') || l.includes('net claim after deductible')) return 'carrier_letter'
+  if (l.includes('payment is being made for the damaged or destroyed property')) return 'carrier_letter'
+  if (l.includes('go paperless') && l.includes('claim number:') && l.includes('date of loss:')) return 'carrier_letter'
+
+  if (l.includes('insured:') && l.includes('claim number:')) return 'claim_document'
   if (l.includes('insurance claim') || l.includes('policy number:')) return 'claim_document'
 
   // Carrier letters / denial letters
@@ -91,13 +110,6 @@ export function detectDocumentType(text: string, filename: string): string {
 
   // Contract
   if (l.includes('this agreement') || l.includes('work authorization') || l.includes('contractor and customer agree')) return 'contract'
-
-  // Price sheets (supplier catalogs)
-  if (l.includes('customer price list') || l.includes('bid proposal')) return 'price_sheet'
-  if (l.includes('abc supply') && l.includes('unit price')) return 'price_sheet'
-  if (l.includes('qxo') && l.includes('pricing')) return 'price_sheet'
-  if (l.includes('new con pricing') || l.includes('bid number')) return 'price_sheet'
-  if (l.includes('effective date:') && l.includes('unit price') && !l.includes('insured:')) return 'price_sheet'
 
   return 'other'
 }
@@ -266,6 +278,39 @@ Respond as JSON only:
 // ---------------------------------------------------------------------------
 
 async function analyzePriceSheet(text: string, originalName: string, aiContext: Partial<ChatOptions> = {}): Promise<DocumentAnalysis> {
+  const qxoItems = parseQxoBidProposalPriceList(text)
+  if (qxoItems.length > 0) {
+    console.log(`[doc-ai] QXO/bid proposal parser: ${qxoItems.length} items`)
+    const supplier = text.match(/\b(QXO|ABC Supply)\b/i)?.[1] || 'Supplier bid'
+    const validUntil = text.match(/Valid\s+Until\s+([A-Za-z]+\s+\d{1,2}\s*,?\s*\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})/i)?.[1]?.trim() || null
+    const bidNumber = text.match(/BID\s+NUMBER\s+.*?(\d{4,})/i)?.[1] || text.match(/\bBID\s*(?:#|NO\.?|NUMBER)?\s*[:#]?\s*(\d{4,})/i)?.[1] || null
+    return {
+      summary: `Supplier bid/proposal from ${supplier} with ${qxoItems.length} material item${qxoItems.length === 1 ? '' : 's'}${validUntil ? ` (valid until ${validUntil})` : ''}`,
+      category: 'price_sheet',
+      extractedData: {
+        supplier,
+        validUntil,
+        bidNumber,
+        documentSubtype: 'supplier_bid_proposal',
+        categoryCounts: qxoItems.reduce((a, i) => { a[i.category] = (a[i.category] || 0) + 1; return a }, {} as Record<string, number>),
+      },
+      materialItems: qxoItems.map(i => ({
+        name: i.name,
+        sku: i.sku,
+        category: i.category,
+        manufacturer: i.manufacturer,
+        productLine: i.productLine,
+        unit: i.unit,
+        unitCost: i.unitPrice,
+        alternateUnit: i.alternateUnit,
+        alternateUnitPrice: i.alternateUnitPrice,
+        quantity: i.quantity,
+        extendedPrice: i.extendedPrice,
+        sourceLineNumber: i.sourceLineNumber,
+      })),
+    }
+  }
+
   const abcItems = parseAbcSupplyPriceList(text)
   if (abcItems.length > 5) {
     console.log(`[doc-ai] ABC Supply parser: ${abcItems.length} items`)
@@ -275,7 +320,7 @@ async function analyzePriceSheet(text: string, originalName: string, aiContext: 
       summary: `Price sheet from ${supplier} with ${abcItems.length} material items (effective ${effDate || 'unknown'})`,
       category: 'price_sheet',
       extractedData: { supplier, validDate: effDate, categoryCounts: abcItems.reduce((a, i) => { a[i.category] = (a[i.category] || 0) + 1; return a }, {} as Record<string, number>) },
-      materialItems: abcItems.map(i => ({ name: i.name, category: i.category, manufacturer: i.manufacturer, productLine: i.productLine, unit: i.unit, unitCost: i.unitPrice, alternateUnit: i.alternateUnit, alternateUnitPrice: i.alternateUnitPrice })),
+      materialItems: abcItems.map(i => ({ name: i.name, sku: i.sku, category: i.category, manufacturer: i.manufacturer, productLine: i.productLine, unit: i.unit, unitCost: i.unitPrice, alternateUnit: i.alternateUnit, alternateUnitPrice: i.alternateUnitPrice })),
     }
   }
   try {

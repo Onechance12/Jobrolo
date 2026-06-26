@@ -207,6 +207,16 @@ export function uploadAnalysisFollowupFromDocument(doc: any): { content: string;
   const lineItems = Array.isArray(extracted.lineItems) ? extracted.lineItems.length : 0
   const total = extracted.totalAmount ?? extracted.claimInfo?.rcv ?? extracted.claimInfo?.total
 
+  if (category.includes('carrier') || category.includes('claim_document') || category.includes('claim doc')) {
+    const claimNumber = textValue(extracted.claimInfo?.claimNumber) || textValue(extracted.claimNumber)
+    const carrier = textValue(extracted.claimInfo?.carrier) || textValue(extracted.carrier)
+    return {
+      content: `Saved and analyzed ${filename}. This looks like a carrier/claim letter${customerName ? ` for ${customerName}` : ''}${carrier ? ` from ${carrier}` : ''}${claimNumber ? `, claim ${claimNumber}` : ''}. I won’t attach or update records silently. Say “attach this to ${customerName || 'the customer'}” or “create a project from this document” if you want it connected to a file.`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], detectedCustomer: customerName ? { name: customerName, address } : null, suggestedActions: ['link_document_to_customer', 'create_project_from_document', 'get_document_content'] },
+    }
+  }
+
   if (category.includes('estimate') || category.includes('scope') || lineItems > 0 || total) {
     return {
       content: `Saved and analyzed ${filename}. It looks like an estimate/scope${customerName ? ` for ${customerName}` : ''}${address ? ` at ${address}` : ''}${lineItems ? ` with ${lineItems} extracted line item${lineItems === 1 ? '' : 's'}` : ''}${confidence !== null ? ` (${confidence}% confidence)` : ''}. I won’t attach or create records silently. Say “attach this to ${customerName || 'the customer'}”, “create a project from this document”, or “show the scope breakdown.”`,
