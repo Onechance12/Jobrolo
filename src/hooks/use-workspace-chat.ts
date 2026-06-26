@@ -2,6 +2,7 @@
 import { useCallback, useRef } from 'react'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
+import { attachmentFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
@@ -48,10 +49,37 @@ export function useWorkspaceChat() {
   const setStreamingText = useWorkspaceStore(s => s.setStreamingText)
   const clearStreamingText = useWorkspaceStore(s => s.clearStreamingText)
   const abortRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const currentJobIdRef = useRef<string | null>(null)
+
+  const stopWorkspaceMessage = useCallback(async () => {
+    abortRef.current = true
+    abortControllerRef.current?.abort()
+    const jobId = currentJobIdRef.current
+    const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
+    currentJobIdRef.current = null
+    if (jobId && workspaceId) {
+      await fetch(`/api/workspaces/${workspaceId}/chat/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      }).catch(() => null)
+    }
+    setTyping(false)
+    clearStreamingText()
+    addMessage({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: 'Stopped. Tell me what you want me to do next.',
+      createdAt: new Date().toISOString(),
+    })
+  }, [addMessage, clearStreamingText, setTyping])
 
   const sendWorkspaceMessage = useCallback(async ({ text, attachments = [] }: { text: string; attachments?: File[] }) => {
     if (!text.trim() && attachments.length === 0) return
     abortRef.current = false
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = new AbortController()
     const store = useWorkspaceStore.getState()
     const workspaceId = store.currentWorkspaceId
     const chatId = store.currentChatId
@@ -71,61 +99,51 @@ export function useWorkspaceChat() {
     let serverAttachments: MessageAttachment[] = []
     if (attachments.length > 0) {
       try {
-        const fd = new FormData()
-        for (const f of attachments) fd.append('files', f)
-        fd.append('workspaceId', workspaceId)
         const ws = store.getCurrentWorkspace()
-        if (ws?.projectId) fd.append('projectId', ws.projectId)
-        const ur = await fetch('/api/upload', { method: 'POST', body: fd })
+        const data = await uploadFilesSequentially(attachments, {
+          signal: abortControllerRef.current.signal,
+          fields: {
+            workspaceId,
+            ...(ws?.projectId ? { projectId: ws.projectId } : {}),
+          },
+        })
 
-        // If upload failed, show error and abort
-        if (!ur.ok) {
-          let errMsg = `Upload failed (HTTP ${ur.status})`
-          try { const e = await ur.json(); if (e.error) errMsg = e.error } catch {}
+        if (data.documents.length === 0) {
+          const errMsg = data.failures.map(f => `${f.fileName}: ${f.error}`).join('\n') || 'Upload failed before the server responded'
           addMessage({
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: `I couldn't process your file upload: ${errMsg}. Please try again.`,
+            content: `I couldn't save the upload yet: ${errMsg}. Try one smaller file first.`,
             createdAt: new Date().toISOString(),
           })
-          return  // ABORT
+          return
         }
 
-        const d = await ur.json()
-          uploadedDocIds = (d.documents || []).map((x: any) => x.id)
-          serverAttachments = (d.documents || []).map((x: any) => ({
-            type: x.fileType === 'photo' ? 'image' : 'file',
-            name: x.originalName,
-            url: x.url,
-            thumbnailUrl: x.thumbnailUrl ?? undefined,
-            mimeType: x.mimeType || (x.fileType === 'photo' ? 'image/jpeg' : 'application/octet-stream'),
-            size: x.size,
-            documentId: x.id,
-            documentStatus: x.status,
-            documentType: x.fileType,
-          }))
+          uploadedDocIds = data.documents.map(x => x.id)
+          serverAttachments = data.documents.map(attachmentFromDocument)
           updateLastMessage({ attachments: serverAttachments })
-          for (const doc of (d.documents || [])) {
-            if (doc.locationResolution) {
+          for (const doc of data.documents) {
+            const locationResolution = (doc as any).locationResolution
+            if (locationResolution) {
               addMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: doc.locationResolution.confidenceLabel === 'high'
+                content: locationResolution.confidenceLabel === 'high'
                   ? `I matched ${doc.originalName} to the most likely job-site location.`
                   : `I found a possible job-site match for ${doc.originalName}. Please confirm before attaching it.`,
                 contextType: 'location_confirmation',
-                contextData: { ...doc.locationResolution, documentId: doc.id, cardType: 'location_confirmation' },
+                contextData: { ...locationResolution, documentId: doc.id, cardType: 'location_confirmation' },
                 createdAt: new Date().toISOString(),
               })
             }
           }
-          if (d.needsLink && d.suggestedPrompt) {
+          if (data.needsLink && data.suggestedPrompt) {
             addMessage({
               id: crypto.randomUUID(),
               role: 'assistant',
-              content: d.suggestedPrompt,
+              content: data.suggestedPrompt,
               contextType: 'upload_link_prompt',
-              contextData: d.uploadContext,
+              contextData: data.uploadContext,
               createdAt: new Date().toISOString(),
             })
           }
@@ -133,7 +151,7 @@ export function useWorkspaceChat() {
 
           // Upload success means "file saved". Analysis runs in the background so
           // workspace chat can keep moving even if OCR/AI processing is slow.
-          const docs = d.documents || []
+          const docs = data.documents
           if (docs.length > 0) {
             updateMessage(userMessageId, {
               attachments: serverAttachments.map(a => ({
@@ -141,7 +159,7 @@ export function useWorkspaceChat() {
                 documentStatus: DOC_BACKGROUND_STATES.has(String(a.documentStatus)) ? 'queued' as const : a.documentStatus,
               })),
             })
-            if (!d.needsLink) {
+            if (!data.needsLink) {
               addMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
@@ -153,7 +171,16 @@ export function useWorkspaceChat() {
               for (const doc of docs) await pollDoc(doc.id, userMessageId)
             })().catch(err => console.error('[ws-chat] background document polling:', err))
           }
+          if (data.failures.length > 0) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: `I saved ${data.documents.length} file${data.documents.length === 1 ? '' : 's'}, but ${data.failures.length} failed:\n${data.failures.map(f => `• ${f.fileName}: ${f.error}`).join('\n')}`,
+              createdAt: new Date().toISOString(),
+            })
+          }
       } catch (e) {
+        if (abortRef.current) return
         console.error('[ws-chat] upload:', e)
         addMessage({
           id: crypto.randomUUID(),
@@ -177,11 +204,13 @@ export function useWorkspaceChat() {
       const res = await fetch(`/api/workspaces/${workspaceId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortControllerRef.current.signal,
         body: JSON.stringify({ chatId, message: fullMsg, documentIds: uploadedDocIds, history }),
       })
       if (!res.ok) throw new Error(res.status === 502 ? 'Server took too long.' : `HTTP ${res.status}`)
       const { jobId } = await res.json()
       if (!jobId) throw new Error('No jobId')
+      currentJobIdRef.current = jobId
       let thinkingSteps: any[] = []
       let lastCount = 0
       while (!abortRef.current) {
@@ -213,6 +242,7 @@ export function useWorkspaceChat() {
           break
         }
         if (data.status === 'error') throw new Error(data.error || 'Failed')
+        if (data.status === 'cancelled') break
       }
     } catch (err) {
       if (abortRef.current) return
@@ -235,9 +265,11 @@ export function useWorkspaceChat() {
         createdAt: new Date().toISOString(),
       })
     } finally {
+      currentJobIdRef.current = null
+      abortControllerRef.current = null
       setTyping(false); clearStreamingText(); abortRef.current = false
     }
   }, [addMessage, updateMessage, updateLastMessage, setTyping, setStreamingText, clearStreamingText])
 
-  return { sendWorkspaceMessage }
+  return { sendWorkspaceMessage, stopWorkspaceMessage }
 }

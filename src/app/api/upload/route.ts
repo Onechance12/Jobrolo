@@ -47,7 +47,8 @@ function storageKeyPrefix(input: { contractorId: string; documentId: string; pro
 }
 
 export async function POST(req: NextRequest) {
-  console.log('[upload] received')
+  const requestId = uuidv4().slice(0, 8)
+  console.log(`[upload] received requestId=${requestId} contentLength=${req.headers.get('content-length') || 'unknown'}`)
   try {
     const ctx = await requireContext(req).catch(e => e)
     if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
     const files = form.getAll('files').filter((value): value is File => value instanceof File)
     if (files.length === 0) return NextResponse.json({ error: 'No files uploaded' }, { status: 400 })
     if (files.length > MAX_FILES_PER_UPLOAD) return NextResponse.json({ error: `Maximum ${MAX_FILES_PER_UPLOAD} files per upload` }, { status: 400 })
+    console.log(`[upload] parsed requestId=${requestId} files=${files.length} totalBytes=${files.reduce((sum, f) => sum + f.size, 0)}`)
 
     const workspaceIdRaw = String(form.get('workspaceId') || '').trim()
     const projectIdRaw = String(form.get('projectId') || '').trim()
@@ -135,7 +137,7 @@ export async function POST(req: NextRequest) {
           customerId,
         },
       })
-      console.log(`[upload] saved document id=${document.id} file=${originalName}`)
+      console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
 
       try {
         await enqueueAgentJob({
@@ -146,7 +148,7 @@ export async function POST(req: NextRequest) {
           workspaceId,
           priority: 4,
         })
-        console.log(`[upload] queued analysis documentId=${document.id}`)
+        console.log(`[upload] queued analysis requestId=${requestId} documentId=${document.id}`)
       } catch (err) {
         console.error('[upload] queue analysis failed:', err)
       }
@@ -177,7 +179,7 @@ export async function POST(req: NextRequest) {
       } : {}),
     })
   } catch (err) {
-    console.error('[upload] failed:', err)
+    console.error(`[upload] failed requestId=${requestId}:`, err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Upload failed' }, { status: 500 })
   }
 }

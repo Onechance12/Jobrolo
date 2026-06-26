@@ -2,6 +2,7 @@
 import { useCallback, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
+import { attachmentFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
@@ -52,10 +53,38 @@ export function useChat() {
   const setConversations = useChatStore(s => s.setConversations)
   const clearUploadProgress = useChatStore(s => s.clearUploadProgress)
   const abortRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const currentJobIdRef = useRef<string | null>(null)
+
+  const stopMessage = useCallback(async () => {
+    abortRef.current = true
+    abortControllerRef.current?.abort()
+    const jobId = currentJobIdRef.current
+    currentJobIdRef.current = null
+    if (jobId) {
+      await fetch('/api/chat/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      }).catch(() => null)
+    }
+    setTyping(false)
+    setStreaming(false)
+    clearStreamingText()
+    clearUploadProgress()
+    addMessage({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: 'Stopped. Tell me what you want me to do next.',
+      createdAt: new Date().toISOString(),
+    })
+  }, [addMessage, clearStreamingText, clearUploadProgress, setStreaming, setTyping])
 
   const sendMessage = useCallback(async ({ text, attachments = [] }: { text: string; attachments?: File[] }) => {
     if (!text.trim() && attachments.length === 0) return
     abortRef.current = false
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = new AbortController()
     const store = useChatStore.getState()
     let activeConversationId = store.conversationId
     if (!activeConversationId) {
@@ -88,55 +117,35 @@ export function useChat() {
     let serverAttachments: MessageAttachment[] = []
     if (attachments.length > 0) {
       try {
-        const formData = new FormData()
-        for (const f of attachments) formData.append('files', f)
-        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
-
-        // If upload failed entirely, show error and abort — don't send an empty chat message
-        if (!uploadRes.ok) {
-          let errMsg = `Upload failed (HTTP ${uploadRes.status})`
-          try {
-            const errData = await uploadRes.json()
-            if (errData.error) errMsg = errData.error
-          } catch {}
+        const data = await uploadFilesSequentially(attachments, { signal: abortControllerRef.current.signal })
+        if (data.documents.length === 0) {
+          const errMsg = data.failures.map(f => `${f.fileName}: ${f.error}`).join('\n') || 'Upload failed before the server responded'
           console.error('[use-chat] upload failed:', errMsg)
-          // Update the user message to show the error
           updateMessage(userMessageId, { content: `${text}\n\n⚠️ Upload failed: ${errMsg}` })
-          // Add an assistant message explaining the failure
           addMessage({
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: `I couldn't process your file upload: ${errMsg}\n\nPlease try uploading the file again. If the problem persists, the file type may not be supported.`,
+            content: `I couldn't save the upload yet: ${errMsg}\n\nTry one smaller file first. If it still fails, I’ll need the Render upload logs for that exact attempt.`,
             createdAt: new Date().toISOString(),
           })
           clearUploadProgress()
-          return  // ← ABORT — don't send the chat message
+          return
         }
 
-        const data = await uploadRes.json()
-        uploadedDocIds = (data.documents || []).map((d: any) => d.id)
-        serverAttachments = (data.documents || []).map((d: any) => ({
-          type: d.fileType === 'photo' ? 'image' : 'file',
-          name: d.originalName,
-          url: d.url,
-          thumbnailUrl: d.thumbnailUrl ?? undefined,
-          mimeType: d.mimeType || (d.fileType === 'photo' ? 'image/jpeg' : 'application/octet-stream'),
-          size: d.size,
-          documentId: d.id,
-          documentStatus: d.status,
-          documentType: d.fileType,
-        }))
+        uploadedDocIds = data.documents.map(d => d.id)
+        serverAttachments = data.documents.map(attachmentFromDocument)
           updateMessage(userMessageId, { attachments: serverAttachments })
-          for (const doc of (data.documents || [])) {
-            if (doc.locationResolution) {
+          for (const doc of data.documents) {
+            const locationResolution = (doc as any).locationResolution
+            if (locationResolution) {
               addMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: doc.locationResolution.confidenceLabel === 'high'
+                content: locationResolution.confidenceLabel === 'high'
                   ? `I matched ${doc.originalName} to the most likely job-site location.`
                   : `I found a possible job-site match for ${doc.originalName}. Please confirm before attaching it.`,
                 contextType: 'location_confirmation',
-                contextData: { ...doc.locationResolution, documentId: doc.id, cardType: 'location_confirmation' },
+                contextData: { ...locationResolution, documentId: doc.id, cardType: 'location_confirmation' },
                 createdAt: new Date().toISOString(),
               })
             }
@@ -156,7 +165,7 @@ export function useChat() {
 
           // Upload success means "file saved". Analysis is intentionally background work.
           // Do not block the user's chat turn while OCR/AI processing catches up.
-          const docsNeedingAnalysis = data.documents || []
+          const docsNeedingAnalysis = data.documents
           if (docsNeedingAnalysis.length > 0) {
             updateMessage(userMessageId, {
               attachments: serverAttachments.map(a => ({
@@ -179,7 +188,16 @@ export function useChat() {
               }
             })().catch(err => console.error('[use-chat] background document polling:', err))
           }
+          if (data.failures.length > 0) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: `I saved ${data.documents.length} file${data.documents.length === 1 ? '' : 's'}, but ${data.failures.length} failed:\n${data.failures.map(f => `• ${f.fileName}: ${f.error}`).join('\n')}`,
+              createdAt: new Date().toISOString(),
+            })
+          }
       } catch (err) {
+        if (abortRef.current) return
         console.error('[use-chat] upload:', err)
         clearUploadProgress()
         // Show error to user
@@ -204,6 +222,7 @@ export function useChat() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortControllerRef.current.signal,
         body: JSON.stringify({
           message: fullMessage,
           conversationId: activeConversationId,
@@ -215,6 +234,7 @@ export function useChat() {
       if (!res.ok) throw new Error(res.status === 502 ? 'Server took too long. Try again.' : `HTTP ${res.status}`)
       const { jobId } = await res.json()
       if (!jobId) throw new Error('No jobId')
+      currentJobIdRef.current = jobId
       let thinkingSteps: any[] = []
       let lastCount = 0
       // First poll immediately, then every 1.5s
@@ -259,6 +279,7 @@ export function useChat() {
           break
         }
         if (data.status === 'error') throw new Error(data.error || 'Failed')
+        if (data.status === 'cancelled') break
       }
     } catch (err) {
       if (abortRef.current) return
@@ -282,9 +303,11 @@ export function useChat() {
         createdAt: new Date().toISOString(),
       })
     } finally {
+      currentJobIdRef.current = null
+      abortControllerRef.current = null
       setTyping(false); setStreaming(false); clearStreamingText(); clearUploadProgress(); abortRef.current = false
     }
   }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, refreshBusinessContext, clearUploadProgress])
 
-  return { sendMessage }
+  return { sendMessage, stopMessage }
 }

@@ -48,8 +48,8 @@ export default function Page() {
   const exitWorkspace = useWorkspaceStore(s => s.exitWorkspace)
   const enterWorkspace = useWorkspaceStore(s => s.enterWorkspace)
 
-  const { sendMessage } = useChat()
-  const { sendWorkspaceMessage } = useWorkspaceChat()
+  const { sendMessage, stopMessage } = useChat()
+  const { sendWorkspaceMessage, stopWorkspaceMessage } = useWorkspaceChat()
   const tts = useTTS({ autoPlay: true })
 
   const isInWorkspace = !!currentWorkspaceId && !!currentChatId
@@ -180,6 +180,10 @@ export default function Page() {
   const handleSend = useCallback((args: { text: string; attachments?: File[] }) => {
     isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
   }, [isInWorkspace, sendWorkspaceMessage, sendMessage])
+
+  const handleStop = useCallback(() => {
+    isInWorkspace ? stopWorkspaceMessage() : stopMessage()
+  }, [isInWorkspace, stopMessage, stopWorkspaceMessage])
 
   const appendProactiveMessages = useCallback((newMessages: ClientMessage[]) => {
     if (!newMessages.length) return
@@ -468,7 +472,9 @@ export default function Page() {
         <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
           <ChatInput
             onSend={handleSend}
+            onStop={handleStop}
             disabled={inputDisabled}
+            isWorking={isAIWorking}
             placeholder={isInWorkspace ? 'Message Jobrolo about this job…' : 'Message Jobrolo…'}
           />
         </div>

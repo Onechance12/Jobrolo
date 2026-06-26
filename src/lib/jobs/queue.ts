@@ -130,6 +130,27 @@ export async function processJobById(jobId: string, retryCount = 0) {
   }
 }
 
+export async function cancelJob(jobId: string, contractorId: string, reason = 'Cancelled by user') {
+  const result = await db.agentJob.updateMany({
+    where: {
+      id: jobId,
+      contractorId,
+      status: { in: ['queued', 'processing'] },
+    },
+    data: {
+      status: 'cancelled',
+      heartbeat: 'Stopped',
+      error: reason.slice(0, 500),
+      completedAt: new Date(),
+    },
+  })
+  return result.count > 0
+}
+
+export async function isJobCancelled(jobId: string) {
+  const job = await db.agentJob.findUnique({ where: { id: jobId }, select: { status: true } })
+  return job?.status === 'cancelled'
+}
 
 export async function processQueuedAgentJobs(limit = 5) {
   const staleCutoff = new Date(Date.now() - STALE_JOB_TIMEOUT_MS)
@@ -162,7 +183,7 @@ export async function processQueuedAgentJobs(limit = 5) {
 // Heartbeat helper (called by worker during long operations)
 export async function heartbeat(jobId: string, message: string) {
   try {
-    await db.agentJob.update({ where: { id: jobId }, data: { heartbeat: message } })
+    await db.agentJob.updateMany({ where: { id: jobId, NOT: { status: 'cancelled' } }, data: { heartbeat: message } })
   } catch {}
 }
 
@@ -172,14 +193,14 @@ export async function appendThinking(jobId: string, step: Record<string, unknown
     const job = await db.agentJob.findUnique({ where: { id: jobId }, select: { thinkingJson: true } })
     const arr = job?.thinkingJson ? JSON.parse(job.thinkingJson) : []
     arr.push(step)
-    await db.agentJob.update({ where: { id: jobId }, data: { thinkingJson: JSON.stringify(arr), heartbeat: step.text ?? 'Working...' } })
+    await db.agentJob.updateMany({ where: { id: jobId, NOT: { status: 'cancelled' } }, data: { thinkingJson: JSON.stringify(arr), heartbeat: step.text ?? 'Working...' } })
   } catch {}
 }
 
 export async function completeJob(jobId: string, output: Record<string, unknown>) {
   try {
-    await db.agentJob.update({
-      where: { id: jobId },
+    await db.agentJob.updateMany({
+      where: { id: jobId, NOT: { status: 'cancelled' } },
       data: {
         status: 'done',
         outputJson: JSON.stringify(output),
@@ -192,8 +213,8 @@ export async function completeJob(jobId: string, output: Record<string, unknown>
 
 export async function failJob(jobId: string, error: string) {
   try {
-    await db.agentJob.update({
-      where: { id: jobId },
+    await db.agentJob.updateMany({
+      where: { id: jobId, NOT: { status: 'cancelled' } },
       data: { status: 'error', error: error.slice(0, 2000), completedAt: new Date() },
     })
   } catch {}

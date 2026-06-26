@@ -1,13 +1,13 @@
 'use client'
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Keyboard } from 'lucide-react'
+import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square } from 'lucide-react'
 import { cn, formatFileSize, isImageFile } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 
-interface Props { onSend: (args: { text: string; attachments?: File[] }) => void; disabled?: boolean; placeholder?: string }
+interface Props { onSend: (args: { text: string; attachments?: File[] }) => void; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
 const SUGGESTIONS = ['What am I forgetting?', "What's on my plate?", 'Show open jobs']
 
-export function ChatInput({ onSend, disabled, placeholder }: Props) {
+export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: Props) {
   const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
@@ -37,8 +37,17 @@ export function ChatInput({ onSend, disabled, placeholder }: Props) {
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[180px]"><button onClick={() => cameraInputRef.current?.click()} className="w-full flex items-center gap-2.5 px-3 py-3 text-sm text-foreground hover:bg-muted/50 min-h-[44px]"><Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" /><span><div className="font-medium">Take photo</div><div className="text-[10px] text-muted-foreground/60">Field photos</div></span></button><button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center gap-2.5 px-3 py-3 text-sm text-foreground hover:bg-muted/50 min-h-[44px]"><Paperclip className="w-5 h-5 text-muted-foreground" /><span><div className="font-medium">Attach file</div><div className="text-[10px] text-muted-foreground/60">PDFs, docs, images</div></span></button></div></>)}
         </div>
         <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder ?? 'Message Jobrolo…'} rows={1} disabled={disabled} suppressHydrationWarning className="flex-1 resize-none bg-muted/50 border border-border rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50 max-h-40 min-h-[44px]" />
-        {speechSupported && <button onClick={startListening} disabled={disabled} className={cn('flex-shrink-0 rounded-full transition-all min-w-[52px] min-h-[52px] flex items-center justify-center', listening ? 'bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/40' : 'bg-blue-600 text-white hover:bg-blue-700', disabled && 'opacity-50')} aria-label={listening ? 'Stop' : 'Hold to talk'}><Mic className="w-5 h-5" /></button>}
-        {(text.trim() || pendingFiles.length > 0) && !listening && <button onClick={handleSend} disabled={disabled} className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"><Send className="w-4 h-4" /></button>}
+        {isWorking && onStop ? (
+          <button onClick={onStop} className="flex-shrink-0 rounded-lg bg-rose-600 text-white hover:bg-rose-700 min-w-[52px] min-h-[52px] flex items-center justify-center gap-1.5 px-3" aria-label="Stop Jobrolo">
+            <Square className="w-4 h-4 fill-current" />
+            <span className="hidden sm:inline text-sm font-medium">Stop</span>
+          </button>
+        ) : (
+          <>
+            {speechSupported && <button onClick={startListening} disabled={disabled} className={cn('flex-shrink-0 rounded-full transition-all min-w-[52px] min-h-[52px] flex items-center justify-center', listening ? 'bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/40' : 'bg-blue-600 text-white hover:bg-blue-700', disabled && 'opacity-50')} aria-label={listening ? 'Stop' : 'Hold to talk'}><Mic className="w-5 h-5" /></button>}
+            {(text.trim() || pendingFiles.length > 0) && !listening && <button onClick={handleSend} disabled={disabled} className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"><Send className="w-4 h-4" /></button>}
+          </>
+        )}
       </div>
       <input ref={fileInputRef} type="file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" className="hidden" onChange={e => handleFiles(e.target.files)} />
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleFiles(e.target.files)} />
