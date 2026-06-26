@@ -63,6 +63,7 @@ export function useWorkspaceChat() {
   const addMessage = useWorkspaceStore(s => s.addMessage)
   const updateMessage = useWorkspaceStore(s => s.updateMessage)
   const updateLastMessage = useWorkspaceStore(s => s.updateLastMessage)
+  const setWorkspaces = useWorkspaceStore(s => s.setWorkspaces)
   const setTyping = useWorkspaceStore(s => s.setTyping)
   const setStreamingText = useWorkspaceStore(s => s.setStreamingText)
   const clearStreamingText = useWorkspaceStore(s => s.clearStreamingText)
@@ -292,6 +293,13 @@ export function useWorkspaceChat() {
             thinking: thinkingSteps.length > 0 ? thinkingSteps : undefined,
             createdAt: new Date().toISOString(),
           })
+          try {
+            const dataRes = await fetch('/api/data')
+            if (dataRes.ok) {
+              const data = await dataRes.json()
+              if (Array.isArray(data.workspaces)) setWorkspaces(data.workspaces)
+            }
+          } catch {}
           break
         }
         if (data.status === 'error') throw new Error(data.error || 'Failed')
@@ -323,7 +331,7 @@ export function useWorkspaceChat() {
       setTyping(false); clearStreamingText(); abortRef.current = false
     }
     return { ok: true }
-  }, [addMessage, updateMessage, updateLastMessage, setTyping, setStreamingText, clearStreamingText])
+  }, [addMessage, updateMessage, updateLastMessage, setWorkspaces, setTyping, setStreamingText, clearStreamingText])
 
   return { sendWorkspaceMessage, stopWorkspaceMessage }
 }

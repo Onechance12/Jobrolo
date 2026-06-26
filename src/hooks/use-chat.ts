@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
+import { useWorkspaceStore } from '@/store/workspace-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
 import { attachmentFromDocument, uploadAnalysisFollowupFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
 import { serializeMessagesForAgentHistory } from '@/hooks/chat-history'
@@ -70,6 +71,7 @@ export function useChat() {
   const refreshBusinessContext = useChatStore(s => s.refreshBusinessContext)
   const setConversations = useChatStore(s => s.setConversations)
   const clearUploadProgress = useChatStore(s => s.clearUploadProgress)
+  const setWorkspaces = useWorkspaceStore(s => s.setWorkspaces)
   const abortRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const currentJobIdRef = useRef<string | null>(null)
@@ -329,10 +331,18 @@ export function useChat() {
             store.setConversationId(result.conversationId)
           }
           try {
-            const cr = await fetch('/api/conversations')
-            if (cr.ok) {
+            const [cr, dataRes] = await Promise.all([
+              fetch('/api/conversations').catch(() => null),
+              fetch('/api/data').catch(() => null),
+            ])
+            if (cr?.ok) {
               const cd = await cr.json()
               setConversations(cd.conversations || [])
+            }
+            if (dataRes?.ok) {
+              const data = await dataRes.json()
+              if (Array.isArray(data.workspaces)) setWorkspaces(data.workspaces)
+              if (data.businessContext) useChatStore.getState().setBusinessContext?.(data.businessContext)
             }
           } catch {}
           break
@@ -367,7 +377,7 @@ export function useChat() {
       setTyping(false); setStreaming(false); clearStreamingText(); clearUploadProgress(); abortRef.current = false
     }
     return { ok: true }
-  }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, refreshBusinessContext, clearUploadProgress])
+  }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, setWorkspaces, refreshBusinessContext, clearUploadProgress])
 
   return { sendMessage, stopMessage }
 }

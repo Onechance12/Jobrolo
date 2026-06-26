@@ -107,6 +107,19 @@ function workspaceChatUrl(workspaceId?: string | null, chatId?: string | null) {
   return `${appBaseUrl()}/?${params.toString()}`
 }
 
+async function ensureWorkspaceMember(workspaceId: string | null | undefined, ctx: ToolContext) {
+  if (!workspaceId || !ctx.userId) return null
+  const role = normalizeRole(ctx.userRole)
+  return db.workspaceMember.upsert({
+    where: { workspaceId_userId: { workspaceId, userId: ctx.userId } },
+    update: { role, permissions: 'read,write' },
+    create: { workspaceId, userId: ctx.userId, role, permissions: 'read,write' },
+  }).catch(err => {
+    console.warn(`[tools-v2] ensureWorkspaceMember failed workspaceId=${workspaceId} userId=${ctx.userId}:`, err)
+    return null
+  })
+}
+
 function withCustomerNumber<T extends { id?: string | null }>(customer: T): T & { clientNumber: string | null; customerNumber: string | null } {
   const number = customerNumber(customer)
   return { ...customer, clientNumber: number, customerNumber: number }
@@ -702,6 +715,8 @@ async function createProjectRecordForCustomer(contractorId: string, ctx: ToolCon
       },
     },
   }).catch(() => null)
+
+  await ensureWorkspaceMember(workspace?.id, ctx)
 
   await createProjectTimelineEvent({
     contractorId,
@@ -1893,6 +1908,7 @@ export const TOOLS: ToolDef[] = [
           select: { id: true },
         })
       }
+      await ensureWorkspaceMember(workspace.id, ctx)
 
       const defaultTitle = args.title || `${args.chatType.charAt(0).toUpperCase()}${args.chatType.slice(1)}`
       const chat = await db.workspaceChat.upsert({
