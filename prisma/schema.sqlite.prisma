@@ -725,6 +725,31 @@ model UsageRecord {
   @@index([contractorId, metric, bucket])
 }
 
+model AIUsageLog {
+  id             String   @id @default(cuid())
+  contractorId   String
+  userId         String?
+  customerId     String?
+  projectId      String?
+  documentId     String?
+  purpose        String
+  provider       String
+  model          String
+  inputTokens    Int?
+  outputTokens   Int?
+  totalTokens    Int?
+  imageCount     Int      @default(0)
+  webSearchCalls Int      @default(0)
+  estimatedCost  Float?
+  success        Boolean  @default(true)
+  error          String?
+  createdAt      DateTime @default(now())
+
+  @@index([contractorId, createdAt])
+  @@index([contractorId, purpose, createdAt])
+  @@index([documentId])
+}
+
 // --- Onboarding Sessions (agent-driven) -------------------------------------
 
 model OnboardingSession {
@@ -1816,4 +1841,3 @@ model StreetResearchRun {
   @@index([contractorId, userId, status])
   @@index([contractorId, focusMode])
 }
-

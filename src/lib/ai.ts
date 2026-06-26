@@ -13,6 +13,7 @@
 // =============================================================================
 
 import ZAI from 'z-ai-web-dev-sdk'
+import { logAIUsage, type AIUsagePurpose } from '@/lib/ai-usage'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -21,6 +22,23 @@ export interface ChatMessage {
 
 export interface ChatOptions {
   temperature?: number
+  maxTokens?: number
+  purpose?: AIUsagePurpose
+  contractorId?: string | null
+  userId?: string | null
+  customerId?: string | null
+  projectId?: string | null
+  documentId?: string | null
+}
+
+export interface VisionOptions {
+  purpose?: AIUsagePurpose
+  contractorId?: string | null
+  userId?: string | null
+  customerId?: string | null
+  projectId?: string | null
+  documentId?: string | null
+  detail?: 'low' | 'high' | 'auto'
   maxTokens?: number
 }
 
@@ -63,10 +81,14 @@ async function imageInputFromLocalReference(imageRef: string): Promise<string | 
 
 type Provider = 'z-ai' | 'openai-compatible'
 
-function getProvider(): Provider {
+export function getConfiguredProviderName(): Provider {
   const p = process.env.LLM_PROVIDER || 'z-ai'
   if (p === 'openai-compatible' || p === 'openai') return 'openai-compatible'
   return 'z-ai'
+}
+
+function getProvider(): Provider {
+  return getConfiguredProviderName()
 }
 
 // ---------------------------------------------------------------------------
@@ -109,38 +131,84 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
     messages: messages.length,
   })
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      ...(process.env.LLM_API_LAYER_SUBSCRIPTION_KEY
-        ? { 'apikey': process.env.LLM_API_LAYER_SUBSCRIPTION_KEY }
-        : {}),
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: opts.temperature ?? 0.3,
-      max_tokens: opts.maxTokens ?? 2000,
-      stream: false,
-    }),
-  })
+  let data: any = null
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        ...(process.env.LLM_API_LAYER_SUBSCRIPTION_KEY
+          ? { 'apikey': process.env.LLM_API_LAYER_SUBSCRIPTION_KEY }
+          : {}),
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: opts.temperature ?? 0.3,
+        max_tokens: opts.maxTokens ?? 2000,
+        stream: false,
+      }),
+    })
 
-  console.log('[ai] openai-compatible response', {
+    console.log('[ai] openai-compatible response', {
+      provider: 'openai-compatible',
+      model,
+      status: res.status,
+      ok: res.ok,
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      const error = `LLM API error ${res.status}: ${errText.slice(0, 200)}`
+      await logAIUsage({
+        contractorId: opts.contractorId,
+        userId: opts.userId,
+        customerId: opts.customerId,
+        projectId: opts.projectId,
+        documentId: opts.documentId,
+        purpose: opts.purpose ?? 'chat',
+        provider: 'openai-compatible',
+        model,
+        success: false,
+        error,
+      })
+      throw new Error(error)
+    }
+
+    data = await res.json()
+  } catch (err) {
+    if (!data) {
+      await logAIUsage({
+        contractorId: opts.contractorId,
+        userId: opts.userId,
+        customerId: opts.customerId,
+        projectId: opts.projectId,
+        documentId: opts.documentId,
+        purpose: opts.purpose ?? 'chat',
+        provider: 'openai-compatible',
+        model,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+    throw err
+  }
+  const content = data.choices?.[0]?.message?.content ?? ''
+  await logAIUsage({
+    contractorId: opts.contractorId,
+    userId: opts.userId,
+    customerId: opts.customerId,
+    projectId: opts.projectId,
+    documentId: opts.documentId,
+    purpose: opts.purpose ?? 'chat',
     provider: 'openai-compatible',
     model,
-    status: res.status,
-    ok: res.ok,
+    inputTokens: data.usage?.prompt_tokens ?? null,
+    outputTokens: data.usage?.completion_tokens ?? null,
+    totalTokens: data.usage?.total_tokens ?? null,
+    success: true,
   })
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    throw new Error(`LLM API error ${res.status}: ${errText.slice(0, 200)}`)
-  }
-
-  const data = await res.json()
-  const content = data.choices?.[0]?.message?.content ?? ''
   console.log('[ai] openai-compatible response preview', {
     provider: 'openai-compatible',
     model,
@@ -153,12 +221,14 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
 // Vision (image analysis) — supports both providers
 // ---------------------------------------------------------------------------
 
-export async function analyzeImage(imageUrl: string, prompt: string): Promise<string> {
+export async function analyzeImage(imageUrl: string, prompt: string, opts: VisionOptions = {}): Promise<string> {
   const provider = getProvider()
 
   if (provider === 'openai-compatible') {
-    return await openaiCompatibleVision(imageUrl, prompt)
+    console.log('[ai-provider] using openai-compatible for image analysis')
+    return await openaiCompatibleVision(imageUrl, prompt, opts)
   }
+  console.log('[ai-provider] using z-ai for image analysis')
   return await zaiVision(imageUrl, prompt)
 }
 
@@ -181,10 +251,10 @@ async function zaiVision(imageUrl: string, prompt: string): Promise<string> {
   }
 }
 
-async function openaiCompatibleVision(imageUrl: string, prompt: string): Promise<string> {
+async function openaiCompatibleVision(imageUrl: string, prompt: string, opts: VisionOptions): Promise<string> {
   try {
     const apiKey = process.env.LLM_API_KEY
-    const baseUrl = process.env.LLM_BASE_URL || 'https://api.openai.com/v1'
+    const baseUrl = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '')
     const model = process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini'
     if (!apiKey) return ''
 
@@ -201,6 +271,9 @@ async function openaiCompatibleVision(imageUrl: string, prompt: string): Promise
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        ...(process.env.LLM_API_LAYER_SUBSCRIPTION_KEY
+          ? { 'apikey': process.env.LLM_API_LAYER_SUBSCRIPTION_KEY }
+          : {}),
       },
       body: JSON.stringify({
         model,
@@ -208,18 +281,47 @@ async function openaiCompatibleVision(imageUrl: string, prompt: string): Promise
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: imageInput } },
+            { type: 'image_url', image_url: { url: imageInput, detail: opts.detail ?? 'low' } },
           ],
         }],
-        max_tokens: 1000,
+        max_tokens: opts.maxTokens ?? 1000,
       }),
     })
 
     if (!res.ok) {
+      const errText = await res.text().catch(() => '')
       console.error('[ai] vision error:', res.status)
+      await logAIUsage({
+        contractorId: opts.contractorId,
+        userId: opts.userId,
+        customerId: opts.customerId,
+        projectId: opts.projectId,
+        documentId: opts.documentId,
+        purpose: opts.purpose ?? 'image_analysis',
+        provider: 'openai-compatible',
+        model,
+        imageCount: 1,
+        success: false,
+        error: `vision error ${res.status}: ${errText.slice(0, 200)}`,
+      })
       return ''
     }
     const data = await res.json()
+    await logAIUsage({
+      contractorId: opts.contractorId,
+      userId: opts.userId,
+      customerId: opts.customerId,
+      projectId: opts.projectId,
+      documentId: opts.documentId,
+      purpose: opts.purpose ?? 'image_analysis',
+      provider: 'openai-compatible',
+      model,
+      inputTokens: data.usage?.prompt_tokens ?? null,
+      outputTokens: data.usage?.completion_tokens ?? null,
+      totalTokens: data.usage?.total_tokens ?? null,
+      imageCount: 1,
+      success: true,
+    })
     return data.choices?.[0]?.message?.content ?? ''
   } catch (err) {
     console.error('[ai] vision error:', err)
@@ -237,6 +339,7 @@ export async function chatComplete(messages: ChatMessage[], opts?: ChatOptions):
     provider,
     model: provider === 'openai-compatible' ? (process.env.LLM_MODEL || 'gpt-4o-mini') : 'z-ai-default',
   })
+  console.log(`[ai-provider] using ${provider} for ${opts?.purpose === 'tool_reasoning' ? 'tool-call reasoning' : 'chat'}`)
 
   if (provider === 'openai-compatible') {
     return await openaiCompatibleChatComplete(messages, opts || {})
@@ -246,11 +349,19 @@ export async function chatComplete(messages: ChatMessage[], opts?: ChatOptions):
 
 export async function getAI() {
   // Backward compat — returns the z-ai instance for code that needs it directly
+  if (getProvider() === 'openai-compatible') {
+    console.warn('[ai-provider] z-ai skipped because openai-compatible is configured; use chatComplete/analyzeImage instead of getAI()')
+  }
   return await getZai()
 }
 
-// Streaming (z-ai only for now — openai-compatible streaming would need SSE parsing)
 export async function* streamChat(messages: ChatMessage[], opts?: ChatOptions): AsyncGenerator<string, string, unknown> {
+  if (getProvider() === 'openai-compatible') {
+    const content = await openaiCompatibleChatComplete(messages, opts || {})
+    yield content
+    return content
+  }
+
   const ai = await getZai()
   let fullText = ''
   const stream: any = await ai.chat.completions.create({

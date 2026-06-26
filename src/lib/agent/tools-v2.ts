@@ -13,7 +13,10 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import type { ChannelType } from '@/lib/types'
-import { ROOFING_SYNONYMS } from '@/lib/specialized-parsers'
+import { parseXactimateLineItems, ROOFING_SYNONYMS } from '@/lib/specialized-parsers'
+import { parseScope } from '@/lib/scope-parser'
+import { saveFile } from '@/lib/storage'
+import { initScopeAnalysis } from '@/lib/scope-manager'
 import { toFileUrl, toThumbnailUrl } from '@/lib/file-url'
 import { getProjectContextByContractor, getProjectDocumentPacket, linkDocumentToJobPacket, createProjectTimelineEvent, getProjectTimeline, getContractorOcrReviewQueue } from '@/lib/project-context'
 import { buildProjectMergeData, getOrCreateContractorProfile, mergeTemplateVariables, publicContractorProfile, upsertContractorProfile } from '@/lib/contractor-profile'
@@ -103,6 +106,58 @@ function customerSearchTerms(query: string) {
     }
   }
   return [...terms].slice(0, 8)
+}
+
+function normalizeMaterialItems(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item: any) => ({
+      name: String(item?.name ?? '').trim(),
+      sku: item?.sku ? String(item.sku).trim() : null,
+      category: item?.category ? String(item.category).trim() : 'other',
+      unit: item?.unit ? String(item.unit).trim() : 'EA',
+      unitCost: Number(item?.unitCost ?? item?.unitPrice ?? item?.cost ?? 0),
+    }))
+    .filter(item => item.name && Number.isFinite(item.unitCost) && item.unitCost >= 0)
+}
+
+function numberFromMoney(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const parsed = Number(String(value ?? '').replace(/[$,()<>\s]/g, ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function scopeLineItemsFromText(rawText: string) {
+  const xactimate = parseXactimateLineItems(rawText)
+  if (xactimate.length > 0) {
+    return xactimate.map(li => ({
+      code: li.lineNumber,
+      description: li.description,
+      quantity: li.quantity,
+      unit: li.unit,
+      unitPrice: li.unitPrice,
+      total: li.rcv,
+      rcv: li.rcv,
+      acv: li.acv,
+      depreciation: li.depreciation,
+      trade: li.trade,
+      category: li.category,
+    }))
+  }
+  const parsed = parseScope(rawText)
+  return parsed.lineItems.map(li => ({
+    code: li.lineNumber,
+    description: li.description,
+    quantity: numberFromMoney(li.quantity),
+    unit: li.unit || null,
+    unitPrice: numberFromMoney(li.unitPrice),
+    total: numberFromMoney(li.rcv),
+    rcv: numberFromMoney(li.rcv),
+    acv: numberFromMoney(li.acv),
+    depreciation: numberFromMoney(li.depreciation),
+    trade: li.trade,
+    category: li.category,
+  }))
 }
 
 function compactDocument(d: { id: string; originalName: string; fileType: string; status: string; mimeType: string; size: number; filePath: string; thumbnailPath: string | null; aiSummary: string | null; customerId: string | null; projectId: string | null; workspaceId: string | null; createdAt: Date }) {
@@ -460,10 +515,17 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'get_customer_file',
     description: 'Resolve a customer by name, first/last name, phone, email, or address and return the saved customer file: customer details, projects/jobs, workspaces/chats, documents/photos, notes, tasks, and recent unlinked uploads. Use for "Timothy’s file", "show what is actually saved", "pull the job packet", or "what do we have on this customer".',
-    schema: z.object({ query: z.string().min(1).max(300) }),
+    schema: z.object({
+      query: z.string().max(300).optional(),
+      name: z.string().max(300).optional(),
+      phone: z.string().max(80).optional(),
+      email: z.string().max(200).optional(),
+      address: z.string().max(500).optional(),
+    }).refine(v => Boolean(v.query || v.name || v.phone || v.email || v.address), 'Provide name, phone, email, address, or query'),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
-      const terms = customerSearchTerms(args.query)
+      const rawQuery = args.query || [args.name, args.phone, args.email, args.address].filter(Boolean).join(' ')
+      const terms = customerSearchTerms(rawQuery)
       if (terms.length === 0) return { success: false, data: null, error: 'Customer search query required' }
 
       const customers = await db.customer.findMany({
@@ -474,6 +536,9 @@ export const TOOLS: ToolDef[] = [
             { phone: { contains: term } },
             { email: { contains: term } },
             { address: { contains: term } },
+            ...(args.phone ? [{ phone: { contains: args.phone } }] : []),
+            ...(args.email ? [{ email: { contains: args.email } }] : []),
+            ...(args.address ? [{ address: { contains: args.address } }] : []),
           ]),
         },
         orderBy: { updatedAt: 'desc' },
@@ -486,16 +551,23 @@ export const TOOLS: ToolDef[] = [
           success: true,
           data: {
             found: false,
-            query: args.query,
-            normalizedQuery: normalizeCustomerFileQuery(args.query),
+            query: rawQuery,
+            normalizedQuery: normalizeCustomerFileQuery(rawQuery),
             searchedTerms: terms,
-            message: 'No saved customer matched exact, name, phone, email, or address fallback searches.',
+            message: `No saved customer record found for ${rawQuery}.`,
           },
         }
       }
 
-      const normalized = normalizeCustomerFileQuery(args.query).toLowerCase()
-      const exact = customers.find(c => c.name.toLowerCase() === normalized || c.email?.toLowerCase() === normalized || c.phone === normalized)
+      const normalized = normalizeCustomerFileQuery(rawQuery).toLowerCase()
+      const exact = customers.find(c =>
+        c.name.toLowerCase() === normalized ||
+        c.email?.toLowerCase() === normalized ||
+        c.phone === normalized ||
+        Boolean(args.email && c.email?.toLowerCase() === args.email.toLowerCase()) ||
+        Boolean(args.phone && c.phone === args.phone) ||
+        Boolean(args.address && c.address?.toLowerCase().includes(args.address.toLowerCase()))
+      )
       const customer = exact ?? customers[0]
       if (!exact && customers.length > 1) {
         return {
@@ -503,8 +575,8 @@ export const TOOLS: ToolDef[] = [
           data: {
             found: true,
             needsClarification: true,
-            query: args.query,
-            normalizedQuery: normalizeCustomerFileQuery(args.query),
+            query: rawQuery,
+            normalizedQuery: normalizeCustomerFileQuery(rawQuery),
             matches: customers.map(c => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, address: c.address })),
             message: 'Multiple saved customers matched. Ask the user which customer file to open before making changes.',
           },
@@ -576,8 +648,8 @@ export const TOOLS: ToolDef[] = [
         success: true,
         data: {
           found: true,
-          query: args.query,
-          normalizedQuery: normalizeCustomerFileQuery(args.query),
+          query: rawQuery,
+          normalizedQuery: normalizeCustomerFileQuery(rawQuery),
           searchedTerms: terms,
           customer,
           counts: {
@@ -690,6 +762,165 @@ export const TOOLS: ToolDef[] = [
           linkedDocuments: linkedDocs,
         },
       }
+    },
+  },
+  {
+    name: 'create_scope_from_text',
+    description: 'Save pasted scope/estimate text as a real Document and ScopeAnalysis linked to a customer/project. Use when the user pastes scope text and asks to save it, create a scope breakdown, or attach it to a customer/job file.',
+    schema: z.object({
+      customerName: z.string().max(300).optional(),
+      customerId: z.string().max(200).optional(),
+      projectId: z.string().max(200).optional(),
+      rawText: z.string().min(20).max(120000),
+      source: z.enum(['pasted', 'extracted', 'uploaded']).optional(),
+      title: z.string().max(300).optional(),
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'insurance'],
+    execute: async (args, contractorId, ctx) => {
+      let customerId = args.customerId || undefined
+      let projectId = args.projectId || undefined
+      let customer: { id: string; name: string; address: string | null } | null = null
+      let project: { id: string; title: string; customerId: string | null; address: string | null } | null = null
+
+      if (!customerId && args.customerName) {
+        const matches = await db.customer.findMany({
+          where: { contractorId, name: { contains: normalizeCustomerFileQuery(args.customerName) || args.customerName } },
+          take: 3,
+          select: { id: true, name: true, address: true },
+        })
+        if (matches.length === 0) return { success: true, data: { needsCustomer: true, message: `No saved customer found for ${args.customerName}. Create or select a customer before saving this scope.` } }
+        if (matches.length > 1) return { success: true, data: { needsClarification: true, matches, message: `Multiple customers matched ${args.customerName}. Which customer should this scope attach to?` } }
+        customer = matches[0]
+        customerId = customer.id
+      }
+
+      if (projectId) {
+        const p = await db.project.findFirst({ where: { contractorId, id: projectId }, select: { id: true, title: true, customerId: true, address: true } })
+        if (!p) return { success: false, data: null, error: 'Project not found' }
+        project = p
+        customerId = customerId ?? p.customerId ?? undefined
+      } else if (customerId) {
+        customer = customer ?? await db.customer.findFirst({ where: { contractorId, id: customerId }, select: { id: true, name: true, address: true } })
+        if (!customer) return { success: false, data: null, error: 'Customer not found' }
+        const projects = await db.project.findMany({
+          where: { contractorId, customerId, status: { not: 'closed' } },
+          orderBy: { updatedAt: 'desc' },
+          take: 3,
+          select: { id: true, title: true, customerId: true, address: true },
+        })
+        if (projects.length === 0) {
+          return { success: true, data: { needsProject: true, customer, message: `No active project/job exists for ${customer.name}. Ask whether to create a project before saving this scope.` } }
+        }
+        if (projects.length > 1) {
+          return { success: true, data: { needsClarification: true, customer, projects, message: `Multiple active projects found for ${customer.name}. Which project should this scope attach to?` } }
+        }
+        project = projects[0]
+        projectId = project.id
+      } else {
+        return { success: true, data: { needsCustomer: true, message: 'Which customer or project should I attach this pasted scope to?' } }
+      }
+
+      const title = args.title?.trim() || `Pasted scope${customer?.name ? ` - ${customer.name}` : ''}`
+      const saved = await saveFile({
+        buffer: Buffer.from(args.rawText, 'utf8'),
+        filename: `${title.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 80) || 'pasted-scope'}.txt`,
+        mimeType: 'text/plain',
+        directory: 'docs',
+      })
+      const lineItems = scopeLineItemsFromText(args.rawText)
+      const extractedData = {
+        source: args.source ?? 'pasted',
+        title,
+        lineItems,
+        rawLength: args.rawText.length,
+        reviewNotes: lineItems.length ? [] : ['No structured line items were parsed. Review the pasted text manually.'],
+      }
+      const document = await db.document.create({
+        data: {
+          contractorId,
+          uploadedById: ctx.userId ?? null,
+          filename: saved.filename,
+          originalName: `${title}.txt`,
+          mimeType: 'text/plain',
+          size: saved.size,
+          filePath: saved.filePath,
+          fileType: 'scope_of_loss',
+          status: lineItems.length ? 'reviewed' : 'needs_review',
+          customerId,
+          projectId,
+          extractedData: JSON.stringify(extractedData),
+          embeddedText: args.rawText.slice(0, 100000),
+          ocrText: args.rawText.slice(0, 100000),
+          extractionMethod: 'text_direct',
+          extractionConfidence: lineItems.length ? 85 : 45,
+          aiSummary: `${lineItems.length} scope line item(s) parsed from pasted text.`,
+          aiCategory: 'scope_of_loss',
+        },
+      })
+      const scope = await initScopeAnalysis(document.id, contractorId)
+      if (!scope) {
+        return { success: true, data: { saved: true, needsReview: true, documentId: document.id, projectId, customerId, lineItemCount: lineItems.length, message: 'The pasted scope was saved as a document, but no ScopeAnalysis could be initialized from the parsed line items.' } }
+      }
+      return {
+        success: true,
+        data: {
+          saved: true,
+          documentId: document.id,
+          scopeAnalysisCreated: true,
+          projectId,
+          customerId,
+          lineItemCount: scope.lineItems.length,
+          selectedRcv: scope.selectedRcv,
+          retrievable: true,
+          message: `Saved pasted scope to the job file with ${scope.lineItems.length} line item(s).`,
+        },
+      }
+    },
+  },
+  {
+    name: 'import_price_sheet_items',
+    description: 'Import pending extracted material rows from a reviewed price sheet document into the contractor material database. Requires explicit user confirmation/approval. Never use this to clear or replace existing prices unless the user separately approved clearing.',
+    schema: z.object({ documentId: z.string().min(1).max(200) }),
+    allowedChannels: ['main', 'management', 'supplier', 'finance'],
+    requiresApproval: true,
+    execute: async (args, contractorId) => {
+      const doc = await db.document.findFirst({
+        where: { id: args.documentId, contractorId },
+        select: { id: true, originalName: true, fileType: true, extractedData: true },
+      })
+      if (!doc) return { success: false, data: null, error: 'Price sheet document not found' }
+      const data = doc.extractedData ? JSON.parse(doc.extractedData) : {}
+      const items = normalizeMaterialItems(data.materialItems)
+      if (items.length === 0) return { success: false, data: null, error: 'No pending material rows found on this document' }
+
+      console.log(`[price-sheet] import confirmed documentId=${doc.id} count=${items.length}`)
+      const existingItems = await db.materialItem.findMany({
+        where: { contractorId },
+        select: { name: true, unit: true, unitCost: true },
+      })
+      const existingKeys = new Set(existingItems.map(i => `${i.name.toLowerCase()}|${i.unit}|${i.unitCost}`))
+      let created = 0
+      let skipped = 0
+      for (const item of items) {
+        const key = `${item.name.toLowerCase()}|${item.unit}|${item.unitCost}`
+        if (existingKeys.has(key)) { skipped++; continue }
+        existingKeys.add(key)
+        await db.materialItem.create({
+          data: {
+            contractorId,
+            name: item.name,
+            sku: item.sku,
+            category: item.category,
+            unit: item.unit,
+            unitCost: item.unitCost,
+          },
+        })
+        created++
+      }
+      data.priceSheetReview = { ...(data.priceSheetReview ?? {}), status: 'imported', importedAt: new Date().toISOString(), created, skipped }
+      await db.document.update({ where: { id: doc.id }, data: { extractedData: JSON.stringify(data), status: 'reviewed' } })
+      console.log(`[price-sheet] import complete documentId=${doc.id} created=${created} skipped=${skipped}`)
+      return { success: true, data: { documentId: doc.id, originalName: doc.originalName, created, skipped, totalRows: items.length, message: `Imported ${created} material item(s); skipped ${skipped} duplicate(s).` } }
     },
   },
   {

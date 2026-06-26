@@ -4,7 +4,7 @@ import { useChatStore } from '@/store/chat-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
 
 // Terminal states — once a document reaches one of these, we stop polling.
-const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr'])
+const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
 
 async function pollDocumentStatus(docId: string, userMessageId: string): Promise<boolean> {
   for (let i = 0; i < 60; i++) { // 60 * 2s = 120s max wait
@@ -141,6 +141,16 @@ export function useChat() {
                 createdAt: new Date().toISOString(),
               })
             }
+          }
+          if (data.needsLink && data.suggestedPrompt) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: data.suggestedPrompt,
+              contextType: 'upload_link_prompt',
+              contextData: data.uploadContext,
+              createdAt: new Date().toISOString(),
+            })
           }
           for (const a of previewAttachments) URL.revokeObjectURL(a.url)
           await refreshBusinessContext()

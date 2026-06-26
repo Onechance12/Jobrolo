@@ -26,6 +26,18 @@ export async function POST(req: NextRequest) {
   const truncated = text.slice(0, 1024)
   const safeVoice = VALID_VOICES.has(voice) ? voice : 'tongtong'
   const safeSpeed = Math.min(2.0, Math.max(0.5, Number(speed) || 1.0))
+
+  const ttsProvider = String(process.env.TTS_PROVIDER || 'disabled').toLowerCase()
+  if (ttsProvider === 'disabled' || !ttsProvider) {
+    console.log('[tts] disabled or not configured')
+    return NextResponse.json({ error: 'TTS is not configured' }, { status: 503 })
+  }
+
+  if (ttsProvider !== 'z-ai') {
+    console.log('[tts] disabled or not configured')
+    return NextResponse.json({ error: 'TTS provider is not supported yet' }, { status: 503 })
+  }
+
   const hash = crypto.createHash('sha256').update(`${safeVoice}:${safeSpeed}:${truncated}`).digest('hex').slice(0, 32)
   const cachePath = path.join(CACHE_DIR, `${hash}.wav`)
   const cacheUrl = `/uploads/tts-cache/${hash}.wav`
@@ -33,7 +45,8 @@ export async function POST(req: NextRequest) {
   try { await fs.access(cachePath); return NextResponse.json({ success: true, url: cacheUrl, cached: true }) } catch {}
   await fs.mkdir(CACHE_DIR, { recursive: true })
 
-  // Only use z-ai for TTS (APILayer doesn't have TTS)
+  // Explicit opt-in only. Production defaults to disabled so missing .z-ai-config
+  // cannot spam logs or affect chat/upload workflows.
   try {
     const ZAI = (await import('z-ai-web-dev-sdk')).default
     const zai = await ZAI.create()

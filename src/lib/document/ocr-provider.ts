@@ -10,7 +10,7 @@
 // until wired up — they exist so the integration surface is clear.
 //
 // Future providers (priority order):
-//   1. openai_vision   — OpenAI GPT-4o vision (already-installed z-ai SDK can do vision)
+//   1. openai_vision   — configured OpenAI-compatible vision provider
 //   2. google_vision   — Google Cloud Vision API
 //   3. aws_textract    — AWS Textract
 //   4. apilayer_ocr    — APILayer OCR.space
@@ -24,6 +24,7 @@
 
 import { readStoredFile } from '@/lib/storage'
 import { promises as fs } from 'node:fs'
+import { analyzeImage } from '@/lib/ai'
 
 export interface OcrResult {
   text: string
@@ -74,17 +75,28 @@ export class OpenAiVisionOcrProvider implements DocumentOcrProvider {
   readonly name = 'openai_vision'
 
   isAvailable(): boolean {
-    // The z-ai SDK is already installed and supports vision. Mark as available
-    // if the SDK is reachable — actual implementation is TODO.
-    return false
+    return (process.env.LLM_PROVIDER === 'openai-compatible' || process.env.LLM_PROVIDER === 'openai') && !!process.env.LLM_API_KEY
   }
 
-  async extractFromPdf(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('OpenAiVisionOcrProvider.extractFromPdf not implemented — TODO: render PDF pages and call vision API')
+  async extractFromPdf(filePath: string): Promise<OcrResult | null> {
+    console.log(`[doc-worker] using vision OCR skipped for PDF ${filePath} — PDF page rendering dependency is not configured`)
+    return null
   }
 
-  async extractFromImage(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('OpenAiVisionOcrProvider.extractFromImage not implemented — TODO: call vision API with image')
+  async extractFromImage(filePath: string): Promise<OcrResult | null> {
+    console.log('[doc-worker] using vision OCR')
+    const buffer = await readStoredFile(filePath)
+    const ext = filePath.toLowerCase()
+    const mimeType = ext.endsWith('.png') ? 'image/png' : ext.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
+    const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`
+    const text = await analyzeImage(dataUrl, `Analyze this uploaded roofing/construction image.
+
+If this is a document photo, estimate, scope, price sheet, declaration page, invoice, contract, or screenshot, extract all visible text and tables.
+If this is an evidence/damage photo, briefly classify it as roof overview, elevation, hail damage, wind damage, soft metals/gutters, interior, document photo, or other, then describe visible evidence.
+
+Return concise text only.`, { purpose: 'image_analysis', detail: 'high', maxTokens: 2000 })
+    if (!text.trim()) return null
+    return { provider: this.name, text: text.trim(), confidence: text.length > 200 ? 70 : 45 }
   }
 }
 
@@ -352,7 +364,7 @@ let _cachedProvider: DocumentOcrProvider | null = null
 export function getOcrProvider(): DocumentOcrProvider {
   if (_cachedProvider) return _cachedProvider
 
-  const providerName = process.env.OCR_PROVIDER || 'none'
+  const providerName = process.env.OCR_PROVIDER || ((process.env.LLM_PROVIDER === 'openai-compatible' || process.env.LLM_PROVIDER === 'openai') ? 'openai_vision' : 'none')
   const factory = PROVIDERS[providerName] ?? PROVIDERS.none
   const provider = factory()
 

@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-06-25
 
+Patch note: production hardening now routes configured AI/OCR analysis through the OpenAI-compatible provider when available, records internal AI usage, stops silent price-sheet imports, and adds the `get_customer_file`, `import_price_sheet_items`, and `create_scope_from_text` workflows.
+
 ## Product north star
 
 Jobrolo should not feel like another CRM. The main chat is the product:
@@ -152,6 +154,12 @@ If no project exists, ask to create one first.
 
 The test price sheet saved 157 material items, but the product did not clearly say what actually saved or ask for replacement confirmation before risky clearing/replacement workflows.
 
+Patch status:
+
+- Auto-import from the document worker is stopped.
+- Extracted material rows stay pending on the Document.
+- `import_price_sheet_items` imports rows only after explicit confirmation/approval.
+
 Needed:
 
 - row count and confidence
@@ -196,6 +204,22 @@ Logs show:
 `[tts]: Error: Configuration file not found or invalid. Please create .z-ai-config...`
 
 TTS should be disabled in production unless configured or routed through a configured provider. TTS errors should not pollute logs or affect chat/upload.
+
+Patch status:
+
+- TTS now defaults to disabled unless `TTS_PROVIDER=z-ai` is explicitly configured.
+- Missing `.z-ai-config` should no longer pollute production logs by default.
+
+### P2 — Web search provider prep
+
+No safe chat-native web-search workflow is confirmed yet.
+
+Current rule:
+
+- Do not web-search on every message.
+- Only use web search when the user asks for current/external information.
+- When implemented, route usage through the configured OpenAI-compatible provider or a clearly configured search provider.
+- Log usage with purpose `web_search`.
 
 ### P2 — Weird extra tool calls
 

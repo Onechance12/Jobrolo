@@ -104,11 +104,11 @@ If a tool previously failed, say: "I tried, but it did not save. Here's the erro
 Respond as JSON only.`
 }
 
-async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<string> {
+async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number; contractorId?: string; userId?: string }): Promise<string> {
   let lastErr: unknown
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      return await chatComplete(messages, opts)
+      return await chatComplete(messages, { ...opts, purpose: 'tool_reasoning', contractorId: opts.contractorId, userId: opts.userId })
     } catch (err) {
       lastErr = err
       const isRateLimit = err instanceof Error && /429|rate.?limit|too many requests/i.test(err.message)
@@ -135,7 +135,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let totalToolCalls = 0
 
   for (let i = 0; i < maxIterations; i++) {
-    const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500 })
+    const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
     const parsed = parseAIResponse(raw)
     const parsedToolCallCount = parsed.tool_calls?.length ?? 0
     const parsedActionCount = parsed.actions?.length ?? 0
@@ -171,10 +171,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       return false
     })
 
-    const isFinal = parsed.final !== false || toolCalls.length === 0
+    const isFinal = toolCalls.length > 0 ? false : parsed.final !== false
     const iteration: AgentIteration = { iteration: i, text: parsed.text, toolCalls, final: isFinal }
 
     if (toolCalls.length > 0) {
+      console.log(`[agent-loop] tool calls detected; forcing post-tool final response contractorId=${opts.contractorId} count=${toolCalls.length}`)
       const results: AgentIteration['toolResults'] = [...blockedToolResults]
       for (const tc of toolCalls) {
         console.log(`[agent-loop] executing tool '${tc.name}' contractorId=${opts.contractorId}`)
@@ -202,10 +203,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ).join('\n\n')
       messages.push({
         role: 'user',
-        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using this real data. Do not make up information. If tools returned errors, acknowledge them.`,
+        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success. If tools returned errors or approvalRequired, acknowledge that clearly.`,
       })
       iterations.push(iteration)
-      if (isFinal) return { final: parsed, iterations, totalToolCalls }
+      continue
     } else {
       if (blockedToolResults.length > 0) {
         iteration.toolResults = blockedToolResults
@@ -221,6 +222,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       }
       if (parsed.final !== false) {
         console.log(`[agent-loop] final answer without mutation contractorId=${opts.contractorId} toolCalls=0 actions=${parsedActionCount}`)
+        if (totalToolCalls > 0) console.log(`[agent-loop] final answer based on tool results contractorId=${opts.contractorId}`)
       }
       opts.onIteration?.(iteration)
       iterations.push(iteration)

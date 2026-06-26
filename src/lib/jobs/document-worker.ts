@@ -47,6 +47,7 @@ import { scoreExtraction } from '@/lib/document/extraction-quality'
 import { getOcrProvider, getOcrUnavailableReason } from '@/lib/document/ocr-provider'
 import { compareExtractions, type ComparisonResult } from '@/lib/document/extraction-comparison'
 import { createProjectTimelineEvent } from '@/lib/project-context'
+import { getConfiguredProviderName } from '@/lib/ai'
 
 interface AgentJobRow {
   id: string
@@ -55,6 +56,7 @@ interface AgentJobRow {
   inputJson: string
   workspaceId: string | null
   chatId: string | null
+  userId: string | null
 }
 
 interface DocAnalysisInput {
@@ -145,18 +147,25 @@ async function processImageDocument(job: AgentJobRow, current: any) {
   console.log(`[doc-worker] doc=${documentId} | stage: processing → image pipeline`)
   await heartbeat(job.id, `Analyzing image: ${current.originalName}`)
 
-  // PASS 1: Vision analysis via z-ai SDK (always runs — primary pass for images)
-  console.log(`[doc-worker] doc=${documentId} | PASS 1: vision analysis (z-ai SDK)`)
+  // PASS 1: Vision analysis via configured AI provider (OpenAI-compatible in production)
+  const configuredAiProvider = getConfiguredProviderName()
+  console.log(`[doc-worker] doc=${documentId} | PASS 1: vision analysis (configured provider: ${configuredAiProvider})`)
+  console.log(`[ai-provider] using ${configuredAiProvider} for image analysis`)
   const analysis = await analyzeDocument({
     filePath: current.filePath,
     mimeType: current.mimeType,
     fileType: current.fileType,
     originalName: current.originalName,
     publicUrl: toFileUrl(current.filePath) || "",
+    contractorId: job.contractorId,
+    userId: job.userId,
+    customerId: current.customerId,
+    projectId: current.projectId,
+    documentId,
   })
 
-  // For images, "visionText" is the rawText from the vision model's structured response
-  const zaiVisionText = (analysis.extractedData?.rawText as string) ?? analysis.summary ?? ''
+  // For images, "visionText" is the raw/visible text from the vision model's structured response
+  const providerVisionText = (analysis.extractedData?.rawText as string) ?? (analysis.extractedData?.visibleText as string) ?? analysis.summary ?? ''
   const embeddedText = '' // images have no embedded text layer
 
   // PASS 2: OCR via configured provider (APILayer, etc.) — runs when provider is available
@@ -187,11 +196,11 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     warnings.push('⚠️ OCR provider not configured, visual text may be missed. Set OCR_PROVIDER env var to enable OCR extraction.')
   }
 
-  // Merge vision texts — z-ai vision is primary, OCR provider supplements
-  let visionText = zaiVisionText
+  // Merge vision texts — configured provider vision is primary, OCR provider supplements
+  let visionText = providerVisionText
   if (ocrProviderText.trim().length > 50) {
-    if (zaiVisionText.trim().length > 50) {
-      visionText = `--- Z-AI VISION TEXT ---\n${zaiVisionText}\n\n--- OCR PROVIDER TEXT (${ocrProviderName}) ---\n${ocrProviderText}`
+    if (providerVisionText.trim().length > 50) {
+      visionText = `--- CONFIGURED VISION TEXT ---\n${providerVisionText}\n\n--- OCR PROVIDER TEXT (${ocrProviderName}) ---\n${ocrProviderText}`
     } else {
       visionText = ocrProviderText
     }
@@ -218,7 +227,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     warnings: comparisonResult.warnings,
     ocrProvider: ocrProviderName,
     ocrProviderTextLength: ocrProviderText.length,
-    zaiVisionTextLength: zaiVisionText.length,
+    providerVisionTextLength: providerVisionText.length,
     ...(analysis.lineItems?.length ? { lineItems: analysis.lineItems } : {}),
     ...(analysis.claimInfo ? { claimInfo: analysis.claimInfo } : {}),
     ...(analysis.materialItems?.length ? { materialItems: analysis.materialItems } : {}),
@@ -240,13 +249,16 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     }
   }
 
+  const imageStatus = comparisonResult.confidence < 50 ? 'needs_review' : 'reviewed'
+  if (imageStatus === 'needs_review') console.log(`[doc-worker] doc=${documentId} | low confidence — flagged for review`)
+
   await db.document.update({
     where: { id: documentId },
     data: {
       aiSummary: analysis.summary,
       aiCategory: analysis.category,
       extractedData: JSON.stringify(fullData),
-      status: 'reviewed',
+      status: imageStatus,
       extractionMethod: 'image_vision',
       embeddedText: embeddedText || null,
       visionText: visionText ? truncateText(visionText) : null,
@@ -265,7 +277,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     customerId: current.customerId,
     documentId,
     originalName: current.originalName,
-    status: 'reviewed',
+    status: imageStatus === 'needs_review' ? 'reviewed' : imageStatus,
     confidence: comparisonResult.confidence,
     conflictCount: Object.values(comparisonResult.conflicts).filter(Boolean).length,
     missingCount: Object.values(comparisonResult.missingData).filter(Boolean).length,
@@ -273,7 +285,9 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     source: 'system',
   })
 
-  console.log(`[doc-worker] doc=${documentId} | stage: image pipeline → reviewed ✓ (confidence: ${comparisonResult.confidence}/100, OCR provider: ${ocrProviderName})`)
+  console.log(`[doc-worker] doc=${documentId} | image analysis complete`)
+  if (imageStatus === 'needs_review') console.log(`[doc-worker] doc=${documentId} | needs review`)
+  console.log(`[doc-worker] doc=${documentId} | stage: image pipeline → ${imageStatus} ✓ (confidence: ${comparisonResult.confidence}/100, OCR provider: ${ocrProviderName})`)
 
   if (analysis.detectedCustomer?.name) {
     try {
@@ -439,6 +453,11 @@ async function processTextDocument(job: AgentJobRow, current: any) {
       originalName: current.originalName,
       publicUrl: toFileUrl(current.filePath) || "",
       preExtractedText: mergedText,
+      contractorId: job.contractorId,
+      userId: job.userId,
+      customerId: current.customerId,
+      projectId: current.projectId,
+      documentId,
     })
   }
 
@@ -550,6 +569,17 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     ...(analysis?.materialItems?.length ? { materialItems: analysis.materialItems } : {}),
   }
 
+  if (analysis?.category === 'price_sheet' && analysis?.materialItems?.length) {
+    finalData.priceSheetReview = {
+      status: 'pending_review',
+      extractedRowCount: analysis.materialItems.length,
+      importRequired: true,
+      message: `Found ${analysis.materialItems.length} material rows. Review/import confirmation is required before changing the material database.`,
+    }
+    console.log(`[price-sheet] extracted rows pending review documentId=${documentId} count=${analysis.materialItems.length}`)
+    console.log(`[price-sheet] auto-import skipped pending user confirmation documentId=${documentId}`)
+  }
+
   // PASS 6: Additive scope intelligence with real document + contractor IDs.
   // Failure is non-blocking; base parsing/processing remains intact.
   if ((analysis?.category === 'estimate' || analysis?.category === 'scope_of_loss' || analysis?.lineItems?.length) && mergedText.trim().length > 0) {
@@ -612,33 +642,9 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     }
   }
 
-  if (analysis?.materialItems?.length) {
-    // Check for existing items with same name + unit to avoid duplicates
-    const existingItems = await db.materialItem.findMany({
-      where: { contractorId: job.contractorId },
-      select: { name: true, unit: true, unitCost: true },
-    })
-    const existingKeys = new Set(existingItems.map(i => `${i.name.toLowerCase()}|${i.unit}|${i.unitCost}`))
-
-    let savedCount = 0
-    for (const item of analysis.materialItems) {
-      const key = `${item.name.toLowerCase()}|${item.unit || 'EA'}|${item.unitCost}`
-      if (existingKeys.has(key)) continue  // skip duplicate
-      existingKeys.add(key)
-      await db.materialItem.create({
-        data: {
-          contractorId: job.contractorId,
-          name: item.name,
-          sku: item.sku || null,
-          category: item.category || 'other',
-          unit: item.unit || 'EA',
-          unitCost: item.unitCost,
-        },
-      }).catch(() => {})
-      savedCount++
-    }
-    console.log(`[doc-worker] doc=${documentId} | saved ${savedCount} new material items (${analysis.materialItems.length} total, ${analysis.materialItems.length - savedCount} duplicates skipped)`)
-  }
+  // Price sheets are intentionally NOT auto-imported into MaterialItem.
+  // They remain on Document.extractedData.materialItems until the user approves
+  // import_price_sheet_items. This avoids silent data-changing imports.
 
   await completeJob(job.id, {
     documentId,

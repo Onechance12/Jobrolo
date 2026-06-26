@@ -147,7 +147,19 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ documents })
+    const needsLink = !customerId && !projectId && !workspaceId
+    return NextResponse.json({
+      documents,
+      ...(needsLink ? {
+        needsLink: true,
+        suggestedPrompt: 'Saved. Which customer or project should I attach this upload to?',
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+        },
+      } : {}),
+    })
   } catch (err) {
     console.error('[upload] failed:', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Upload failed' }, { status: 500 })

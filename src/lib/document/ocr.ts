@@ -10,7 +10,7 @@
 //   - extractStructuredFromText(text) — structured extraction from plain text
 // =============================================================================
 
-import { getAI } from '@/lib/ai'
+import { analyzeImage } from '@/lib/ai'
 
 const OCR_PROMPT = `You are an OCR engine for construction and insurance documents. Extract ALL text from this image exactly as it appears.
 
@@ -82,13 +82,8 @@ Extract ALL of the following that are visible in the image. If a field is not pr
  */
 export async function ocrImage(imageBuffer: Buffer, mimeType: string = 'image/png'): Promise<string> {
   try {
-    const ai = await getAI()
     const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-    const res: any = await (ai.chat.completions as any).createVision({
-      messages: [{ role: 'user', content: OCR_PROMPT }],
-      image: dataUrl,
-    })
-    return res.choices?.[0]?.message?.content ?? ''
+    return await analyzeImage(dataUrl, OCR_PROMPT, { purpose: 'document_extraction', detail: 'high', maxTokens: 2000 })
   } catch (err) {
     console.error('[ocr] ocrImage failed:', err)
     return ''
@@ -103,13 +98,8 @@ export async function ocrImage(imageBuffer: Buffer, mimeType: string = 'image/pn
  */
 export async function visionExtractStructured(imageBuffer: Buffer, mimeType: string = 'image/png'): Promise<Record<string, unknown> | null> {
   try {
-    const ai = await getAI()
     const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-    const res: any = await (ai.chat.completions as any).createVision({
-      messages: [{ role: 'user', content: STRUCTURED_VISION_PROMPT }],
-      image: dataUrl,
-    })
-    const content = res.choices?.[0]?.message?.content ?? ''
+    const content = await analyzeImage(dataUrl, STRUCTURED_VISION_PROMPT, { purpose: 'document_extraction', detail: 'high', maxTokens: 3000 })
     let cleaned = content.trim()
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()

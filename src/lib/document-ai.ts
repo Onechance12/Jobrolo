@@ -11,7 +11,7 @@
 import { readStoredFile } from '@/lib/storage'
 import { analyzeImage } from './ai'
 import { extractPdfText, truncateForAI } from './pdf'
-import { chatComplete } from './ai'
+import { chatComplete, type ChatOptions, type VisionOptions } from './ai'
 import { parseAbcSupplyPriceList, parseXactimateLineItems } from './specialized-parsers'
 import { parseScope } from './scope-parser'
 import { extractEntities, mergeEntities, type ExtractedEntities } from './document/entity-extractor'
@@ -105,12 +105,24 @@ export async function analyzeDocument(opts: {
   originalName: string
   publicUrl: string
   preExtractedText?: string
+  contractorId?: string
+  userId?: string | null
+  customerId?: string | null
+  projectId?: string | null
+  documentId?: string | null
 }): Promise<DocumentAnalysis> {
   const { filePath, mimeType, originalName, publicUrl, preExtractedText } = opts
+  const aiContext = {
+    contractorId: opts.contractorId,
+    userId: opts.userId,
+    customerId: opts.customerId,
+    projectId: opts.projectId,
+    documentId: opts.documentId,
+  }
   let fileType = opts.fileType
 
   // Photos use vision analysis
-  if (mimeType.startsWith('image/')) return await analyzePhoto(publicUrl, originalName)
+  if (mimeType.startsWith('image/')) return await analyzePhoto(publicUrl, originalName, aiContext)
 
   // Get text (use pre-extracted if provided)
   let text: string | null = null
@@ -144,23 +156,23 @@ export async function analyzeDocument(opts: {
   // Route by type
   let analysis: DocumentAnalysis
   if (fileType === 'price_sheet') {
-    analysis = await analyzePriceSheet(text ?? '', originalName)
+    analysis = await analyzePriceSheet(text ?? '', originalName, aiContext)
   } else if (fileType === 'scope_of_loss' || fileType === 'xactimate' || fileType === 'symbility' || fileType === 'insurance_claim' || fileType === 'estimate') {
-    analysis = await analyzeEstimate(text ?? '', originalName)
+    analysis = await analyzeEstimate(text ?? '', originalName, aiContext)
   } else if (fileType === 'contract') {
-    analysis = await analyzeGeneric(text ?? '', originalName, 'contract')
+    analysis = await analyzeGeneric(text ?? '', originalName, 'contract', aiContext)
   } else if (fileType === 'carrier_letter') {
-    analysis = await analyzeGeneric(text ?? '', originalName, 'carrier_letter')
+    analysis = await analyzeGeneric(text ?? '', originalName, 'carrier_letter', aiContext)
   } else if (fileType === 'inspection_report') {
-    analysis = await analyzeGeneric(text ?? '', originalName, 'inspection_report')
+    analysis = await analyzeGeneric(text ?? '', originalName, 'inspection_report', aiContext)
   } else if (fileType === 'invoice' || fileType === 'receipt') {
-    analysis = await analyzeGeneric(text ?? '', originalName, 'invoice')
+    analysis = await analyzeGeneric(text ?? '', originalName, 'invoice', aiContext)
   } else if (fileType === 'mortgage_document') {
-    analysis = await analyzeGeneric(text ?? '', originalName, 'mortgage_document')
+    analysis = await analyzeGeneric(text ?? '', originalName, 'mortgage_document', aiContext)
   } else if (fileType === 'claim_document') {
-    analysis = await analyzeEstimate(text ?? '', originalName)
+    analysis = await analyzeEstimate(text ?? '', originalName, aiContext)
   } else if (text && text.length > 50) {
-    analysis = await analyzeGeneric(text, originalName)
+    analysis = await analyzeGeneric(text, originalName, undefined, aiContext)
   } else {
     return { summary: 'File uploaded — no extractable content found.', category: 'other', extractedData: {} }
   }
@@ -213,9 +225,22 @@ export async function analyzeDocument(opts: {
 // Photo analysis — uses vision
 // ---------------------------------------------------------------------------
 
-async function analyzePhoto(imageUrl: string, originalName: string): Promise<DocumentAnalysis> {
+async function analyzePhoto(imageUrl: string, originalName: string, aiContext: Partial<VisionOptions> = {}): Promise<DocumentAnalysis> {
   try {
-    const r = await analyzeImage(imageUrl, `Analyze this photo for a roofing contractor. Respond as JSON: {"summary":"1-2 sentences","category":"photo","extractedData":{"location":"where","damageObserved":"any damage or none","materialsVisible":"materials or unknown","safetyConcerns":"any or none","photoType":"roof|attic|exterior|interior|damage|other"}}`)
+    const r = await analyzeImage(imageUrl, `Analyze this upload for a roofing contractor.
+
+First decide whether it is an evidence/damage photo or a document photo/screenshot.
+
+For document photos, extract visible text, likely document type, customer name/address, carrier/claim info, line items/totals/material rows if visible, confidence, and warnings.
+For evidence photos, classify as roof_overview, elevation, hail_damage, wind_damage, soft_metals_gutters_vents, interior_damage, document_photo, or other, then summarize visible evidence.
+
+Respond as JSON only:
+{"summary":"1-2 sentences","category":"photo","extractedData":{"photoType":"roof_overview|elevation|hail_damage|wind_damage|soft_metals_gutters_vents|interior_damage|document_photo|other","visibleText":"text or null","likelyDocumentType":"estimate|scope_of_loss|price_sheet|invoice|contract|claim_document|declaration_page|other|null","customerName":"string or null","address":"string or null","carrier":"string or null","claimNumber":"string or null","lineItems":[],"totals":{},"damageObserved":"string or none","materialsVisible":"string or unknown","safetyConcerns":"string or none","confidence":0,"warnings":["low confidence notes"]}}`, {
+      purpose: 'image_analysis',
+      ...aiContext,
+      detail: 'low',
+      maxTokens: 1500,
+    })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     try {
       const p = JSON.parse(c)
@@ -236,7 +261,7 @@ async function analyzePhoto(imageUrl: string, originalName: string): Promise<Doc
 // Price sheet analysis (specialized parser + AI fallback)
 // ---------------------------------------------------------------------------
 
-async function analyzePriceSheet(text: string, originalName: string): Promise<DocumentAnalysis> {
+async function analyzePriceSheet(text: string, originalName: string, aiContext: Partial<ChatOptions> = {}): Promise<DocumentAnalysis> {
   const abcItems = parseAbcSupplyPriceList(text)
   if (abcItems.length > 5) {
     console.log(`[doc-ai] ABC Supply parser: ${abcItems.length} items`)
@@ -253,7 +278,7 @@ async function analyzePriceSheet(text: string, originalName: string): Promise<Do
     const r = await chatComplete([
       { role: 'system', content: `Extract material items from this price list. Respond as JSON (no markdown fences):\n{"summary":"1-2 sentences","category":"price_sheet","extractedData":{"supplier":"name or null","validDate":"date or null"},"materialItems":[{"name":"...","sku":"...","category":"Shingles|Underlayment|Decking|Flashing|Fasteners|Ventilation|Sealants|Other","unit":"SQ|ROLL|PCS|BOX|LF|BUNDLE|EA","unitCost":0.00}]}` },
       { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 8000)}` },
-    ], { temperature: 0.1, maxTokens: 4000 })
+    ], { temperature: 0.1, maxTokens: 4000, purpose: 'price_sheet_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const p = JSON.parse(c)
     console.log(`[doc-ai] AI price sheet: ${p.materialItems?.length ?? 0} items`)
@@ -273,7 +298,7 @@ async function analyzePriceSheet(text: string, originalName: string): Promise<Do
 // Estimate / scope analysis (Xactimate parser + AI claim extraction)
 // ---------------------------------------------------------------------------
 
-async function analyzeEstimate(text: string, originalName: string): Promise<DocumentAnalysis> {
+async function analyzeEstimate(text: string, originalName: string, aiContext: Partial<ChatOptions> = {}): Promise<DocumentAnalysis> {
   try {
     const r = await chatComplete([
       { role: 'system', content: `Extract claim info from this insurance estimate. Respond as JSON only (no markdown fences).
@@ -288,7 +313,7 @@ IMPORTANT — entity ownership rules:
 JSON shape:
 {"customer":"homeowner name or null","customerEmail":"homeowner email or null","customerPhone":"homeowner phone or null","projectAddress":"address or null","totalAmount":"total as number or null","scope":"1-2 sentence summary","claimNumber":"claim # or null","policyNumber":"policy # or null","carrier":"insurance company or null","dateOfLoss":"date or null","adjuster":"adjuster name or null","adjusterPhone":"adjuster phone or null","adjusterEmail":"adjuster email or null","deductible":"number or null","rcv":"number or null","acv":"number or null","depreciation":"number or null","mortgageCompany":"string or null"}` },
       { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 8000)}` },
-    ], { temperature: 0.1, maxTokens: 1000 })
+    ], { temperature: 0.1, maxTokens: 1000, purpose: 'document_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const ext = JSON.parse(c)
 
@@ -389,7 +414,7 @@ JSON shape:
 // Generic analysis (carrier letters, inspection reports, contracts, etc.)
 // ---------------------------------------------------------------------------
 
-async function analyzeGeneric(text: string, originalName: string, hint?: string): Promise<DocumentAnalysis> {
+async function analyzeGeneric(text: string, originalName: string, hint?: string, aiContext: Partial<ChatOptions> = {}): Promise<DocumentAnalysis> {
   try {
     const hintStr = hint ? ` Document type hint: ${hint}.` : ''
     const r = await chatComplete([
@@ -398,7 +423,7 @@ async function analyzeGeneric(text: string, originalName: string, hint?: string)
         content: `Analyze this document. Respond as JSON (no markdown fences):${hintStr}\n{"summary":"1-2 sentences","category":"${hint || 'document_analysis'}","extractedData":{"documentType":"type","keyInfo":["facts"],"dates":["dates"],"amounts":["amounts"],"parties":["people/companies"],"letterDate":"date if letter","sender":"who wrote it","recipient":"who it's addressed to"}}`,
       },
       { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 6000)}` },
-    ], { temperature: 0.2, maxTokens: 1500 })
+    ], { temperature: 0.2, maxTokens: 1500, purpose: 'document_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const p = JSON.parse(c)
     return {
