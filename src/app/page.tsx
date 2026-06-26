@@ -413,10 +413,10 @@ export default function Page() {
               {isInWorkspace && currentWorkspace && (
                 <button
                   onClick={() => setInviteOpen(true)}
-                  className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-muted"
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-background p-2 text-xs font-medium text-foreground shadow-sm hover:bg-muted sm:px-3 sm:py-1.5"
                   aria-label="Invite people to this chat"
                 >
-                  <UserPlus className="h-3.5 w-3.5" /> Invite
+                  <UserPlus className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Invite</span>
                 </button>
               )}
 
