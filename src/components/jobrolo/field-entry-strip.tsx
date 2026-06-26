@@ -60,10 +60,11 @@ export function FieldEntryStrip({ workspace, onOpenFieldCopilot, onSendPrompt, o
 
   const fieldPrompt = `Open the field briefing for ${project.title}. Tell me what matters before I walk up, what is missing, what documents are pending, and what I should log next.`
   const materialPrompt = `Crew/field update for ${project.title}: I need extra material. Ask me for material, quantity, reason, and photos if needed, then create the right material request for PM approval.`
-  const photoPrompt = `I am about to upload field photos for ${project.title}. Use the job packet and location context to attach them correctly, then tell me if anything still needs photo documentation.`
   const signingPrompt = `I am at ${project.title} for signing. Show pending signature documents, explain what should be signed, and help me log the outcome.`
   const productionPrompt = `Production update for ${project.title}. Show crew/material/scope notes and help me log any issue, extra material, completion item, or customer concern.`
-  const inspectionPrompt = `Start inspection mode for ${project.title}. Give me the required photo sections first, then help me capture: front elevation, all elevations, roof overview, slopes/facets, hail/wind damage, soft metals/gutters/vents, attic, interior, detached structures, and documents.`
+  const openInspectionPhotos = (section?: string) => {
+    window.dispatchEvent(new CustomEvent('jobrolo:open-inspection-photo-intake', { detail: { section } }))
+  }
 
   return (
     <div className={cn('border-b border-border/50 bg-background/90 backdrop-blur', compact && 'rounded-2xl border') }>
@@ -74,8 +75,8 @@ export function FieldEntryStrip({ workspace, onOpenFieldCopilot, onSendPrompt, o
           <span className="max-w-[10rem] truncate text-xs font-medium text-foreground sm:max-w-[16rem]">{project.customer?.name || project.title}</span>
         </div>
         <FieldPill disabled={arriving} onClick={markArrived} icon={arriving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} label="I'm here" />
-        <FieldPill onClick={() => onSendPrompt?.(inspectionPrompt)} icon={<Camera className="h-3.5 w-3.5" />} label="Start inspection" />
-        <FieldPill onClick={() => onSendPrompt?.(photoPrompt)} icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
+        <FieldPill onClick={() => openInspectionPhotos()} icon={<Camera className="h-3.5 w-3.5" />} label="Start inspection" />
+        <FieldPill onClick={() => openInspectionPhotos('roof_overview')} icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
         <FieldPill onClick={() => onSendPrompt?.(fieldPrompt)} icon={<ClipboardCheck className="h-3.5 w-3.5" />} label="Brief" />
         <FieldPill onClick={() => onSendPrompt?.(materialPrompt)} icon={<PackagePlus className="h-3.5 w-3.5" />} label="Material" />
         <FieldPill onClick={() => onSendPrompt?.(signingPrompt)} icon={<PenLine className="h-3.5 w-3.5" />} label="Signing" />

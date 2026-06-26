@@ -3739,6 +3739,7 @@ export const TOOLS: ToolDef[] = [
             title: 'Field inspection run',
             territoryName: 'Current field area',
             notes: 'Started from a newly landed field inspection.',
+            mode: 'field',
             location: args.location,
           })
           sessionId = session.id
@@ -3837,7 +3838,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'start_canvassing_session',
-    description: 'Start a canvassing session/territory for a rep or crew. This creates a field session and posts a chat-native canvassing session card.',
+    description: 'Start a door-knocking canvassing session/territory for a rep or crew only when the user explicitly wants canvassing, a street run, or territory work. Do NOT use this for "where I am", "at this house", "I landed an inspection", or property lookup; use research_property_now or start_field_inspection_lead instead.',
     schema: z.object({ title: z.string().optional(), territoryName: z.string().optional(), notes: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management'],
     execute: async (args, contractorId, ctx) => {

@@ -55,6 +55,7 @@ const OPERATIONAL_INTENT_PHRASES = [
   'i will process', 'i will save', 'i will create', 'i will update', 'i will add', 'i will attach',
   'i will link', 'i will import', 'i will extract', 'i will upload', 'i will clear', 'i will proceed',
   'i will now', 'please hold on', 'one moment', 'checking now', 'searching now', 'looking now',
+  'starting the', 'starting this', 'starting your', 'setting up', 'setting this up',
   'fetching your', 'retrieving your', 'pulling up your', 'getting your', 'looking up your',
   'fetching the', 'retrieving the', 'pulling up the', 'getting the', 'looking up the',
   'first, let me', 'first let me',

@@ -74,6 +74,21 @@ function truncateText(text: string): string {
   return text.slice(0, headLen) + '\n\n[...truncated for length...]\n\n' + text.slice(-tailLen)
 }
 
+function parseDocumentData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'string') return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function preservedUploadContext(current: { extractedData?: string | null }) {
+  const existing = parseDocumentData(current.extractedData)
+  return existing.uploadContext ? { uploadContext: existing.uploadContext } : {}
+}
+
 function hasValue(value: unknown) {
   if (Array.isArray(value)) return value.length > 0
   if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(hasValue)
@@ -339,6 +354,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
   // can enrich image-based estimates without overwriting deterministic analysis.
   let fullData: Record<string, unknown> = {
     ...analysis.extractedData,
+    ...preservedUploadContext(current),
     extractionMethod: 'image_vision',
     extractionConfidence: comparisonResult.confidence,
     conflicts: comparisonResult.conflicts,
@@ -653,6 +669,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
         missingDataFlags: JSON.stringify(comparisonResult.missingData),
         conflictFlags: JSON.stringify(comparisonResult.conflicts),
         extractedData: JSON.stringify({
+          ...preservedUploadContext(current),
           pageCount,
           textLength: mergedText.length,
           ocrAttempted: ocrConfigured,
@@ -696,6 +713,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
   // Successful extraction — persist full result
   let finalData: Record<string, unknown> = {
     ...(analysis?.extractedData ?? {}),
+    ...preservedUploadContext(current),
     pageCount,
     textLength: mergedText.length,
     embeddedTextLength: embeddedText.length,

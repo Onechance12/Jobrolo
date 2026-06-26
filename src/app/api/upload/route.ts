@@ -77,6 +77,9 @@ export async function POST(req: NextRequest) {
     const workspaceIdRaw = String(form.get('workspaceId') || '').trim()
     const projectIdRaw = String(form.get('projectId') || '').trim()
     const customerIdRaw = String(form.get('customerId') || '').trim()
+    const uploadPurpose = String(form.get('uploadPurpose') || '').trim()
+    const photoSection = String(form.get('photoSection') || '').trim()
+    const photoSectionLabel = String(form.get('photoSectionLabel') || '').trim()
 
     let workspaceId: string | undefined
     let projectId: string | undefined
@@ -128,6 +131,16 @@ export async function POST(req: NextRequest) {
         storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId, customerId }),
       })
       const fileType = fileTypeFor(originalName, mimeType)
+      const uploadContext = uploadPurpose || photoSection || photoSectionLabel
+        ? {
+            uploadContext: {
+              uploadPurpose: uploadPurpose || null,
+              photoSection: photoSection || null,
+              photoSectionLabel: photoSectionLabel || null,
+              capturedFrom: 'chat_input',
+            },
+          }
+        : null
       const document = await db.document.create({
         data: {
           id: documentId,
@@ -141,6 +154,7 @@ export async function POST(req: NextRequest) {
           thumbnailPath: saved.thumbnailPath,
           fileType,
           status: statusFor(fileType),
+          extractedData: uploadContext ? JSON.stringify(uploadContext) : undefined,
           workspaceId,
           projectId,
           customerId,

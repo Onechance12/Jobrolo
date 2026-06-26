@@ -16,7 +16,7 @@ import {
 
 type SendResult = { ok?: boolean; keepAttachments?: boolean } | void
 interface Props {
-  onSend: (args: { text: string; displayText?: string; attachments?: File[] }) => SendResult | Promise<SendResult>
+  onSend: (args: { text: string; displayText?: string; attachments?: File[]; uploadFields?: Record<string, string> }) => SendResult | Promise<SendResult>
   onStop?: () => void
   disabled?: boolean
   isWorking?: boolean
@@ -26,7 +26,7 @@ interface Props {
 
 function shouldRequestBrowserLocation(prompt: string) {
   const t = prompt.toLowerCase().replace(/[’']/g, "'")
-  const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now)\b/i.test(t)
+  const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now|address i'?m at|address i am at|this address i'?m at|this address i am at)\b/i.test(t)
   const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route|inspection|appointment|jobsite|job site|arrived|onsite|on site)\b/i.test(t)
   const liveFieldMoment = /\b(walking up|walk up|i'?m here|i arrived|arrived|just landed|landed (an? )?inspection|got (an? )?inspection|set (an? )?inspection|at the house|at the property|outside mowing)\b/i.test(t)
   return asksHere || liveFieldMoment || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
@@ -73,8 +73,11 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [shortcuts, setShortcuts] = useState<CommandShortcut[]>(DEFAULT_COMMAND_SHORTCUTS)
+  const [inspectionPickerOpen, setInspectionPickerOpen] = useState(false)
+  const [inspectionSectionId, setInspectionSectionId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
   const textRef = useRef(text); useEffect(() => { textRef.current = text }, [text])
+  const selectedInspectionSection = inspectionSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === inspectionSectionId) ?? null : null
 
   // Check speech support on client only — prevents hydration mismatch
   useEffect(() => {
@@ -114,11 +117,22 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   useEffect(() => {
     const openFilePicker = () => fileInputRef.current?.click()
     const openCamera = () => cameraInputRef.current?.click()
+    const openInspectionIntake = (event: Event) => {
+      const detail = (event as CustomEvent<{ section?: string; sectionId?: string }>).detail
+      const requested = detail?.sectionId || detail?.section
+      const match = requested ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === requested || s.label.toLowerCase() === requested.toLowerCase()) : null
+      setInspectionSectionId(match?.id ?? null)
+      setInspectionPickerOpen(true)
+      setShowAttachMenu(false)
+      setLocalError(null)
+    }
     window.addEventListener('jobrolo:open-file-picker', openFilePicker)
     window.addEventListener('jobrolo:open-camera', openCamera)
+    window.addEventListener('jobrolo:open-inspection-photo-intake', openInspectionIntake)
     return () => {
       window.removeEventListener('jobrolo:open-file-picker', openFilePicker)
       window.removeEventListener('jobrolo:open-camera', openCamera)
+      window.removeEventListener('jobrolo:open-inspection-photo-intake', openInspectionIntake)
     }
   }, [])
 
@@ -133,6 +147,13 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     const filesToSend = [...pendingFiles]
     try {
       let finalText = t
+      const uploadFields = selectedInspectionSection && filesToSend.length
+        ? {
+            uploadPurpose: 'inspection_photo',
+            photoSection: selectedInspectionSection.id,
+            photoSectionLabel: selectedInspectionSection.label,
+          }
+        : undefined
       if (t && shouldRequestBrowserLocation(t)) {
         setLocalError('Requesting your location… allow it in the browser popup so Jobrolo can use where you are right now.')
         try {
@@ -144,19 +165,21 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           return
         }
       }
-      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend })
+      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend, uploadFields })
       if (result && typeof result === 'object' && result.keepAttachments) {
         setLocalError('Upload did not finish. I kept the file attached so you can try again.')
         return
       }
       setText('')
       setPendingFiles([])
+      setInspectionPickerOpen(false)
+      setInspectionSectionId(null)
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Upload did not finish. I kept the file attached so you can try again.')
     } finally {
       setSubmitting(false)
     }
-  }, [text, pendingFiles, disabled, submitting, onSend])
+  }, [text, pendingFiles, disabled, submitting, onSend, selectedInspectionSection])
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
   const handleFiles = (files: FileList | null) => {
     if (!files) return
@@ -165,11 +188,34 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     console.log('[chat-input] files selected:', selected.map(file => ({ name: file.name, size: file.size, type: file.type || 'unknown' })))
     setLocalError(null)
     setPendingFiles(p => [...p, ...selected])
+    if (selectedInspectionSection && !textRef.current.trim()) {
+      setText(inspectionPromptForSection(selectedInspectionSection))
+    }
     setShowAttachMenu(false)
     window.setTimeout(() => {
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (cameraInputRef.current) cameraInputRef.current.value = ''
     }, 0)
+  }
+  const openInspectionIntake = (sectionId?: string | null) => {
+    setInspectionSectionId(sectionId ?? null)
+    setInspectionPickerOpen(true)
+    setShowAttachMenu(false)
+    setLocalError(null)
+  }
+  const chooseInspectionSection = (sectionId: string) => {
+    const section = INSPECTION_PHOTO_SECTIONS.find(s => s.id === sectionId)
+    setInspectionSectionId(sectionId)
+    if (section && !textRef.current.trim()) setText(inspectionPromptForSection(section))
+  }
+  const openInspectionPicker = (source: 'camera' | 'file') => {
+    if (!selectedInspectionSection) {
+      setLocalError('Pick the photo section first, then take or upload the photos.')
+      return
+    }
+    if (!textRef.current.trim()) setText(inspectionPromptForSection(selectedInspectionSection))
+    if (source === 'camera') cameraInputRef.current?.click()
+    else fileInputRef.current?.click()
   }
   const insertPrompt = (prompt: string) => {
     setText(prompt)
@@ -198,12 +244,21 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
       {pendingFiles.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{pendingFiles.map((f, i) => <PendingFileChip key={i} file={f} onRemove={() => setPendingFiles(p => p.filter((_, idx) => idx !== i))} />)}</div>}
       {localError ? <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{localError}</div> : null}
+      {inspectionPickerOpen ? (
+        <InspectionPhotoIntakeCard
+          selectedSectionId={inspectionSectionId}
+          onSelectSection={chooseInspectionSection}
+          onTakePhoto={() => openInspectionPicker('camera')}
+          onUpload={() => openInspectionPicker('file')}
+          onClose={() => setInspectionPickerOpen(false)}
+        />
+      ) : null}
       {text === '' && !pendingFiles.length && !listening && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {(mode === 'field' ? FIELD_QUICK_PROMPTS : shortcuts.slice(0, 6)).map(s => (
             <button
               key={s.id}
-              onClick={() => setText(s.prompt)}
+              onClick={() => mode === 'field' ? openInspectionIntake(fieldShortcutSectionId(s.label)) : setText(s.prompt)}
               className={cn(
                 'inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors',
                 mode === 'field'
@@ -221,6 +276,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       <div className="flex items-end gap-2">
         <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center"><Plus className="w-5 h-5" /></button>
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[260px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
+            {mode === 'field' ? <MenuButton icon={<Camera className="w-5 h-5 text-emerald-600 dark:text-emerald-300" />} label="Inspection photos" hint="Choose roof/interior/attic section" onClick={() => openInspectionIntake(null)} /> : null}
             <MenuButton icon={<Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" />} label="Take photo" hint="Save field photos" onClick={() => cameraInputRef.current?.click()} />
             <MenuButton icon={<Paperclip className="w-5 h-5 text-muted-foreground" />} label="Attach file" hint="PDFs, docs, images" onClick={() => fileInputRef.current?.click()} />
             <div className="my-1 border-t border-border" />
@@ -269,6 +325,93 @@ const FIELD_QUICK_PROMPTS: CommandShortcut[] = [
   makeCommandShortcut('Attic', 'Log attic inspection notes/photos. Ask me for decking, moisture, daylight, ventilation, and structural concerns.', 'field'),
   makeCommandShortcut('Detached', 'Log detached structure inspection notes/photos for this property.', 'field'),
 ]
+
+const INSPECTION_PHOTO_SECTIONS = [
+  { id: 'front_elevation', label: 'Front elevation', hint: 'Street view, house number if visible, whole front.' },
+  { id: 'all_elevations', label: 'All elevations', hint: 'Each side of the home before roof detail shots.' },
+  { id: 'roof_overview', label: 'Roof photos', hint: 'Overview, slopes, facets, ridges, valleys, penetrations.' },
+  { id: 'damage', label: 'Damage', hint: 'Hail, wind, creased shingles, collateral closeups.' },
+  { id: 'soft_metals', label: 'Soft metals', hint: 'Gutters, vents, drip edge, flashing, screens.' },
+  { id: 'interior', label: 'Interior', hint: 'Ceilings, walls, moisture, room context, closeups.' },
+  { id: 'attic', label: 'Attic', hint: 'Decking, leaks, daylight, ventilation, framing.' },
+  { id: 'detached', label: 'Detached', hint: 'Shed, garage, fence, pergola, detached structures.' },
+  { id: 'documents', label: 'Documents', hint: 'Scope, estimate, invoice, contract, claim paperwork.' },
+] as const
+
+type InspectionPhotoSection = (typeof INSPECTION_PHOTO_SECTIONS)[number]
+
+function fieldShortcutSectionId(label: string) {
+  const lower = label.toLowerCase()
+  if (lower.includes('roof')) return 'roof_overview'
+  if (lower.includes('interior')) return 'interior'
+  if (lower.includes('attic')) return 'attic'
+  if (lower.includes('detached')) return 'detached'
+  return null
+}
+
+function inspectionPromptForSection(section: InspectionPhotoSection) {
+  return `Upload these ${section.label.toLowerCase()} inspection photos for this job. Save them to the current project/job file, tag them as "${section.label}", analyze what they show, and tell me what photo section is still missing.`
+}
+
+function InspectionPhotoIntakeCard({
+  selectedSectionId,
+  onSelectSection,
+  onTakePhoto,
+  onUpload,
+  onClose,
+}: {
+  selectedSectionId: string | null
+  onSelectSection: (sectionId: string) => void
+  onTakePhoto: () => void
+  onUpload: () => void
+  onClose: () => void
+}) {
+  const selected = selectedSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === selectedSectionId) : null
+  return (
+    <div className="mb-2 rounded-2xl border border-emerald-300/60 bg-emerald-50 p-3 shadow-sm dark:border-emerald-900/70 dark:bg-emerald-950/25">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-50">Inspection photo capture</div>
+          <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Pick what these photos are, then take or upload them.</div>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-full p-1 text-emerald-950/60 hover:bg-emerald-100 dark:text-emerald-100/70 dark:hover:bg-emerald-900/40">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+        {INSPECTION_PHOTO_SECTIONS.map(section => (
+          <button
+            key={section.id}
+            type="button"
+            onClick={() => onSelectSection(section.id)}
+            className={cn(
+              'rounded-xl border px-2.5 py-2 text-left text-xs transition-colors',
+              selectedSectionId === section.id
+                ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
+                : 'border-emerald-200 bg-background/80 text-foreground hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-background/60 dark:hover:bg-emerald-950/60'
+            )}
+          >
+            <div className="font-medium">{section.label}</div>
+            <div className={cn('mt-0.5 line-clamp-2 text-[10px]', selectedSectionId === section.id ? 'text-white/80' : 'text-muted-foreground')}>{section.hint}</div>
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={onTakePhoto} className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700">
+          <Camera className="h-4 w-4" />
+          Take photo
+        </button>
+        <button type="button" onClick={onUpload} className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-background px-3 text-sm font-medium text-foreground hover:bg-emerald-50 dark:border-emerald-900/70 dark:hover:bg-emerald-950/40">
+          <Paperclip className="h-4 w-4" />
+          Upload
+        </button>
+      </div>
+      <div className="mt-2 text-[11px] text-emerald-900/75 dark:text-emerald-100/70">
+        {selected ? `Selected: ${selected.label}. Photos will be tagged with this section when you send.` : 'Select a section first so Jobrolo does not have to guess what these photos are.'}
+      </div>
+    </div>
+  )
+}
 
 function MenuButton({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint: string; onClick: () => void }) {
   return (

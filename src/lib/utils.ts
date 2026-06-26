@@ -6,7 +6,24 @@ export function formatMessageTime(isoDate: string | Date): string { const d = ty
 export function groupByTimeSlot<T extends { updatedAt?: string | null; createdAt?: string | null }>(items: T[]): Array<{ label: string; items: T[] }> { const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const yesterday = new Date(today.getTime() - 86400000); const weekAgo = new Date(today.getTime() - 7 * 86400000); const groups: Record<string, T[]> = { Today: [], Yesterday: [], 'Previous 7 Days': [], Older: [] }; for (const item of items) { const d = new Date(item.updatedAt ?? item.createdAt ?? ''); if (d >= today) groups.Today.push(item); else if (d >= yesterday) groups.Yesterday.push(item); else if (d >= weekAgo) groups['Previous 7 Days'].push(item); else groups.Older.push(item) } return Object.entries(groups).filter(([, v]) => v.length > 0).map(([label, items]) => ({ label, items })) }
 export function truncate(s: string, max: number): string { return s.length <= max ? s : s.slice(0, max).trim() + '…' }
 export function getInitials(name: string): string { if (!name) return '?'; const parts = name.trim().split(/\s+/); return parts.length === 1 ? parts[0].charAt(0).toUpperCase() : (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase() }
-export function stripJsonWrapper(content: string): string { let c = content.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim(); if (c.startsWith('{') && c.includes('"text"')) { try { const p = JSON.parse(c); if (p.text) return String(p.text) } catch { const m = c.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/); if (m) return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') } } return c }
+export function stripJsonWrapper(content: string): string {
+  let c = content.trim()
+  if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
+  if (c.startsWith('{') && c.includes('"text"')) {
+    try {
+      const p = JSON.parse(c)
+      if (p.text) c = String(p.text)
+    } catch {
+      const m = c.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      if (m) c = m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+    }
+  }
+  c = c
+    .replace(/\n*\[MESSAGE CARD[^\]]*\]\s*\n[\s\S]*$/i, '')
+    .replace(/\n*\[STRUCTURED CARD CONTEXT[^\]]*\]\s*\n[\s\S]*$/i, '')
+    .trim()
+  return c
+}
 export function formatFileSize(bytes: number): string { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / (1024 * 1024)).toFixed(1)} MB` }
 export function isImageFile(mimeType: string): boolean { return mimeType.startsWith('image/') }
 export function getFileType(filename: string, mimeType: string): string { const lower = filename.toLowerCase(); if (mimeType.startsWith('image/')) return 'photo'; if (lower.includes('xactimate') || lower.includes('xact')) return 'xactimate'; if (lower.includes('symbility')) return 'symbility'; if (lower.includes('scope')) return 'scope_of_loss'; if (lower.includes('adjust') || lower.includes('adjuster')) return 'scope_of_loss'; if (lower.includes('claim') || lower.includes('insurance')) return 'insurance_claim'; if (lower.includes('resolution') || lower.includes('estimate') || lower.includes('proposal') || lower.includes('bid')) return 'estimate'; if (lower.includes('contract') || lower.includes('agreement')) return 'contract'; if (lower.includes('invoice') || lower.includes('billing')) return 'invoice'; if (lower.includes('permit')) return 'permit'; if (lower.includes('price') || lower.includes('pricelist') || lower.includes('price-list') || lower.includes('catalog') || lower.includes('supplier') || lower.includes('material')) return 'price_sheet'; if (lower.endsWith('.pdf')) return 'pdf'; if (lower.endsWith('.doc') || lower.endsWith('.docx')) return 'contract'; if (lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.csv')) return 'price_sheet'; return 'other' }

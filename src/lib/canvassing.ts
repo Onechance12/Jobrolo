@@ -16,6 +16,7 @@ export type StartCanvassingSessionInput = {
   title?: string | null
   territoryName?: string | null
   notes?: string | null
+  mode?: 'field' | 'canvassing' | null
   location?: CanvassingLocationInput | null
 }
 
@@ -68,7 +69,7 @@ function sessionMetadata(input: StartCanvassingSessionInput) {
   return JSON.stringify({
     notes: input.notes ?? null,
     startLocation: loc,
-    startedFrom: 'canvassing_map_mode',
+    startedFrom: input.mode === 'field' ? 'field_chat' : 'canvassing_map_mode',
   })
 }
 
@@ -90,6 +91,8 @@ async function createSessionActivity(ctx: TenantContext, sessionId: string, inpu
 
 export async function startCanvassingSession(ctx: TenantContext, input: StartCanvassingSessionInput = {}) {
   const title = input.title?.trim() || `${input.territoryName?.trim() || 'Canvassing'} session`
+  const isFieldMode = input.mode === 'field' || /field inspection|inspection run/i.test(title)
+  const cardType = isFieldMode ? 'field_session' : 'canvassing_session'
   const session = await db.canvassingSession.create({
     data: {
       contractorId: ctx.contractorId,
@@ -102,10 +105,12 @@ export async function startCanvassingSession(ctx: TenantContext, input: StartCan
   })
   await createSessionActivity(ctx, session.id, { type: 'session_started', summary: `Started ${title}`, location: input.location })
   await createGlobalCanvassingInbox(ctx, {
-    type: 'canvassing_session',
-    title: `Canvassing started: ${title}`,
-    summary: input.territoryName ? `Territory: ${input.territoryName}` : 'A canvassing session is active.',
-    payload: { sessionId: session.id, title, territoryName: input.territoryName ?? null, cardType: 'canvassing_session' },
+    type: cardType,
+    title: isFieldMode ? `Field started: ${title}` : `Canvassing started: ${title}`,
+    summary: isFieldMode
+      ? 'Field mode is active in chat.'
+      : input.territoryName ? `Territory: ${input.territoryName}` : 'A canvassing session is active.',
+    payload: { sessionId: session.id, title, territoryName: input.territoryName ?? null, cardType },
   })
   return session
 }

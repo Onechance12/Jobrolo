@@ -32,7 +32,11 @@ export function serializeMessageForAgentHistory(message: ClientMessage) {
   }
 
   if (message.contextType && message.contextData) {
-    parts.push(`[MESSAGE CARD contextType="${message.contextType}"]\n${safeJson(message.contextData)}`)
+    parts.push([
+      '[STRUCTURED CARD CONTEXT — do not copy into the user-facing reply]',
+      `type=${message.contextType}`,
+      `data=${safeJson(message.contextData)}`,
+    ].join('\n'))
   }
 
   if (message.actionResults?.length) {

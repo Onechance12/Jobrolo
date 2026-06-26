@@ -159,7 +159,7 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('field_inspection_lead')) {
     return <FieldInspectionLeadCard data={contextData as any} />
   }
-  if (cardType.includes('canvassing_session')) {
+  if (cardType.includes('canvassing_session') || cardType.includes('field_session')) {
     return <CanvassingSessionCard data={contextData as any} />
   }
   if (cardType.includes('canvassing_lead') || cardType.includes('canvassing_activity')) {

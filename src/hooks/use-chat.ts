@@ -100,7 +100,7 @@ export function useChat() {
     })
   }, [addMessage, clearStreamingText, clearUploadProgress, setStreaming, setTyping])
 
-  const sendMessage = useCallback(async ({ text, displayText, attachments = [] }: { text: string; displayText?: string; attachments?: File[] }) => {
+  const sendMessage = useCallback(async ({ text, displayText, attachments = [], uploadFields = {} }: { text: string; displayText?: string; attachments?: File[]; uploadFields?: Record<string, string> }) => {
     if (!text.trim() && attachments.length === 0) return
     const visibleText = displayText ?? text
     abortRef.current = false
@@ -138,7 +138,7 @@ export function useChat() {
     let serverAttachments: MessageAttachment[] = []
     if (attachments.length > 0) {
       try {
-        const data = await uploadFilesSequentially(attachments, { signal: abortControllerRef.current.signal })
+        const data = await uploadFilesSequentially(attachments, { signal: abortControllerRef.current.signal, fields: uploadFields })
         if (data.documents.length === 0) {
           const errMsg = data.failures.map(f => `${f.fileName}: ${f.error}`).join('\n') || 'Upload failed before the server responded'
           console.error('[use-chat] upload failed:', errMsg)

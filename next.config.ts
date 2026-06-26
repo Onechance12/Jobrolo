@@ -26,6 +26,7 @@ const nextConfig: NextConfig = {
       "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self' https:",
       "media-src 'self' data: blob:",
+      "frame-src 'self' https://www.openstreetmap.org",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

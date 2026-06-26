@@ -94,7 +94,7 @@ export function useWorkspaceChat() {
     })
   }, [addMessage, clearStreamingText, setTyping])
 
-  const sendWorkspaceMessage = useCallback(async ({ text, displayText, attachments = [] }: { text: string; displayText?: string; attachments?: File[] }) => {
+  const sendWorkspaceMessage = useCallback(async ({ text, displayText, attachments = [], uploadFields = {} }: { text: string; displayText?: string; attachments?: File[]; uploadFields?: Record<string, string> }) => {
     if (!text.trim() && attachments.length === 0) return
     const visibleText = displayText ?? text
     abortRef.current = false
@@ -125,6 +125,7 @@ export function useWorkspaceChat() {
           fields: {
             workspaceId,
             ...(ws?.projectId ? { projectId: ws.projectId } : {}),
+            ...uploadFields,
           },
         })
 
