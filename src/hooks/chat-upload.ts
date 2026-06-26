@@ -34,6 +34,39 @@ function friendlyUploadError(err: unknown) {
   return String(err)
 }
 
+function shouldTryBrowserCompression(file: File) {
+  if (!file.type.startsWith('image/')) return false
+  if (/heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)) return false
+  return file.size > 6 * 1024 * 1024
+}
+
+async function compressImageForUpload(file: File): Promise<File> {
+  if (!shouldTryBrowserCompression(file)) return file
+  if (typeof createImageBitmap !== 'function') return file
+
+  try {
+    const bitmap = await createImageBitmap(file)
+    const maxSide = 2200
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close?.()
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82))
+    if (!blob || blob.size <= 0 || blob.size >= file.size) return file
+    const stem = file.name.replace(/\.[^.]+$/, '') || 'photo'
+    return new File([blob], `${stem}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified })
+  } catch (err) {
+    console.warn('[chat-upload] image compression skipped:', err)
+    return file
+  }
+}
+
 async function uploadOneFile(file: File, fields: Record<string, string>, signal?: AbortSignal) {
   const attempts = [0, 900, 1800]
   let lastError: unknown
@@ -42,8 +75,9 @@ async function uploadOneFile(file: File, fields: Record<string, string>, signal?
     if (signal?.aborted) throw new DOMException('Upload stopped', 'AbortError')
 
     try {
+      const uploadFile = await compressImageForUpload(file)
       const form = new FormData()
-      form.append('files', file)
+      form.append('files', uploadFile)
       for (const [key, value] of Object.entries(fields)) {
         if (value) form.append(key, value)
       }

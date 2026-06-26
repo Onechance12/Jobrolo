@@ -180,6 +180,8 @@ export function useWorkspaceChat() {
               createdAt: new Date().toISOString(),
             })
           }
+
+          if (!text.trim()) return
       } catch (e) {
         if (abortRef.current) return
         console.error('[ws-chat] upload:', e)

@@ -207,7 +207,7 @@ function plainMessageText(text: string) {
 }
 
 function isAffirmativeReply(text: string) {
-  return /^(yes|yeah|yea|yep|yup|ok|okay|sure|do it|go ahead|proceed|please do|sounds good|that works|correct)$/i.test(plainMessageText(text))
+  return /^(yes|yeah|yea|yep|yup|ok|okay|sure|do it|go ahead|proceed|please do|sounds good|that works|correct)(\b|[.!?])?.{0,120}$/i.test(plainMessageText(text))
 }
 
 function lastMessageByRole(messages: ChatMessage[], role: ChatMessage['role'], beforeIndex = messages.length) {
@@ -281,10 +281,26 @@ function buildAffirmativeContinuationInstruction(messages: ChatMessage[]) {
   if (!latestUser || !isAffirmativeReply(latestUser.message.content)) return null
   const previousAssistant = lastMessageByRole(messages, 'assistant', latestUser.index)
   if (!previousAssistant) return null
+  const previousAssistantText = plainMessageText(previousAssistant.message.content)
 
-  const customerName = extractPendingProjectCustomerName(previousAssistant.message.content)
+  if (/approval needed|requires approval|review and approve|approve before/i.test(previousAssistantText)) {
+    const toolName =
+      /delete (?:client|customer)|delete_customer/i.test(previousAssistantText) ? 'delete_customer' :
+      /delete (?:file|document)|delete_document/i.test(previousAssistantText) ? 'delete_document' :
+      /import price|price sheet/i.test(previousAssistantText) ? 'import_price_sheet_items' :
+      undefined
+    return `The latest user reply "${plainMessageText(latestUser.message.content)}" confirms an approval request from the previous assistant message.
+
+Do not create a new approval request. Do not narrate.
+
+Call decide_pending_action_requests with decision "approved"${toolName ? ` and toolName "${toolName}"` : ''}.
+
+Only say the action completed after the approval replay tool result confirms success. If multiple approvals match, ask which exact approval to run. Respond as JSON only.`
+  }
+
+  const customerName = extractPendingProjectCustomerName(previousAssistantText)
   if (!customerName) {
-    const linkCustomerName = extractPendingLinkCustomerName(previousAssistant.message.content)
+    const linkCustomerName = extractPendingLinkCustomerName(previousAssistantText)
     const documentRef = linkCustomerName ? findRecentDocumentReference(messages, latestUser.index) : null
     if (linkCustomerName && documentRef) {
       return `The latest user reply "${plainMessageText(latestUser.message.content)}" confirms the previous assistant offer to link/attach the recent uploaded file to customer "${linkCustomerName}".
@@ -311,6 +327,29 @@ Call create_project_for_customer with customerName "${customerName}".
 ${requestedChatType ? `The user's original request also asked for a ${requestedChatType} chat. After create_project_for_customer returns a real projectId, continue the workflow by calling create_project_chat with that projectId and chatType "${requestedChatType}".` : ''}
 
 Only say created/done after the relevant tool result confirms success. Respond as JSON only.`
+}
+
+function buildUploadLinkContinuationInstruction(messages: ChatMessage[]) {
+  const latestUser = lastMessageByRole(messages, 'user')
+  if (!latestUser) return null
+  const latest = plainMessageText(latestUser.message.content)
+  if (!latest || latest.length > 160) return null
+  const previousAssistant = lastMessageByRole(messages, 'assistant', latestUser.index)
+  if (!previousAssistant) return null
+  const previousText = plainMessageText(previousAssistant.message.content)
+  if (!/which customer or project should i attach|which client or project should i attach|attach this upload/i.test(previousText)) return null
+  const documentRef = findRecentDocumentReference(messages, latestUser.index)
+  if (!documentRef) return null
+  const customerName = cleanCustomerName(latest)
+  if (!customerName || /^(project|customer|client|job)$/i.test(customerName)) return null
+
+  return `The previous assistant asked which customer/project to attach the recent upload to. The latest user answered "${customerName}".
+
+Do not ask again and do not require a project for customer-file attachment.
+
+Call link_document_to_customer with customerName "${customerName}"${documentRef.documentId ? ` and documentId "${documentRef.documentId}"` : documentRef.filename ? ` and filename "${documentRef.filename}"` : ''}.
+
+Only say linked/attached after the tool result confirms success. Respond as JSON only.`
 }
 
 function buildMissingToolInstruction(text: string) {
@@ -363,7 +402,7 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxIterations = opts.maxIterations ?? 4
   const messages = [...opts.messages]
-  const continuationInstruction = buildAffirmativeContinuationInstruction(messages)
+  const continuationInstruction = buildAffirmativeContinuationInstruction(messages) ?? buildUploadLinkContinuationInstruction(messages)
   if (continuationInstruction) {
     const insertAt = Math.max(0, messages.length - 1)
     console.log(`[agent-loop] affirmative continuation detected contractorId=${opts.contractorId}`)

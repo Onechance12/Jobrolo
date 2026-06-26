@@ -197,6 +197,11 @@ export function useChat() {
               createdAt: new Date().toISOString(),
             })
           }
+
+          if (!text.trim()) {
+            clearUploadProgress()
+            return
+          }
       } catch (err) {
         if (abortRef.current) return
         console.error('[use-chat] upload:', err)

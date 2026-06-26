@@ -79,7 +79,7 @@ export class OpenAiVisionOcrProvider implements DocumentOcrProvider {
   }
 
   async extractFromPdf(filePath: string): Promise<OcrResult | null> {
-    console.log(`[doc-worker] using vision OCR skipped for PDF ${filePath} — PDF page rendering dependency is not configured`)
+    console.warn(`[doc-worker] vision OCR PDF skipped for ${filePath}: PDF page rendering dependencies are not installed. Embedded PDF text extraction still runs before this fallback.`)
     return null
   }
 

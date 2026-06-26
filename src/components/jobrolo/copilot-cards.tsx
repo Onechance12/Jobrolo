@@ -151,6 +151,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('signed_document') || cardType.includes('generated_document_pdf')) {
     return <DocumentPdfCard data={contextData as any} />
   }
+  if (cardType.includes('document_link_review')) {
+    return <DocumentLinkReviewCard data={contextData as any} />
+  }
   if (cardType.includes('document_review')) {
     return <DocumentReviewCard data={contextData as any} />
   }
@@ -413,6 +416,84 @@ export function DocumentReviewCard({ data }: { data?: any }) {
         </div>
         {data?.aiSummary ? <div className="rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">{String(data.aiSummary).slice(0, 240)}</div> : null}
       </CardContent>
+    </Card>
+  )
+}
+
+export function DocumentLinkReviewCard({ data }: { data?: any }) {
+  const detected = data?.detectedCustomer && typeof data.detectedCustomer === 'object' ? data.detectedCustomer : {}
+  const candidates = Array.isArray(data?.candidateCustomers) ? data.candidateCustomers : []
+  const documentId = data?.documentId ? String(data.documentId) : ''
+  const documentName = data?.documentName || data?.name || 'this document'
+
+  function insertPrompt(text: string) {
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-amber-200 bg-amber-50/70 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4" /> Review before attaching
+          </CardTitle>
+          <Badge variant="outline" className="text-[10px]">human check</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-foreground/90">
+          Jobrolo found possible customer info in <span className="font-medium">{String(documentName)}</span>, but it needs confirmation before changing a customer file.
+        </p>
+        <div className="rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">
+          <div className="mb-1 font-semibold text-foreground">Detected in document</div>
+          {detected.name ? <div><span className="font-medium text-foreground">Name:</span> {String(detected.name)}</div> : null}
+          {detected.phone ? <div><span className="font-medium text-foreground">Phone:</span> {String(detected.phone)}</div> : null}
+          {detected.email ? <div><span className="font-medium text-foreground">Email:</span> {String(detected.email)}</div> : null}
+          {detected.address ? <div><span className="font-medium text-foreground">Address:</span> {String(detected.address)}</div> : null}
+          {!detected.name && !detected.phone && !detected.email && !detected.address ? <div>No readable customer fields were extracted.</div> : null}
+        </div>
+        {candidates.length ? (
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Possible saved matches</div>
+            {candidates.slice(0, 4).map((candidate: any) => {
+              const name = String(candidate?.name || 'Saved customer')
+              return (
+                <div key={String(candidate?.id || name)} className="rounded-lg border bg-background/70 p-2 text-xs">
+                  <div className="font-semibold text-foreground">{name}</div>
+                  <div className="text-muted-foreground">
+                    {candidate?.phone ? <span>{String(candidate.phone)} · </span> : null}
+                    {candidate?.address ? <span>{String(candidate.address)}</span> : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 h-7 text-xs"
+                    onClick={() => insertPrompt(`Attach ${documentName} (${documentId ? `documentId ${documentId}` : 'latest upload'}) to ${name}. If there is a phone or address conflict, ask me before changing saved customer info.`)}
+                  >
+                    Attach to {name}
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button
+          size="sm"
+          onClick={() => insertPrompt(`Create a project/job from ${documentName} (${documentId ? `documentId ${documentId}` : 'latest upload'}). Check for customer conflicts before linking.`)}
+        >
+          Create job from document
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => insertPrompt(`Leave ${documentName} (${documentId ? `documentId ${documentId}` : 'latest upload'}) unassigned for now.`)}
+        >
+          Leave unassigned
+        </Button>
+      </CardFooter>
     </Card>
   )
 }

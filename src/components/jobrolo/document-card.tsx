@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
-import { Loader2, CheckCircle2, FileText, AlertCircle, Download, ScanLine } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Loader2, CheckCircle2, FileText, AlertCircle, Download, ScanLine, Link2, FolderPlus, Rows3, FileCheck2 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 
@@ -42,6 +43,12 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
   const reviewNotes = (extracted?.reviewNotes as string[] | undefined) ?? []
   const warnings = (extracted?.warnings as string[] | undefined) ?? []
   const hasReviewNotes = reviewNotes.length > 0 || warnings.length > 0
+  const isPriceSheet = attachment.documentType === 'price_sheet' || String(attachment.documentCategory ?? '').includes('price')
+  const isScopeLike = ['scope_of_loss', 'estimate', 'insurance_claim'].includes(attachment.documentType ?? '')
+
+  function insertPrompt(text: string) {
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+  }
 
   // Status icon
   const StatusIcon = isQueued || isProcessing
@@ -68,7 +75,7 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
   const confidenceLabel = confidence == null ? null : `${confidence}%`
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/60 overflow-hidden w-full sm:max-w-md">
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 overflow-hidden w-full sm:max-w-md dark:border-slate-800 dark:bg-slate-950/40">
       <div
         onClick={() => isReady && hasExtractedData && setExpanded(v => !v)}
         className={cn(
@@ -77,15 +84,15 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
           (!isReady || !hasExtractedData) && 'cursor-default',
         )}
       >
-        <div className="flex-shrink-0 w-9 h-9 rounded-md bg-white border border-slate-200 flex items-center justify-center">
+        <div className="flex-shrink-0 w-9 h-9 rounded-md bg-white border border-slate-200 flex items-center justify-center dark:border-slate-800 dark:bg-slate-900">
           {StatusIcon}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium text-slate-800 truncate">{attachment.name}</span>
+            <span className="text-sm font-medium text-slate-800 truncate dark:text-slate-100">{attachment.name}</span>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{typeLabel}</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{typeLabel}</span>
             {attachment.size !== undefined && (
               <>
                 <span className="text-[10px] text-slate-400">·</span>
@@ -110,7 +117,7 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
             )}
           </div>
           {attachment.documentSummary && (
-            <div className="text-xs text-slate-600 mt-1.5 line-clamp-2">{attachment.documentSummary}</div>
+            <div className="text-xs text-slate-600 mt-1.5 line-clamp-2 dark:text-slate-300">{attachment.documentSummary}</div>
           )}
         </div>
         <a
@@ -118,17 +125,25 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
           target="_blank"
           rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}
-          className="flex-shrink-0 p-1.5 rounded-md hover:bg-slate-200 text-slate-500"
+          className="flex-shrink-0 p-1.5 rounded-md hover:bg-slate-200 text-slate-500 dark:hover:bg-slate-800 dark:text-slate-300"
           aria-label="Open file"
         >
           <Download className="w-4 h-4" />
         </a>
       </div>
+      {attachment.documentId ? (
+        <div className="flex flex-wrap gap-1.5 border-t border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/50">
+          <ActionChip icon={<Link2 className="h-3.5 w-3.5" />} label="Attach" onClick={() => insertPrompt(`Attach ${attachment.name} (documentId ${attachment.documentId}) to a customer or project. Ask me which one if you need more info.`)} />
+          <ActionChip icon={<FolderPlus className="h-3.5 w-3.5" />} label="Create job" onClick={() => insertPrompt(`Create a project/job from ${attachment.name} (documentId ${attachment.documentId}). Check for customer conflicts before linking.`)} />
+          {isScopeLike ? <ActionChip icon={<FileCheck2 className="h-3.5 w-3.5" />} label="Save scope" onClick={() => insertPrompt(`Save ${attachment.name} (documentId ${attachment.documentId}) as a scope/estimate in the correct job file. Ask which project if needed.`)} /> : null}
+          {isPriceSheet ? <ActionChip icon={<Rows3 className="h-3.5 w-3.5" />} label="Review rows" onClick={() => insertPrompt(`Review the first 10 extracted material rows from ${attachment.name} (documentId ${attachment.documentId}) and tell me if they are pending import or already saved.`)} /> : null}
+        </div>
+      ) : null}
       {expanded && isReady && extracted && (
-        <div className="border-t border-slate-200 bg-white px-3 py-3 space-y-3">
+        <div className="border-t border-slate-200 bg-white px-3 py-3 space-y-3 dark:border-slate-800 dark:bg-slate-950">
           {claimInfo && Object.keys(claimInfo).length > 0 && (
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1.5">Claim Info</div>
+              <div className="text-xs font-semibold text-slate-700 mb-1.5 dark:text-slate-200">Claim Info</div>
               <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
                 {claimInfo.insured ? <><dt className="text-[10px] text-slate-500 uppercase">Insured</dt><dd className="text-slate-800 font-medium">{String(claimInfo.insured)}</dd></> : null}
                 {claimInfo.property ? <><dt className="text-[10px] text-slate-500 uppercase">Property</dt><dd className="text-slate-800 font-medium">{String(claimInfo.property)}</dd></> : null}
@@ -139,8 +154,8 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
           )}
           {lineItems.length > 0 && (
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1.5">Line Items ({lineItems.length})</div>
-              <div className="max-h-48 overflow-y-auto">
+              <div className="text-xs font-semibold text-slate-700 mb-1.5 dark:text-slate-200">Line Items ({lineItems.length})</div>
+              <div className="max-h-48 overflow-x-auto overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-white">
                     <tr className="text-left text-slate-500 border-b border-slate-100">
@@ -167,8 +182,8 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
           )}
           {materialItems.length > 0 && (
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1.5">Material Items ({materialItems.length})</div>
-              <div className="max-h-48 overflow-y-auto">
+              <div className="text-xs font-semibold text-slate-700 mb-1.5 dark:text-slate-200">Material Items ({materialItems.length})</div>
+              <div className="max-h-48 overflow-x-auto overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-white">
                     <tr className="text-left text-slate-500 border-b border-slate-100">
@@ -220,5 +235,18 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
         </div>
       )}
     </div>
+  )
+}
+
+function ActionChip({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex min-h-[32px] items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+    >
+      {icon}
+      {label}
+    </button>
   )
 }

@@ -40,7 +40,6 @@ import { db } from '@/lib/db'
 import { analyzeDocument, enrichWithScopeIntelligence } from '@/lib/document-ai'
 import { extractPdfText } from '@/lib/pdf'
 import { convertHeicInBackground } from '@/lib/upload'
-import { logActivity, ACTIVITY_TYPES } from '@/lib/activity'
 import { toFileUrl } from '@/lib/file-url'
 import { completeJob, failJob, heartbeat } from '@/lib/jobs/queue'
 import { scoreExtraction } from '@/lib/document/extraction-quality'
@@ -49,6 +48,7 @@ import { compareExtractions, type ComparisonResult } from '@/lib/document/extrac
 import { createProjectTimelineEvent } from '@/lib/project-context'
 import { getConfiguredProviderName } from '@/lib/ai'
 import { resolveJobExecutionContext } from '@/lib/security/agent-execution'
+import { createRoleNotification } from '@/lib/notifications'
 
 interface AgentJobRow {
   id: string
@@ -420,8 +420,8 @@ async function processImageDocument(job: AgentJobRow, current: any) {
 
   if (analysis.detectedCustomer?.name) {
     try {
-      await autoLinkToCustomer(documentId, job.contractorId, analysis.detectedCustomer)
-    } catch (err) { console.error(`[doc-worker] customer linking failed:`, err) }
+      await queueCustomerDocumentReview(documentId, job.contractorId, analysis.detectedCustomer, current)
+    } catch (err) { console.error(`[doc-worker] customer/document review queue failed:`, err) }
   }
 
   await completeJob(job.id, {
@@ -772,13 +772,15 @@ async function processTextDocument(job: AgentJobRow, current: any) {
 
   console.log(`[doc-worker] doc=${documentId} | stage: analyzed → reviewed ✓ (method=${finalExtractionMethod}, confidence=${comparisonResult.confidence}/100)`)
 
-  // ----- Side effects: customer linking + material items -----
+  // ----- Side effects: review routing only -----
+  // Do NOT silently create/update/link customers from extracted document text.
+  // Extraction can be wrong ("Dison" vs "Disen", different phone/address, etc.).
+  // Route a review item instead so the operator explicitly decides how to attach it.
   if (analysis?.detectedCustomer?.name) {
     try {
-      await autoLinkToCustomer(documentId, job.contractorId, analysis.detectedCustomer)
-      console.log(`[doc-worker] doc=${documentId} | linked to customer: ${analysis.detectedCustomer.name}`)
+      await queueCustomerDocumentReview(documentId, job.contractorId, analysis.detectedCustomer, current)
     } catch (err) {
-      console.error(`[doc-worker] doc=${documentId} | customer linking failed:`, err)
+      console.error(`[doc-worker] doc=${documentId} | customer/document review queue failed:`, err)
     }
   }
 
@@ -842,49 +844,66 @@ async function recordDocumentProcessingTimeline(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Customer auto-linking
+// Customer/document review routing
 // ---------------------------------------------------------------------------
 
-async function autoLinkToCustomer(docId: string, contractorId: string, detected: { name?: string; email?: string | null; phone?: string | null; address?: string }) {
+async function queueCustomerDocumentReview(docId: string, contractorId: string, detected: { name?: string; email?: string | null; phone?: string | null; address?: string }, doc?: { originalName?: string | null; customerId?: string | null; projectId?: string | null }) {
   const name = detected.name?.trim()
   if (!name) return
-  const existing = (await db.customer.findMany({ where: { contractorId } })).find(c => c.name.toLowerCase() === name.toLowerCase())
-  let customer
-  if (existing) {
-    customer = await db.customer.update({
-      where: { id: existing.id },
-      data: {
-        email: detected.email ?? existing.email,
-        phone: detected.phone ?? existing.phone,
-        address: detected.address ?? existing.address,
-      },
-    })
-  } else {
-    customer = await db.customer.create({
-      data: {
-        contractorId,
-        name,
-        email: detected.email || null,
-        phone: detected.phone || null,
-        address: detected.address || null,
-      },
-    })
+
+  if (doc?.customerId || doc?.projectId) {
+    console.log(`[doc-worker] doc=${docId} | customer/document review skipped — already linked`)
+    return
   }
-  const project = await db.project.findFirst({
-    where: { customerId: customer.id, contractorId, status: 'active' },
-    include: { workspace: true },
-  })
-  await db.document.update({
-    where: { id: docId },
-    data: {
-      customerId: customer.id,
-      projectId: project?.id ?? null,
-      workspaceId: project?.workspace?.id ?? null,
+
+  const existing = await db.inboxItem.findFirst({
+    where: {
+      contractorId,
+      type: 'document_link_review',
+      relatedType: 'document',
+      relatedId: docId,
+      status: { in: ['unread', 'read'] },
     },
   })
-  if (project) {
-    await logActivity(project.id, ACTIVITY_TYPES.DOCUMENT_ANALYZED, `Document analyzed: ${detected.name}`, {
-      source: 'system', body: '', relatedId: docId, relatedType: 'document',
-    }).catch(() => {})
-  }
+  if (existing) return
+
+  const candidates = await db.customer.findMany({
+    where: {
+      contractorId,
+      OR: [
+        { name: { contains: name } },
+        ...(detected.phone ? [{ phone: { contains: detected.phone } }] : []),
+        ...(detected.email ? [{ email: { contains: detected.email } }] : []),
+        ...(detected.address ? [{ address: { contains: detected.address } }] : []),
+      ],
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 5,
+    select: { id: true, name: true, phone: true, email: true, address: true },
+  })
+
+  await createRoleNotification({
+    contractorId,
+    role: 'project_manager',
+    type: 'document_link_review',
+    title: `Review document owner: ${doc?.originalName ?? 'uploaded document'}`,
+    summary: `Document analysis detected ${name}. Confirm before attaching or updating a customer file.`,
+    priority: 'normal',
+    relatedType: 'document',
+    relatedId: docId,
+    payload: {
+      cardType: 'document_link_review',
+      documentId: docId,
+      documentName: doc?.originalName ?? null,
+      detectedCustomer: detected,
+      candidateCustomers: candidates,
+      suggestedPrompts: [
+        `Attach ${doc?.originalName ?? 'this document'} to ${name}`,
+        `Create a project from document ${docId}`,
+        `Leave document ${doc?.originalName ?? docId} unassigned`,
+      ],
+      message: 'Extraction suggested a customer, but Jobrolo did not silently change records. Use chat or the file card to attach/create/update after review.',
+    },
+  })
+  console.log(`[doc-worker] doc=${docId} | queued customer/document review for detected customer: ${name}`)
 }
