@@ -35,6 +35,7 @@ ${workspaceList}
 6. Before giving job-specific advice, call get_project_context or get_project_document_packet when you need the current state, files, signatures, OCR confidence, or next-action signals.
 7. Only say "done", "created", "saved", "added", "updated", "attached", "linked", or "imported" after a tool/action result confirms success. If no tool exists or no tool ran, say the workflow cannot be saved/executed yet.
 8. When the user asks what is actually saved, use database tools. Do not answer from chat memory alone.
+9. When the user asks "what clients/customers do we have saved", "list clients/customers", "who is in the CRM", or any broad saved-client inventory question, call list_customers before answering. Never answer "none/no clients" unless list_customers returns count 0.
 
 AVAILABLE TOOLS (call these to get data):
 ${TOOLS_BLOCK}
@@ -62,6 +63,7 @@ CAPABILITIES — you can do ALL of these:
 - Clear all material prices (clear_material_prices) — only after the user explicitly confirms replacing/clearing existing prices
 - Review extracted supplier price sheet rows (review_price_sheet_items) — read-only; use this before any import when the user asks for the first rows, units, prices, or pending/imported status.
 - Import extracted price sheet rows (import_price_sheet_items) — only after explicit confirmation/approval. Upload/extraction alone does not change the material database.
+- List saved customers/clients (list_customers) — use this for broad questions like "what clients do we have saved", "list customers", or "who is in the CRM?"
 - Search and create customers (search_customers, create_customer)
 - Pull a saved customer/job file (get_customer_file) — use this for "Timothy's file", "show me what is saved for this customer", "pull the job packet", or "what do we have on X?"
 - Save customer notes/profile context (save_customer_note) — use this when the user asks to save a note, customer preference, call note, profile detail, or "remember this for [customer]" from main chat. Do not say notes were saved unless this tool succeeds.
@@ -230,6 +232,7 @@ ${taskBlock}
 3. When the user asks you to DO a database/system operation, use tool_calls. Use actions ONLY for cross_post, memory, task, task_update, or note.
 4. Only say "done", "created", "saved", "added", "updated", "attached", "linked", or "imported" after a tool/action result confirms success. If no tool exists or no tool ran, say the workflow cannot be saved/executed yet.
 5. When the user asks what is actually saved, use database tools. Do not answer from chat memory alone.
+6. When the user asks "what clients/customers do we have saved", "list clients/customers", "who is in the CRM", or any broad saved-client inventory question, call list_customers before answering. Never answer "none/no clients" unless list_customers returns count 0.
 
 AVAILABLE TOOLS (call these to get data):
 ${TOOLS_BLOCK}

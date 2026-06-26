@@ -8,7 +8,8 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
   { name: 'get_document_content', description: 'Get full extracted content from an uploaded document. ALWAYS call before answering about document contents.', parameters: { documentId: { type: 'string', description: 'Document ID', required: false }, filename: { type: 'string', description: 'Partial filename', required: false } } },
   { name: 'list_documents', description: 'List recently uploaded documents.', parameters: { fileType: { type: 'string', description: 'Filter: price_sheet, scope_of_loss, estimate, etc.', required: false } } },
   { name: 'get_project_details', description: 'Get project details: customer, tasks, notes, memory.', parameters: { workspaceName: { type: 'string', description: 'Workspace name', required: true } } },
-  { name: 'search_customers', description: 'Search customers by name, phone, or email.', parameters: { query: { type: 'string', description: 'Search term', required: true } } },
+  { name: 'list_customers', description: 'List saved customers/clients from the database. Use before saying no clients exist.', parameters: { query: { type: 'string', description: 'Optional filter', required: false }, limit: { type: 'number', description: 'Maximum customers to return', required: false } } },
+  { name: 'search_customers', description: 'Search customers by name, phone, email, or address.', parameters: { query: { type: 'string', description: 'Search term', required: true } } },
   { name: 'get_workspace_memory', description: 'Get recent memory entries for a workspace.', parameters: { workspaceName: { type: 'string', description: 'Workspace name', required: true }, category: { type: 'string', description: 'Filter: decision, material_decision, etc.', required: false } } },
   { name: 'list_photos', description: 'List uploaded photos. Returns URLs for attaching to responses.', parameters: { workspaceName: { type: 'string', description: 'Filter by workspace', required: false } } },
   { name: 'create_customer', description: 'Create a new customer. ASK for info first — do NOT call with empty data.', parameters: { name: { type: 'string', description: 'Full name (required)', required: true }, phone: { type: 'string', description: 'Phone', required: false }, email: { type: 'string', description: 'Email', required: false }, address: { type: 'string', description: 'Address', required: false } } },
@@ -21,6 +22,7 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
       case 'get_document_content': return await getDocumentContent(args.documentId as string | undefined, args.filename as string | undefined, contractorId)
       case 'list_documents': return await listDocuments(args.fileType as string | undefined, contractorId)
       case 'get_project_details': return await getProjectDetails(args.workspaceName as string, contractorId)
+      case 'list_customers': return await listCustomers(args.query as string | undefined, args.limit as number | undefined, contractorId)
       case 'search_customers': return await searchCustomers(args.query as string, contractorId)
       case 'get_workspace_memory': return await getWorkspaceMemory(args.workspaceName as string, args.category as string | undefined, contractorId)
       case 'list_photos': return await listPhotos(args.workspaceName as string | undefined, contractorId)
@@ -58,8 +60,60 @@ async function getProjectDetails(workspaceName: string, contractorId: string) {
 }
 
 async function searchCustomers(query: string, contractorId: string) {
-  const customers = await db.customer.findMany({ where: { contractorId, OR: [{ name: { contains: query } }, { phone: { contains: query } }, { email: { contains: query } }] }, take: 10 })
+  const customers = await db.customer.findMany({ where: { contractorId, OR: [{ name: { contains: query } }, { phone: { contains: query } }, { email: { contains: query } }, { address: { contains: query } }] }, orderBy: { updatedAt: 'desc' }, take: 10 })
   return { success: true, data: { count: customers.length, customers } }
+}
+
+async function listCustomers(query: string | undefined, limitInput: number | undefined, contractorId: string) {
+  const filter = query?.trim()
+  const limit = Math.min(Math.max(Number(limitInput ?? 25), 1), 50)
+  const customers = await db.customer.findMany({
+    where: {
+      contractorId,
+      ...(filter ? {
+        OR: [
+          { name: { contains: filter } },
+          { phone: { contains: filter } },
+          { email: { contains: filter } },
+          { address: { contains: filter } },
+          { notes: { contains: filter } },
+        ],
+      } : {}),
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      address: true,
+      notes: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: { select: { projects: true, documents: true, noteRecords: true, followUps: true } },
+    },
+  })
+  return {
+    success: true,
+    data: {
+      count: customers.length,
+      query: filter || null,
+      limit,
+      customers: customers.map(c => ({
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        address: c.address,
+        notes: c.notes,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        counts: { projects: c._count.projects, documents: c._count.documents, notes: c._count.noteRecords, followUps: c._count.followUps },
+      })),
+      message: customers.length ? `Found ${customers.length} saved customer${customers.length === 1 ? '' : 's'}.` : 'No saved customer records found for this contractor.',
+    },
+  }
 }
 
 async function getWorkspaceMemory(workspaceName: string, category: string | undefined, contractorId: string) {

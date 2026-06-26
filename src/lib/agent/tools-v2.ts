@@ -933,7 +933,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'search_customers',
-    description: 'Search customers by name, phone, or email.',
+    description: 'Search customers by name, phone, email, or address. Use for specific customer lookups. For broad questions like "what clients do we have saved" or "list customers", use list_customers.',
     schema: z.object({ query: z.string().min(1).max(200) }),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
@@ -942,10 +942,86 @@ export const TOOLS: ToolDef[] = [
           { name: { contains: args.query } },
           { phone: { contains: args.query } },
           { email: { contains: args.query } },
+          { address: { contains: args.query } },
         ] },
+        orderBy: { updatedAt: 'desc' },
         take: 10,
       })
       return { success: true, data: { count: customers.length, customers } }
+    },
+  },
+  {
+    name: 'list_customers',
+    description: 'List saved customers/clients from the database. Use this before answering broad questions like "what clients do we have saved", "list customers", "who is in the CRM", or "show my clients". Never answer that there are no clients unless this tool returns count 0.',
+    schema: z.object({
+      query: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      const query = typeof args.query === 'string' ? args.query.trim() : ''
+      const limit = Math.min(Math.max(Number(args.limit ?? 25), 1), 50)
+      const customers = await db.customer.findMany({
+        where: {
+          contractorId,
+          ...(query ? {
+            OR: [
+              { name: { contains: query } },
+              { phone: { contains: query } },
+              { email: { contains: query } },
+              { address: { contains: query } },
+              { notes: { contains: query } },
+            ],
+          } : {}),
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          address: true,
+          notes: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: {
+            select: {
+              projects: true,
+              documents: true,
+              noteRecords: true,
+              followUps: true,
+            },
+          },
+        },
+      })
+      return {
+        success: true,
+        data: {
+          count: customers.length,
+          query: query || null,
+          limit,
+          customers: customers.map(c => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+            address: c.address,
+            notes: c.notes,
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt,
+            counts: {
+              projects: c._count.projects,
+              documents: c._count.documents,
+              notes: c._count.noteRecords,
+              followUps: c._count.followUps,
+            },
+          })),
+          message: customers.length
+            ? `Found ${customers.length} saved customer${customers.length === 1 ? '' : 's'}.`
+            : 'No saved customer records found for this contractor.',
+        },
+      }
     },
   },
   {
