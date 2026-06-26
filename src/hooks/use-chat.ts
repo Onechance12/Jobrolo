@@ -130,7 +130,7 @@ export function useChat() {
             createdAt: new Date().toISOString(),
           })
           clearUploadProgress()
-          return
+          return { ok: false, keepAttachments: true }
         }
 
         uploadedDocIds = data.documents.map(d => d.id)
@@ -200,7 +200,7 @@ export function useChat() {
 
           if (!text.trim()) {
             clearUploadProgress()
-            return
+            return { ok: true }
           }
       } catch (err) {
         if (abortRef.current) return
@@ -213,7 +213,7 @@ export function useChat() {
           content: `I couldn't upload your file(s). Please try again.`,
           createdAt: new Date().toISOString(),
         })
-        return  // ← ABORT
+        return { ok: false, keepAttachments: true }
       }
     }
 
@@ -314,6 +314,7 @@ export function useChat() {
       abortControllerRef.current = null
       setTyping(false); setStreaming(false); clearStreamingText(); clearUploadProgress(); abortRef.current = false
     }
+    return { ok: true }
   }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, refreshBusinessContext, clearUploadProgress])
 
   return { sendMessage, stopMessage }

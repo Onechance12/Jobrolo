@@ -117,7 +117,7 @@ export function useWorkspaceChat() {
             content: `I couldn't save the upload yet: ${errMsg}. Try one smaller file first.`,
             createdAt: new Date().toISOString(),
           })
-          return
+          return { ok: false, keepAttachments: true }
         }
 
           uploadedDocIds = data.documents.map(x => x.id)
@@ -181,7 +181,7 @@ export function useWorkspaceChat() {
             })
           }
 
-          if (!text.trim()) return
+          if (!text.trim()) return { ok: true }
       } catch (e) {
         if (abortRef.current) return
         console.error('[ws-chat] upload:', e)
@@ -191,7 +191,7 @@ export function useWorkspaceChat() {
           content: `I couldn't upload your file(s). Please try again.`,
           createdAt: new Date().toISOString(),
         })
-        return  // ABORT
+        return { ok: false, keepAttachments: true }
       }
     }
 
@@ -273,6 +273,7 @@ export function useWorkspaceChat() {
       abortControllerRef.current = null
       setTyping(false); clearStreamingText(); abortRef.current = false
     }
+    return { ok: true }
   }, [addMessage, updateMessage, updateLastMessage, setTyping, setStreamingText, clearStreamingText])
 
   return { sendWorkspaceMessage, stopWorkspaceMessage }

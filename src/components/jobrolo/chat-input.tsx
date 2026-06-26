@@ -4,12 +4,15 @@ import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square } from 'lucide-
 import { cn, formatFileSize, isImageFile } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 
-interface Props { onSend: (args: { text: string; attachments?: File[] }) => void; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
+type SendResult = { ok?: boolean; keepAttachments?: boolean } | void
+interface Props { onSend: (args: { text: string; attachments?: File[] }) => SendResult | Promise<SendResult>; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
 const SUGGESTIONS = ['What needs attention?', 'Show saved clients', 'Create a job']
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: Props) {
   const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
   const textRef = useRef(text); useEffect(() => { textRef.current = text }, [text])
 
@@ -32,14 +35,40 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
 
   useEffect(() => { const ta = textareaRef.current; if (!ta) return; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }, [text])
 
-  const handleSend = useCallback(() => { const t = text.trim(); if (!t && !pendingFiles.length) return; if (disabled) return; onSend({ text: t, attachments: pendingFiles }); setText(''); setPendingFiles([]) }, [text, pendingFiles, disabled, onSend])
+  const handleSend = useCallback(async () => {
+    const t = text.trim()
+    if (!t && !pendingFiles.length) return
+    if (disabled || submitting) return
+    setLocalError(null)
+    setSubmitting(true)
+    const filesToSend = [...pendingFiles]
+    try {
+      const result = await onSend({ text: t, attachments: filesToSend })
+      if (result && typeof result === 'object' && result.keepAttachments) {
+        setLocalError('Upload did not finish. I kept the file attached so you can try again.')
+        return
+      }
+      setText('')
+      setPendingFiles([])
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Upload did not finish. I kept the file attached so you can try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [text, pendingFiles, disabled, submitting, onSend])
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
   const handleFiles = (files: FileList | null) => {
     if (!files) return
-    setPendingFiles(p => [...p, ...Array.from(files)])
+    const selected = Array.from(files).filter(file => file.size > 0)
+    if (!selected.length) return
+    console.log('[chat-input] files selected:', selected.map(file => ({ name: file.name, size: file.size, type: file.type || 'unknown' })))
+    setLocalError(null)
+    setPendingFiles(p => [...p, ...selected])
     setShowAttachMenu(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    window.setTimeout(() => {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
+    }, 0)
   }
   const insertPrompt = (prompt: string) => {
     setText(prompt)
@@ -53,13 +82,14 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
   return (
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
       {pendingFiles.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{pendingFiles.map((f, i) => <PendingFileChip key={i} file={f} onRemove={() => setPendingFiles(p => p.filter((_, idx) => idx !== i))} />)}</div>}
+      {localError ? <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{localError}</div> : null}
       {text === '' && !pendingFiles.length && !listening && <div className="mb-2 flex flex-wrap gap-1.5">{SUGGESTIONS.map(s => <button key={s} onClick={() => setText(s)} className="px-3 py-1.5 rounded-full text-xs bg-muted text-muted-foreground hover:bg-muted-foreground/20 min-h-[32px]">{s}</button>)}</div>}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
       <div className="flex items-end gap-2">
-        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center"><Plus className="w-5 h-5" /></button>
+        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center"><Plus className="w-5 h-5" /></button>
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[220px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg"><button onClick={() => cameraInputRef.current?.click()} className="flex min-h-[44px] w-full items-center gap-2.5 px-3 py-3 text-left text-sm text-foreground hover:bg-muted/50"><Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" /><span><div className="font-medium">Take photo</div><div className="text-[10px] text-muted-foreground/60">Save field photos</div></span></button><button onClick={() => fileInputRef.current?.click()} className="flex min-h-[44px] w-full items-center gap-2.5 px-3 py-3 text-left text-sm text-foreground hover:bg-muted/50"><Paperclip className="w-5 h-5 text-muted-foreground" /><span><div className="font-medium">Attach file</div><div className="text-[10px] text-muted-foreground/60">PDFs, docs, images</div></span></button><button onClick={() => insertPrompt('Create a client named ')} className="flex min-h-[44px] w-full items-center gap-2.5 px-3 py-3 text-left text-sm text-foreground hover:bg-muted/50"><Plus className="w-5 h-5 text-blue-600 dark:text-blue-300" /><span><div className="font-medium">Create client</div><div className="text-[10px] text-muted-foreground/60">Add through chat</div></span></button><button onClick={() => insertPrompt('Create a project/job for ')} className="flex min-h-[44px] w-full items-center gap-2.5 px-3 py-3 text-left text-sm text-foreground hover:bg-muted/50"><FileText className="w-5 h-5 text-blue-600 dark:text-blue-300" /><span><div className="font-medium">Create job</div><div className="text-[10px] text-muted-foreground/60">Attach to a client</div></span></button><button onClick={() => insertPrompt('Create a crew chat for ')} className="flex min-h-[44px] w-full items-center gap-2.5 px-3 py-3 text-left text-sm text-foreground hover:bg-muted/50"><Mic className="w-5 h-5 text-blue-600 dark:text-blue-300" /><span><div className="font-medium">Create crew chat</div><div className="text-[10px] text-muted-foreground/60">Start a shared thread</div></span></button></div></>)}
         </div>
-        <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder ?? 'Message Jobrolo…'} rows={1} disabled={disabled} suppressHydrationWarning className="flex-1 resize-none bg-muted/50 border border-border rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50 max-h-40 min-h-[44px]" />
+        <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder ?? 'Message Jobrolo…'} rows={1} disabled={disabled || submitting} suppressHydrationWarning className="flex-1 resize-none bg-muted/50 border border-border rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50 max-h-40 min-h-[44px]" />
         {isWorking && onStop ? (
           <button onClick={onStop} className="flex-shrink-0 rounded-lg bg-slate-800 text-white hover:bg-slate-900 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white min-w-[52px] sm:min-w-[72px] min-h-[52px] flex items-center justify-center gap-1.5 px-3 shadow-sm" aria-label="Stop Jobrolo">
             <Square className="w-4 h-4 fill-current" />
@@ -67,8 +97,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
           </button>
         ) : (
           <>
-            {speechSupported && <button onClick={startListening} disabled={disabled} className={cn('flex-shrink-0 rounded-full transition-all min-w-[52px] min-h-[52px] flex items-center justify-center', listening ? 'bg-slate-800 text-white shadow-lg dark:bg-slate-100 dark:text-slate-950' : 'bg-blue-600 text-white hover:bg-blue-700', disabled && 'opacity-50')} aria-label={listening ? 'Stop voice input' : 'Start voice input'}><Mic className="w-5 h-5" /></button>}
-            {(text.trim() || pendingFiles.length > 0) && !listening && <button onClick={handleSend} disabled={disabled} className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"><Send className="w-4 h-4" /></button>}
+            {speechSupported && <button onClick={startListening} disabled={disabled || submitting} className={cn('flex-shrink-0 rounded-full transition-all min-w-[52px] min-h-[52px] flex items-center justify-center', listening ? 'bg-slate-800 text-white shadow-lg dark:bg-slate-100 dark:text-slate-950' : 'bg-blue-600 text-white hover:bg-blue-700', (disabled || submitting) && 'opacity-50')} aria-label={listening ? 'Stop voice input' : 'Start voice input'}><Mic className="w-5 h-5" /></button>}
+            {(text.trim() || pendingFiles.length > 0) && !listening && <button onClick={handleSend} disabled={disabled || submitting} className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"><Send className="w-4 h-4" /></button>}
           </>
         )}
       </div>

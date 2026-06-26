@@ -200,7 +200,7 @@ export default function Page() {
   }, [messages, workspaceMessages, isStreaming, isWorkspaceTyping, streamingText, workspaceStreamingText])
 
   const handleSend = useCallback((args: { text: string; attachments?: File[] }) => {
-    isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
+    return isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
   }, [isInWorkspace, sendWorkspaceMessage, sendMessage])
 
   const handleStop = useCallback(() => {
