@@ -3,7 +3,58 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireContext } from '@/lib/security/context'
 import { requireDocument } from '@/lib/security/ownership'
+import { enqueueAgentJob, kickAgentJob } from '@/lib/jobs/queue'
 export const runtime = 'nodejs'
+
+const STUCK_DOCUMENT_JOB_MS = 2 * 60 * 1000
+
+function isAnalyzingStatus(status: string) {
+  return status === 'queued' || status === 'processing'
+}
+
+async function nudgeDocumentAnalysis(input: {
+  documentId: string
+  contractorId: string
+  userId?: string | null
+  workspaceId?: string | null
+  status: string
+}) {
+  if (!isAnalyzingStatus(input.status)) return null
+  const latestJob = await db.agentJob.findFirst({
+    where: { contractorId: input.contractorId, type: 'doc_analysis', inputJson: { contains: input.documentId } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, updatedAt: true, error: true },
+  })
+
+  if (latestJob?.status === 'queued') {
+    kickAgentJob(latestJob.id, `document-status:${input.documentId}`)
+    return { action: 'kicked_queued_job', jobId: latestJob.id }
+  }
+
+  if (latestJob?.status === 'processing') {
+    const stale = Date.now() - latestJob.updatedAt.getTime() > STUCK_DOCUMENT_JOB_MS
+    if (!stale) return { action: 'already_processing', jobId: latestJob.id }
+    await db.agentJob.updateMany({
+      where: { id: latestJob.id, status: 'processing', contractorId: input.contractorId },
+      data: { status: 'queued', heartbeat: 'Recovered stale document analysis job from status poll' },
+    })
+    kickAgentJob(latestJob.id, `document-status-stale:${input.documentId}`)
+    return { action: 'requeued_stale_processing_job', jobId: latestJob.id }
+  }
+
+  if (!input.userId) return { action: 'cannot_enqueue_without_uploaded_by_user', jobId: latestJob?.id ?? null, previousStatus: latestJob?.status ?? 'missing' }
+
+  const job = await enqueueAgentJob({
+    contractorId: input.contractorId,
+    userId: input.userId,
+    type: 'doc_analysis',
+    input: { documentId: input.documentId, heicConversionNeeded: false },
+    workspaceId: input.workspaceId ?? undefined,
+    priority: 4,
+  })
+  kickAgentJob(job.id, `document-status-new:${input.documentId}`)
+  return { action: 'enqueued_replacement_job', jobId: job.id, previousStatus: latestJob?.status ?? 'missing' }
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireContext(req).catch(e => e)
@@ -24,6 +75,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!docWithRelations) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
+
+  const analysisNudge = await nudgeDocumentAnalysis({
+    documentId: docWithRelations.id,
+    contractorId: ctx.contractorId,
+    userId: docWithRelations.uploadedById,
+    workspaceId: docWithRelations.workspaceId,
+    status: docWithRelations.status,
+  }).catch(err => {
+    console.error(`[documents/${id}] analysis nudge failed:`, err)
+    return { action: 'nudge_failed', error: err instanceof Error ? err.message : String(err) }
+  })
 
   // Don't return the full ocrText by default (can be 100k+ chars) — return length + a preview.
   // The chat-status hook polls this endpoint, so we want it lean.
@@ -57,6 +119,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       extractedData: docWithRelations.extractedData ? JSON.parse(docWithRelations.extractedData) : null,
       status: docWithRelations.status,
       statusDetail,
+      analysisNudge,
       extractionMethod: docWithRelations.extractionMethod,
       // Collaborative extraction fields (v3)
       extractionConfidence: docWithRelations.extractionConfidence,

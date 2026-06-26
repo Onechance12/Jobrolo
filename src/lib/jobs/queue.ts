@@ -73,6 +73,13 @@ export async function enqueueAgentJob(opts: EnqueueOptions) {
   return job
 }
 
+export function kickAgentJob(jobId: string, reason = 'manual') {
+  if (process.env.AGENT_JOB_SELF_HEALING === 'false') return false
+  console.log(`[queue] kick job=${jobId} reason=${reason}`)
+  processJobById(jobId).catch(err => console.error(`[queue] kicked job ${jobId} failed:`, err))
+  return true
+}
+
 export async function processJobById(jobId: string, retryCount = 0) {
   // Atomically transition queued → processing
   const updated = await db.agentJob.updateMany({

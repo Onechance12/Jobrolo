@@ -4,7 +4,7 @@ import { saveUpload, thumbnailUrl } from '@/lib/upload'
 import { requireContext } from '@/lib/security/context'
 import { requireCustomer, requireProject, requireWorkspace } from '@/lib/security/ownership'
 import { MAX_FILES_PER_UPLOAD, validateUpload, safeFilename } from '@/lib/security/upload-validation'
-import { enqueueAgentJob } from '@/lib/jobs/queue'
+import { enqueueAgentJob, kickAgentJob } from '@/lib/jobs/queue'
 import { toFileUrl } from '@/lib/file-url'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
 
       try {
-        await enqueueAgentJob({
+        const analysisJob = await enqueueAgentJob({
           contractorId: ctx.contractorId,
           userId: ctx.user.id,
           type: 'doc_analysis',
@@ -157,7 +157,8 @@ export async function POST(req: NextRequest) {
           workspaceId,
           priority: 4,
         })
-        console.log(`[upload] queued analysis requestId=${requestId} documentId=${document.id}`)
+        kickAgentJob(analysisJob.id, `upload:${requestId}`)
+        console.log(`[upload] queued analysis requestId=${requestId} documentId=${document.id} jobId=${analysisJob.id}`)
       } catch (err) {
         console.error('[upload] queue analysis failed:', err)
       }
