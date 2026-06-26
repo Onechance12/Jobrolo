@@ -96,6 +96,17 @@ function projectNumber(projectOrId: { id?: string | null; title?: string | null 
   return shortRecordNumber('P', projectOrId)
 }
 
+function appBaseUrl() {
+  return (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
+}
+
+function workspaceChatUrl(workspaceId?: string | null, chatId?: string | null) {
+  if (!workspaceId) return null
+  const params = new URLSearchParams({ workspaceId })
+  if (chatId) params.set('chatId', chatId)
+  return `${appBaseUrl()}/?${params.toString()}`
+}
+
 function withCustomerNumber<T extends { id?: string | null }>(customer: T): T & { clientNumber: string | null; customerNumber: string | null } {
   const number = customerNumber(customer)
   return { ...customer, clientNumber: number, customerNumber: number }
@@ -1911,15 +1922,16 @@ export const TOOLS: ToolDef[] = [
           projectTitle: project.title,
           customer: customer ? withCustomerNumber(customer) : null,
           chat,
+          chatUrl: workspaceChatUrl(workspace.id, chat.id),
           seededMessage,
-          message: `Created/opened the ${args.chatType} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'}`,
+          message: `Created/opened the ${args.chatType} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'} Chat link: ${workspaceChatUrl(workspace.id, chat.id)}`,
         },
       }
     },
   },
   {
     name: 'invite_user_to_chat',
-    description: 'Invite an employee, crew member, subcontractor, sales rep, manager, or customer/homeowner to a Jobrolo workspace chat. Creates an invited user, workspace membership, in-app notification, and one-time invite link. Use for "add Jose to the crew chat", "invite homeowner to customer chat", or "add employee to this job chat". Requires approval because it grants chat access.',
+    description: 'Invite an employee, crew member, subcontractor, sales rep, manager, or customer/homeowner to a Jobrolo workspace chat. Creates an invited user, workspace membership, in-app notification, and one-time invite link that can be copied and texted manually. Use for "add Jose to the crew chat", "invite homeowner to customer chat", "add employee to this job chat", or "give me a link to share". Requires approval because it grants chat access.',
     schema: z.object({
       workspaceId: z.string().max(200).optional(),
       projectId: z.string().max(200).optional(),

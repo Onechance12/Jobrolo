@@ -427,6 +427,8 @@ If not saved:
 1. Create/list/open project and role chats from main chat.
 2. Save chats to project.
 3. Start roof reports/templates/signatures from chat.
+4. Make chat invites copy-link first: the owner should be able to create a secure invite link, copy it, and send it manually by text/email. Automated email/SMS delivery is optional, not required.
+5. Direct chat links should deep-link existing authorized members to the workspace/chat without bypassing login or role-scoped access.
 
 ### Phase 6 — Prompt guidance UX
 

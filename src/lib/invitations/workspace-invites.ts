@@ -24,6 +24,12 @@ function appUrl() {
   return (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
 }
 
+function workspaceChatUrl(workspaceId: string, chatId?: string | null) {
+  const params = new URLSearchParams({ workspaceId })
+  if (chatId) params.set('chatId', chatId)
+  return `${appUrl()}/?${params.toString()}`
+}
+
 export function hashInviteToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
@@ -137,6 +143,7 @@ export async function createWorkspaceInvite(ctx: TenantContext, input: CreateWor
   })
 
   const inviteUrl = `${appUrl()}/invite?token=${encodeURIComponent(token)}`
+  const chatUrl = workspaceChatUrl(workspace.id, selectedChat?.id ?? null)
   const copy = inviteCopy(role, workspace.name, selectedChat?.title)
   const body = `${copy.body}
 
@@ -162,12 +169,13 @@ This invite expires in ${INVITE_TTL_DAYS} days.${input.note ? `\n\nNote from ${c
       inviteeUserId: user.id,
       inviteeRole: role,
       inviteUrl,
+      chatUrl,
       cardType: 'chat_invite',
     },
   })
 
   const deliveries: any[] = []
-  if (input.sendEmail !== false) {
+  if (input.sendEmail === true) {
     const msg = await queueCommunication({
       contractorId: ctx.contractorId,
       userId: user.id,
@@ -208,6 +216,7 @@ This invite expires in ${INVITE_TTL_DAYS} days.${input.note ? `\n\nNote from ${c
 
   return {
     inviteUrl,
+    chatUrl,
     expiresAt: expires,
     user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, status: user.status },
     workspace: { id: workspace.id, name: workspace.name, type: workspace.type, projectId: workspace.projectId, customerId: workspace.customerId },

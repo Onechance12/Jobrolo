@@ -92,10 +92,16 @@ export default function Page() {
         if (wr.ok) {
           const d = await wr.json()
           setWorkspaces(d.workspaces || [])
+          const params = new URLSearchParams(window.location.search)
+          const linkedWorkspaceId = params.get('workspaceId')
+          const linkedChatId = params.get('chatId')
+          const linkedWorkspace = linkedWorkspaceId ? d.workspaces?.find((w: any) => w.id === linkedWorkspaceId) : null
           const invitedWorkspaceId = window.localStorage.getItem('jobroloInviteWorkspaceId')
           const invitedChatId = window.localStorage.getItem('jobroloInviteChatId')
           const invitedWorkspace = invitedWorkspaceId ? d.workspaces?.find((w: any) => w.id === invitedWorkspaceId) : null
-          if (invitedWorkspace) {
+          if (linkedWorkspace) {
+            useWorkspaceStore.getState().enterWorkspace(linkedWorkspace.id, linkedChatId || undefined)
+          } else if (invitedWorkspace) {
             useWorkspaceStore.getState().enterWorkspace(invitedWorkspace.id, invitedChatId || undefined)
             window.localStorage.removeItem('jobroloInviteWorkspaceId')
             window.localStorage.removeItem('jobroloInviteChatId')
@@ -565,17 +571,23 @@ function InvitePeopleModal({
 }) {
   const [members, setMembers] = useState<any[]>([])
   const [copied, setCopied] = useState(false)
+  const [copiedChatLink, setCopiedChatLink] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [chatLink, setChatLink] = useState('')
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
     role: defaultInviteRole(chat?.chatType),
-    sendEmail: true,
+    sendEmail: false,
     sendSms: false,
   })
+
+  useEffect(() => {
+    setChatLink(`${window.location.origin}/?workspaceId=${encodeURIComponent(workspace.id)}${chat?.id ? `&chatId=${encodeURIComponent(chat.id)}` : ''}`)
+  }, [workspace.id, chat?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -630,6 +642,13 @@ function InvitePeopleModal({
     setTimeout(() => setCopied(false), 1800)
   }
 
+  async function copyChatLink() {
+    if (!chatLink) return
+    await navigator.clipboard?.writeText(chatLink).catch(() => null)
+    setCopiedChatLink(true)
+    setTimeout(() => setCopiedChatLink(false), 1800)
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="w-full max-w-lg rounded-t-3xl border border-border bg-background p-4 shadow-2xl sm:rounded-3xl">
@@ -644,6 +663,27 @@ function InvitePeopleModal({
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+          <div className="font-medium">Copy-first invite flow</div>
+          <p className="mt-1 text-blue-800 dark:text-blue-200">
+            Create a secure invite link, then copy it and text it yourself. Email and Twilio SMS are optional add-ons, not required.
+          </p>
+        </div>
+
+        {chatLink ? (
+          <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 text-sm">
+            <div className="font-medium">Direct chat link for existing members</div>
+            <p className="mt-1 text-muted-foreground">
+              Use this when someone already has access. It opens this workspace/chat after they log in.
+            </p>
+            <div className="mt-2 break-all rounded-xl bg-background px-3 py-2 text-xs text-muted-foreground">{chatLink}</div>
+            <button onClick={copyChatLink} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted">
+              {copiedChatLink ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedChatLink ? 'Copied' : 'Copy chat link'}
+            </button>
+          </div>
+        ) : null}
 
         <form onSubmit={submit} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -674,11 +714,11 @@ function InvitePeopleModal({
           <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.sendEmail} onChange={e => setForm({ ...form, sendEmail: e.target.checked })} />
-              Send email invite
+              Also email this invite
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.sendSms} onChange={e => setForm({ ...form, sendSms: e.target.checked })} />
-              Send SMS if Twilio is configured
+              Also send SMS if Twilio is configured
             </label>
           </div>
           {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">{error}</div> : null}
