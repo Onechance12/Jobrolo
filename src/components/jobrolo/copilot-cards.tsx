@@ -296,6 +296,20 @@ export function CreatedChatCard({ data }: { data?: CreatedChatLike | null }) {
   const customerName = data?.customer?.name
   const customerNumber = data?.customer?.customerNumber || data?.customer?.clientNumber
 
+  function openChat() {
+    if (data?.workspaceId) {
+      window.dispatchEvent(new CustomEvent('jobrolo:open-workspace-chat', {
+        detail: {
+          workspaceId: data.workspaceId,
+          chatId: data.chatId,
+          href,
+        },
+      }))
+      return
+    }
+    if (href) window.location.assign(href.startsWith('http') ? href : `${window.location.origin}${href}`)
+  }
+
   async function copy() {
     if (!href) return
     const absolute = href.startsWith('http') ? href : `${window.location.origin}${href}`
@@ -336,7 +350,7 @@ export function CreatedChatCard({ data }: { data?: CreatedChatLike | null }) {
         </p>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        {href ? <Button size="sm" asChild><Link href={href}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open chat</Link></Button> : null}
+        {href ? <Button size="sm" onClick={openChat}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open chat</Button> : null}
         {href ? <Button size="sm" variant="outline" onClick={copy}>{copied ? <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}{copied ? 'Copied' : 'Copy link'}</Button> : null}
         <Button size="sm" variant="outline" onClick={invite}><UserPlus className="mr-1.5 h-3.5 w-3.5" />Invite person</Button>
       </CardFooter>

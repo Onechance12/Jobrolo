@@ -314,13 +314,69 @@ export default function Page() {
     window.dispatchEvent(new Event('jobrolo:open-file-picker'))
   }, [])
 
-  const handleEnterWorkspace = useCallback((id: string) => {
-    enterWorkspace(id); setLeftDrawerOpen(false)
-  }, [enterWorkspace])
+  const openWorkspaceChat = useCallback(async (workspaceId: string, chatId?: string | null, opts?: { updateUrl?: boolean }) => {
+    if (!workspaceId) return
+    setStartMenuOpen(false)
+    setProfileMenuOpen(false)
+    setLeftDrawerOpen(false)
+
+    let workspaceList = useWorkspaceStore.getState().workspaces
+    let workspace = workspaceList.find(w => w.id === workspaceId)
+    let hasRequestedChat = !chatId || !!workspace?.chats?.some(chat => chat.id === chatId)
+
+    if (!workspace || !hasRequestedChat) {
+      const res = await fetch('/api/workspaces').catch(() => null)
+      if (res?.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (Array.isArray(data.workspaces)) {
+          setWorkspaces(data.workspaces)
+          workspaceList = data.workspaces
+          workspace = workspaceList.find((w: any) => w.id === workspaceId)
+          hasRequestedChat = !chatId || !!workspace?.chats?.some((chat: any) => chat.id === chatId)
+        }
+      }
+    }
+
+    if (!workspace) {
+      const href = `/?workspaceId=${encodeURIComponent(workspaceId)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}`
+      window.location.assign(href)
+      return
+    }
+
+    enterWorkspace(workspaceId, hasRequestedChat ? chatId ?? undefined : undefined)
+    if (opts?.updateUrl !== false) {
+      const href = `/?workspaceId=${encodeURIComponent(workspaceId)}${chatId ? `&chatId=${encodeURIComponent(chatId)}` : ''}`
+      window.history.pushState({ jobroloWorkspaceId: workspaceId, jobroloChatId: chatId ?? null }, '', href)
+    }
+  }, [enterWorkspace, setWorkspaces])
+
+  useEffect(() => {
+    function onOpenWorkspaceChat(event: Event) {
+      const detail = (event as CustomEvent<{ workspaceId?: string; chatId?: string | null }>).detail
+      if (!detail?.workspaceId) return
+      void openWorkspaceChat(String(detail.workspaceId), detail.chatId ? String(detail.chatId) : undefined)
+    }
+
+    function onPopState() {
+      const params = new URLSearchParams(window.location.search)
+      const workspaceId = params.get('workspaceId')
+      const chatId = params.get('chatId')
+      if (workspaceId) void openWorkspaceChat(workspaceId, chatId, { updateUrl: false })
+      else exitWorkspace()
+    }
+
+    window.addEventListener('jobrolo:open-workspace-chat', onOpenWorkspaceChat)
+    window.addEventListener('popstate', onPopState)
+    return () => {
+      window.removeEventListener('jobrolo:open-workspace-chat', onOpenWorkspaceChat)
+      window.removeEventListener('popstate', onPopState)
+    }
+  }, [exitWorkspace, openWorkspaceChat])
 
   const handleExitToCommandCenter = useCallback(() => {
     exitWorkspace()
     if (conversationId) selectConversation(conversationId)
+    window.history.pushState({ jobroloCommandCenter: true }, '', '/')
   }, [exitWorkspace, conversationId, selectConversation])
 
   const handleLogout = useCallback(async () => {
