@@ -48,6 +48,7 @@ import { getOcrProvider, getOcrUnavailableReason } from '@/lib/document/ocr-prov
 import { compareExtractions, type ComparisonResult } from '@/lib/document/extraction-comparison'
 import { createProjectTimelineEvent } from '@/lib/project-context'
 import { getConfiguredProviderName } from '@/lib/ai'
+import { resolveJobExecutionContext } from '@/lib/security/agent-execution'
 
 interface AgentJobRow {
   id: string
@@ -166,11 +167,12 @@ function buildDocumentReviewProfile(input: {
 }
 
 export async function processDocumentJob(job: AgentJobRow) {
+  await resolveJobExecutionContext(job)
   const input = JSON.parse(job.inputJson) as DocAnalysisInput
   const { documentId, heicConversionNeeded } = input
 
-  const doc = await db.document.findUnique({ where: { id: documentId } })
-  if (!doc || doc.contractorId !== job.contractorId) {
+  const doc = await db.document.findFirst({ where: { id: documentId, contractorId: job.contractorId } })
+  if (!doc) {
     await failJob(job.id, `Document ${documentId} not found for contractor ${job.contractorId}`)
     return
   }
@@ -206,7 +208,7 @@ export async function processDocumentJob(job: AgentJobRow) {
       console.log(`[doc-worker] doc=${documentId} | HEIC converted → ${converted.newFilename}`)
     }
 
-    const current = await db.document.findUnique({ where: { id: documentId } })
+    const current = await db.document.findFirst({ where: { id: documentId, contractorId: job.contractorId } })
     if (!current) {
       await failJob(job.id, 'Document disappeared during processing')
       return

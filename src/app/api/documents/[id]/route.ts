@@ -17,8 +17,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   // Fetch with relations for the response
-  const docWithRelations = await db.document.findUnique({
-    where: { id },
+  const docWithRelations = await db.document.findFirst({
+    where: { id, contractorId: ctx.contractorId },
     include: { project: { select: { id: true, title: true } }, customer: { select: { id: true, name: true } } },
   })
   if (!docWithRelations) {

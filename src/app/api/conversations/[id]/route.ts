@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireContext, ForbiddenError } from '@/lib/security/context'
+import { requireContext } from '@/lib/security/context'
 import { requireConversation } from '@/lib/security/ownership'
 export const runtime = 'nodejs'
 
@@ -15,7 +15,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  const convo = await db.conversation.findUnique({ where: { id }, include: { messages: { orderBy: { createdAt: 'asc' } } } })
+  const convo = await db.conversation.findFirst({
+    where: { id, contractorId: ctx.contractorId },
+    include: { messages: { orderBy: { createdAt: 'asc' } } },
+  })
   if (!convo) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }

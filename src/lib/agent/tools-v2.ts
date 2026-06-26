@@ -28,14 +28,19 @@ import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanv
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { sanitizeHtml } from '@/lib/security/html'
+import type { TenantContext } from '@/lib/security/context'
+import { normalizeRole } from '@/lib/security/permissions'
 
 export interface ToolContext {
   workspaceId?: string
   chatId?: string
   channelType?: ChannelType
   userId?: string
+  userRole?: string
   documentIds?: string[]  // IDs of documents uploaded with the current message
   approved?: boolean      // Set to true when a human has approved the action
+  approvalActionRequestId?: string
+  trustedDirectExecution?: boolean
 }
 
 export interface ToolResult {
@@ -51,6 +56,45 @@ export interface ToolDef {
   allowedChannels: ChannelType[] | 'all'
   requiresApproval?: boolean
   execute: (args: any, contractorId: string, ctx: ToolContext) => Promise<ToolResult>
+}
+
+const TRUSTED_DIRECT_TOOLS = new Set(['create_customer'])
+const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
+
+function canRunDirectWithoutApproval(name: string, ctx: ToolContext) {
+  if (!ctx.trustedDirectExecution) return false
+  if (!TRUSTED_DIRECT_TOOLS.has(name)) return false
+  return TRUSTED_DIRECT_ROLES.has(normalizeRole(ctx.userRole))
+}
+
+function stableStringify(value: unknown): string {
+  if (typeof value === 'undefined') return 'undefined'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+}
+
+async function buildTrustedToolTenantContext(contractorId: string, ctx: ToolContext): Promise<TenantContext> {
+  const contractor = await db.contractor.findFirst({
+    where: { id: contractorId, status: 'active', deletedAt: null },
+    select: { id: true, name: true, company: true, plan: true, subscriptionStatus: true, status: true },
+  })
+  if (!contractor) throw new Error('Contractor not found')
+  const user = ctx.userId
+    ? await db.user.findFirst({
+        where: { id: ctx.userId, contractorId, status: 'active', deletedAt: null },
+        select: { id: true, contractorId: true, name: true, email: true, role: true, status: true },
+      })
+    : null
+  if (ctx.userId && !user) throw new Error('User not authorized')
+  return {
+    contractorId,
+    contractor,
+    user,
+    actor: user ? `user:${user.email}` : 'ai',
+    authMethod: 'system',
+  }
 }
 
 
@@ -545,13 +589,13 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId) => {
       let doc
       if (args.documentId) {
-        doc = await db.document.findUnique({ where: { id: args.documentId } })
+        doc = await db.document.findFirst({ where: { id: args.documentId, contractorId } })
       } else if (args.filename) {
         const lower = args.filename.toLowerCase()
         const all = await db.document.findMany({ where: { contractorId }, orderBy: { createdAt: 'desc' }, take: 50 })
         doc = all.find(d => d.originalName.toLowerCase().includes(lower))
       }
-      if (!doc || doc.contractorId !== contractorId) return { success: false, data: null, error: 'Document not found. Call list_documents.' }
+      if (!doc) return { success: false, data: null, error: 'Document not found. Call list_documents.' }
       let extractedData: unknown = null
       try { extractedData = doc.extractedData ? JSON.parse(doc.extractedData) : null } catch {}
 
@@ -1742,8 +1786,8 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'management', 'sales'],
     requiresApproval: true,
     execute: async (args, contractorId) => {
-      const doc = await db.document.findUnique({ where: { id: args.documentId } })
-      if (!doc || doc.contractorId !== contractorId) {
+      const doc = await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+      if (!doc) {
         return { success: false, data: null, error: 'Document not found' }
       }
       await deleteStoredFile(doc.filePath).catch(() => false)
@@ -1788,15 +1832,16 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: ['main', 'management'],
     requiresApproval: true,
-    execute: async (args, contractorId) => {
-      const doc = await db.document.findUnique({ where: { id: args.documentId } })
-      if (!doc || doc.contractorId !== contractorId) {
+    execute: async (args, contractorId, ctx) => {
+      const doc = await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+      if (!doc) {
         return { success: false, data: null, error: 'Document not found' }
       }
       // Enqueue a new doc_analysis job
       const { enqueueAgentJob } = await import('@/lib/jobs/queue')
       await enqueueAgentJob({
         contractorId,
+        userId: ctx.userId,
         type: 'doc_analysis',
         input: { documentId: args.documentId, heicConversionNeeded: false },
         priority: 3,
@@ -1813,8 +1858,8 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
-      const doc = await db.document.findUnique({ where: { id: args.documentId } })
-      if (!doc || doc.contractorId !== contractorId) {
+      const doc = await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+      if (!doc) {
         return { success: false, data: null, error: 'Document not found' }
       }
       // Find customer by name (partial match)
@@ -1826,7 +1871,7 @@ export const TOOLS: ToolDef[] = [
       }
       // Find the customer's active project
       const project = await db.project.findFirst({
-        where: { customerId: customer.id, status: 'active' },
+        where: { contractorId, customerId: customer.id, status: 'active' },
         include: { workspace: true },
       })
       await db.document.update({
@@ -2412,10 +2457,9 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'customer', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const contractor = await db.contractor.findFirst({ where: { id: contractorId }, select: { id: true, name: true, company: true, plan: true, status: true } })
-      if (!contractor) return { success: false, data: null, error: 'Contractor not found' }
+      const tenantCtx = await buildTrustedToolTenantContext(contractorId, ctx)
       const result = await createUnsignedDocumentPdf({
-        ctx: { contractorId, contractor, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' },
+        ctx: tenantCtx,
         generatedDocumentId: args.generatedDocumentId,
         postToThread: true,
       })
@@ -2428,9 +2472,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ generatedDocumentId: z.string().min(1) }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
-      const contractor = await db.contractor.findFirst({ where: { id: contractorId }, select: { id: true, name: true, company: true, plan: true, status: true } })
-      if (!contractor) return { success: false, data: null, error: 'Contractor not found' }
-      const artifacts = await getSignedDocumentArtifacts({ contractorId, contractor, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.generatedDocumentId)
+      const artifacts = await getSignedDocumentArtifacts(await buildTrustedToolTenantContext(contractorId, ctx), args.generatedDocumentId)
       return { success: true, data: artifacts }
     },
   },
@@ -2446,7 +2488,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const upload = await createTemplateUploadFromDocument({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const upload = await createTemplateUploadFromDocument(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { upload, nextAction: `Run analyze_template_upload with uploadId ${upload.id}` } }
     },
   },
@@ -2457,7 +2499,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await analyzeTemplateUpload({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.uploadId)
+      const result = await analyzeTemplateUpload(await buildTrustedToolTenantContext(contractorId, ctx), args.uploadId)
       return { success: true, data: result }
     },
   },
@@ -2497,7 +2539,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const template = await approveDocumentTemplate({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.templateId)
+      const template = await approveDocumentTemplate(await buildTrustedToolTenantContext(contractorId, ctx), args.templateId)
       return { success: true, data: { template } }
     },
   },
@@ -2517,7 +2559,7 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId, ctx) => {
       const target = await resolveJobTarget(contractorId, args)
       if ('error' in target) return { success: false, data: null, error: target.error }
-      const generated = await generateDocumentFromTemplate({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, {
+      const generated = await generateDocumentFromTemplate(await buildTrustedToolTenantContext(contractorId, ctx), {
         templateId: args.templateId,
         projectId: target.projectId,
         customerId: target.customerId,
@@ -2552,7 +2594,7 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
-      const briefing = await getFieldBriefing({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const briefing = await getFieldBriefing(await buildTrustedToolTenantContext(contractorId, ctx), args)
       if (!briefing) return { success: false, data: null, error: 'Project not found' }
       return { success: true, data: { briefing } }
     },
@@ -2575,7 +2617,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'crew', 'management', 'sales', 'insurance', 'customer'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await executeFieldAction({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await executeFieldAction(await buildTrustedToolTenantContext(contractorId, ctx), args)
       if (!result) return { success: false, data: null, error: 'Project not found or field action failed' }
       return { success: true, data: result }
     },
@@ -2596,7 +2638,7 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
-      const result = await resolveFieldEntity({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await resolveFieldEntity(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2606,7 +2648,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ role: z.string().optional(), projectId: z.string().optional(), status: z.string().optional(), limit: z.number().optional() }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
-      const inbox = await listCopilotInbox({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: args.role ?? 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const inbox = await listCopilotInbox(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: inbox }
     },
   },
@@ -2617,7 +2659,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'management', 'crew', 'supplier', 'finance'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const request = await decideActionRequest({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.actionRequestId, args.decision, args.notes)
+      const request = await decideActionRequest(await buildTrustedToolTenantContext(contractorId, ctx), args.actionRequestId, args.decision, args.notes)
       if (!request) return { success: false, data: null, error: 'Action request not found' }
       return { success: true, data: { actionRequest: request } }
     },
@@ -2629,7 +2671,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ propertyMemoryId: z.string().optional(), canvassingLeadId: z.string().optional(), address: z.string().optional(), status: z.string().optional(), limit: z.number().optional() }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     execute: async (args, contractorId, ctx) => {
-      const result = await getPropertyMemoryContext({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await getPropertyMemoryContext(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2642,7 +2684,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const property = await upsertPropertyMemory({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const property = await upsertPropertyMemory(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { property, card: { cardType: 'property_memory', propertyMemoryId: property.id, address: property.address, roofCondition: property.roofCondition, damageSignal: property.damageSignal, solicitationStatus: property.solicitationStatus, occupancyStatus: property.occupancyStatus, opportunityScore: property.opportunityScore, status: property.status } } }
     },
   },
@@ -2653,7 +2695,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const observation = await recordPropertyObservation({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const observation = await recordPropertyObservation(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { observation, card: { cardType: 'property_observation', observationId: observation.id, propertyMemoryId: observation.propertyMemoryId, type: observation.type, title: observation.title, summary: observation.summary } } }
     },
   },
@@ -2664,7 +2706,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const attempt = await recordDoorAttempt({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const attempt = await recordDoorAttempt(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { attempt, card: { cardType: 'door_attempt', attemptId: attempt.id, propertyMemoryId: attempt.propertyMemoryId, outcome: attempt.outcome, summary: attempt.summary, followUpAt: attempt.followUpAt } } }
     },
   },
@@ -2675,7 +2717,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await createCanvassingGamePlan({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await createCanvassingGamePlan(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { ...result, card: { cardType: 'canvassing_game_plan', planId: result.plan.id, title: result.plan.title, focusMode: result.plan.focusMode, strategySummary: result.plan.strategySummary, recommendedStart: result.plan.recommendedStart, goals: { doors: result.plan.goalDoors, conversations: result.plan.goalConversations, inspections: result.plan.goalInspections }, recommendations: result.recommendations.recommendations } } }
     },
   },
@@ -2689,7 +2731,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await researchPropertyNow({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await researchPropertyNow(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2700,7 +2742,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await confirmPropertyResearchCandidate({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.researchRunId, args)
+      const result = await confirmPropertyResearchCandidate(await buildTrustedToolTenantContext(contractorId, ctx), args.researchRunId, args)
       return { success: true, data: result }
     },
   },
@@ -2710,7 +2752,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ researchRunId: z.string().min(1) }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     execute: async (args, contractorId, ctx) => {
-      const result = await getPropertyResearchRun({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.researchRunId)
+      const result = await getPropertyResearchRun(await buildTrustedToolTenantContext(contractorId, ctx), args.researchRunId)
       if (!result) return { success: false, data: null, error: 'Property research run not found' }
       return { success: true, data: result }
     },
@@ -2722,7 +2764,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await researchPropertyNow({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, { ...args, mode: 'street_game_plan' })
+      const result = await researchPropertyNow(await buildTrustedToolTenantContext(contractorId, ctx), { ...args, mode: 'street_game_plan' })
       return { success: true, data: result }
     },
   },
@@ -2732,7 +2774,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ status: z.string().optional(), limit: z.number().optional() }),
     allowedChannels: ['main', 'sales', 'management'],
     execute: async (args, contractorId, ctx) => {
-      const result = await getStreetResearchRuns({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await getStreetResearchRuns(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2752,7 +2794,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const lead = await createCanvassingLead({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const lead = await createCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { lead, card: { cardType: 'canvassing_lead', leadId: lead.id, address: lead.address, homeownerName: lead.homeownerName, phone: lead.phone, status: lead.status, latitude: lead.latitude, longitude: lead.longitude } } }
     },
   },
@@ -2762,7 +2804,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({ sessionId: z.string().optional(), status: z.string().optional(), includeConverted: z.boolean().optional(), limit: z.number().optional() }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
-      const result = await getCanvassingMap({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await getCanvassingMap(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2773,7 +2815,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const session = await startCanvassingSession({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const session = await startCanvassingSession(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { session, card: { cardType: 'canvassing_session', sessionId: session.id, title: session.title, territoryName: session.territoryName, status: session.status } } }
     },
   },
@@ -2784,7 +2826,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await logCanvassingActivity({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args)
+      const result = await logCanvassingActivity(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
     },
   },
@@ -2795,7 +2837,7 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management'],
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const result = await convertCanvassingLead({ contractorId, contractor: { id: contractorId, name: '', company: null, plan: 'free', status: 'active' }, user: ctx.userId ? { id: ctx.userId, contractorId, name: '', email: '', role: 'manager', status: 'active' } : null, actor: 'ai', authMethod: 'system' }, args.leadId, args)
+      const result = await convertCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), args.leadId, args)
       if (!result) return { success: false, data: null, error: 'Canvassing lead not found' }
       return { success: true, data: result }
     },
@@ -2871,7 +2913,7 @@ export async function executeTool(
 
   // SECURITY: Enforce requiresApproval flag — dangerous tools must not execute autonomously.
   // Instead of dead-ending, create an approval replay request that can be approved from a chat card.
-  if (tool.requiresApproval && !ctx.approved) {
+  if (tool.requiresApproval && !ctx.approved && !canRunDirectWithoutApproval(name, ctx)) {
     console.warn(`[tools-v2] APPROVAL REQUIRED: Tool '${name}' contractorId=${contractorId}`)
     const requestedRole = approvalRoleForTool(name)
     const title = `Approval needed: ${humanizeToolName(name)}`
@@ -2921,6 +2963,25 @@ export async function executeTool(
   }
 
   try {
+    if (tool.requiresApproval && ctx.approved && !ctx.approvalActionRequestId && !canRunDirectWithoutApproval(name, ctx)) {
+      return { success: false, data: null, error: 'Trusted approval context required' }
+    }
+    if (tool.requiresApproval && ctx.approved && ctx.approvalActionRequestId) {
+      const approvedRequest = await db.actionRequest.findFirst({
+        where: {
+          id: ctx.approvalActionRequestId,
+          contractorId,
+          type: 'tool_approval',
+          status: { in: ['approved', 'completed'] },
+        },
+        select: { id: true, payloadJson: true },
+      })
+      if (!approvedRequest) return { success: false, data: null, error: 'Approval not found' }
+      const approvedPayload = JSON.parse(approvedRequest.payloadJson || '{}') as { toolName?: string; args?: unknown }
+      if (approvedPayload.toolName !== name || stableStringify(approvedPayload.args ?? {}) !== stableStringify(parsed.data)) {
+        return { success: false, data: null, error: 'Approval does not match requested action' }
+      }
+    }
     const result = await tool.execute(parsed.data, contractorId, ctx)
     // Log all tool executions for audit trail
     console.log(`[tools-v2] Tool '${name}' executed by contractor ${contractorId}: success=${result.success}`)

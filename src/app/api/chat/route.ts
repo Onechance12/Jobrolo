@@ -5,12 +5,17 @@ import { requireContext, audit } from '@/lib/security/context'
 import { rateLimit } from '@/lib/security/rate-limit'
 import { sanitizeUserInput } from '@/lib/security/prompt-defense'
 import { enqueueAgentJob } from '@/lib/jobs/queue'
+import { assertDocumentsBelongToTenant, normalizeIdList } from '@/lib/security/agent-execution'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
+  const sizeErr = checkBodySize(req)
+  if (sizeErr) return sizeErr
+
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
+  if (!ctx.user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
 
   // Rate limit per contractor
   const rl = rateLimit(ctx.contractorId, '/api/chat')
@@ -22,7 +27,8 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const { message, conversationId, businessContext, documentIds = [], history = [] } = body as any
+  const { message, conversationId, businessContext, history = [] } = body as any
+  const documentIds = normalizeIdList((body as any).documentIds)
 
   // Allow empty message IF documents were uploaded — the user might just
   // upload a file with no text and expect the AI to read it.
@@ -31,6 +37,15 @@ export async function POST(req: NextRequest) {
   }
   if (!message.trim() && (!documentIds || documentIds.length === 0)) {
     return NextResponse.json({ error: 'message or document required' }, { status: 400 })
+  }
+  if (conversationId) {
+    const conversation = await db.conversation.findFirst({ where: { id: String(conversationId), contractorId: ctx.contractorId }, select: { id: true } })
+    if (!conversation) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+  }
+  try {
+    await assertDocumentsBelongToTenant(ctx.contractorId, documentIds)
+  } catch {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 })
   }
 
   // If message is empty but docs exist, use a default prompt
@@ -44,7 +59,7 @@ export async function POST(req: NextRequest) {
 
   const job = await enqueueAgentJob({
     contractorId: ctx.contractorId,
-    userId: ctx.user?.id,
+    userId: ctx.user.id,
     type: 'chat',
     input: { message: sanitized.text, conversationId, businessContext, documentIds, history },
     priority: 5,

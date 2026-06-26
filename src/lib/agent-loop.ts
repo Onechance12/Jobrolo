@@ -19,6 +19,8 @@ export interface AgentLoopOptions {
   messages: ChatMessage[]
   contractorId: string
   userId?: string
+  userRole?: string
+  trustedDirectExecution?: boolean
   workspaceId?: string
   chatId?: string
   channelType?: ChannelType
@@ -318,7 +320,8 @@ Respond as JSON only.`,
         console.log(`[agent-loop] executing tool '${tc.name}' contractorId=${opts.contractorId}`)
         const result = await executeTool(tc.name, tc.args, opts.contractorId, {
           userId: opts.userId,
-          approved: tc.name === 'create_customer' ? true : undefined,
+          userRole: opts.userRole,
+          trustedDirectExecution: opts.trustedDirectExecution,
           workspaceId: opts.workspaceId,
           chatId: opts.chatId,
           channelType: opts.channelType,

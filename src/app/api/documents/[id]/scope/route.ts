@@ -10,8 +10,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
   const { id } = await params
 
-  const doc = await db.document.findUnique({ where: { id }, select: { contractorId: true } })
-  if (!doc || doc.contractorId !== ctx.contractorId) {
+  const doc = await db.document.findFirst({ where: { id, contractorId: ctx.contractorId }, select: { contractorId: true } })
+  if (!doc) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 

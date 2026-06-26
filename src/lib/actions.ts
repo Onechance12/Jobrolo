@@ -36,7 +36,7 @@ async function executeOne(action: AiAction, ctx: ExecutionContext): Promise<Acti
     }
     case 'task': {
       if (!action.title) return { action: 'task', status: 'skipped', detail: 'Missing title' }
-      const ws = await db.workspace.findUnique({ where: { id: ctx.workspaceId }, select: { projectId: true } })
+      const ws = await db.workspace.findFirst({ where: { id: ctx.workspaceId, contractorId: ctx.contractorId }, select: { projectId: true } })
       if (!ws?.projectId) return { action: 'task', status: 'skipped', detail: 'No project' }
       const t = await db.task.create({ data: { projectId: ws.projectId, title: action.title, description: action.description, priority: action.priority ?? 'medium', dueDate: action.dueDate ? new Date(action.dueDate) : null, createdById: ctx.userId } })
       return { action: 'task', status: 'executed', detail: `Task: ${t.title}` }
@@ -58,7 +58,8 @@ async function executeOne(action: AiAction, ctx: ExecutionContext): Promise<Acti
     }
     case 'note': {
       if (!action.content) return { action: 'note', status: 'skipped', detail: 'Missing content' }
-      const ws = await db.workspace.findUnique({ where: { id: ctx.workspaceId }, select: { projectId: true, customerId: true } })
+      const ws = await db.workspace.findFirst({ where: { id: ctx.workspaceId, contractorId: ctx.contractorId }, select: { projectId: true, customerId: true } })
+      if (!ws) return { action: 'note', status: 'failed', detail: 'Workspace not found' }
       await db.note.create({ data: { projectId: ws?.projectId, customerId: ws?.customerId, content: action.content, type: action.noteType ?? 'general', isAiGenerated: true, createdById: ctx.userId } })
       return { action: 'note', status: 'executed', detail: `Note saved (${action.noteType ?? 'general'})` }
     }

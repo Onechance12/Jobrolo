@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { requireContext, audit } from '@/lib/security/context'
 import { rateLimit } from '@/lib/security/rate-limit'
 import { sanitizeUserInput } from '@/lib/security/prompt-defense'
 import { enqueueAgentJob } from '@/lib/jobs/queue'
+import { checkBodySize } from '@/lib/security/body-size'
+import { requireWorkspace, requireWorkspaceChat } from '@/lib/security/ownership'
+import { assertDocumentsBelongToTenant, normalizeIdList } from '@/lib/security/agent-execution'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const sizeErr = checkBodySize(req)
+  if (sizeErr) return sizeErr
+
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
+  if (!ctx.user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
   const { id: workspaceId } = await params
 
   // Verify workspace ownership
-  const ws = await db.workspace.findUnique({ where: { id: workspaceId }, select: { contractorId: true } })
-  if (!ws || ws.contractorId !== ctx.contractorId) {
+  const ws = await requireWorkspace(ctx, workspaceId)
+  if (!ws) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
@@ -23,7 +29,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Rate limit exceeded', retryAfter: rl.retryAfter }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } })
   }
 
-  const { chatId, message, documentIds = [], history = [] } = await req.json().catch(() => ({}))
+  const body = await req.json().catch(() => ({}))
+  const { chatId, message, history = [] } = body
+  const documentIds = normalizeIdList(body.documentIds)
   if (!chatId) return NextResponse.json({ error: 'chatId required' }, { status: 400 })
 
   // Allow empty message IF documents were uploaded
@@ -36,13 +44,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const finalMessage = message.trim() || '(No text message — please review the uploaded document(s) and tell me what you found.)'
 
   // Verify chat belongs to workspace
-  const chat = await db.workspaceChat.findFirst({ where: { id: chatId, workspaceId }, select: { id: true, chatType: true } })
+  const chat = await requireWorkspaceChat(ctx, workspaceId, String(chatId))
   if (!chat) return NextResponse.json({ error: 'Chat not found' }, { status: 404 })
+  try {
+    await assertDocumentsBelongToTenant(ctx.contractorId, documentIds)
+  } catch {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+  }
 
   const sanitized = sanitizeUserInput(finalMessage)
   const job = await enqueueAgentJob({
     contractorId: ctx.contractorId,
-    userId: ctx.user?.id,
+    userId: ctx.user.id,
     type: 'workspace_chat',
     input: { message: sanitized.text, documentIds, history, workspaceId, chatId },
     workspaceId,

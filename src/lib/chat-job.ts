@@ -75,6 +75,13 @@ export async function processJob(jobId: string, opts: {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>; workspaceId?: string; chatId?: string
 }): Promise<void> {
   const job = jobs.get(jobId); if (!job) return
+  if (process.env.JOBROLO_ENABLE_LEGACY_CHAT_JOB !== '1') {
+    job.status = 'error'
+    job.error = 'Legacy in-memory chat processor is disabled. Use the database-backed agent job queue.'
+    job.heartbeat = 'Legacy processor disabled'
+    console.error('[chat-job] legacy in-memory processor disabled; use enqueueAgentJob/processAgentJob')
+    return
+  }
   const { message, conversationId, businessContext, documentIds = [], history = [], workspaceId, chatId } = opts
   let heartbeatCount = 0
   const heartbeatTexts = ['Thinking...', 'Processing...', 'Gathering data...', 'Almost there...', 'Working on it...']

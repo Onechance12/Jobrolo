@@ -11,6 +11,8 @@ import { executeActions } from '@/lib/actions'
 import { heartbeat, appendThinking, completeJob, failJob } from '@/lib/jobs/queue'
 import { wrapUntrusted, sanitizeAIOutput, validateAction } from '@/lib/security/prompt-defense'
 import type { AiAction, ChannelType, WorkspaceInfo } from '@/lib/types'
+import { assertDocumentsBelongToTenant, normalizeIdList, resolveJobExecutionContext } from '@/lib/security/agent-execution'
+import { normalizeRole } from '@/lib/security/permissions'
 
 interface AgentJobRow {
   id: string
@@ -33,6 +35,7 @@ export async function processAgentJob(job: AgentJobRow) {
     workspaceId?: string
     chatId?: string
   }
+  input.documentIds = normalizeIdList(input.documentIds)
 
   // Heartbeat loop — show the user what we're doing
   let hbCount = 0
@@ -59,8 +62,9 @@ export async function processAgentJob(job: AgentJobRow) {
   }, 90_000)
 
   try {
-    const contractor = await db.contractor.findUnique({ where: { id: job.contractorId } })
-    if (!contractor) throw new Error('Contractor not found')
+    const execCtx = await resolveJobExecutionContext(job)
+    const contractor = execCtx.contractor
+    const actorRole = normalizeRole(execCtx.user?.role)
 
     // 1. Persist user message + find/create conversation
     let conversationId = input.conversationId ?? job.conversationId
@@ -68,12 +72,17 @@ export async function processAgentJob(job: AgentJobRow) {
       const convo = await db.conversation.create({ data: { contractorId: contractor.id, title: input.message.slice(0, 50) } })
       conversationId = convo.id
     }
-    const conversation = await db.conversation.findUnique({ where: { id: conversationId } })
-    if (!conversation || conversation.contractorId !== job.contractorId) {
+    const conversation = await db.conversation.findFirst({ where: { id: conversationId, contractorId: job.contractorId } })
+    if (!conversation) {
       throw new Error('Conversation not found')
     }
 
     if (job.workspaceId && job.chatId) {
+      const chat = await db.workspaceChat.findFirst({
+        where: { id: job.chatId, workspace: { id: job.workspaceId, contractorId: job.contractorId } },
+        select: { id: true },
+      })
+      if (!chat) throw new Error('Workspace/chat not found')
       await db.workspaceMessage.create({ data: { chatId: job.chatId, role: 'user', content: input.message, attachments: input.documentIds?.length ? JSON.stringify(input.documentIds) : null } })
       await db.workspaceChat.update({ where: { id: job.chatId }, data: { lastActivity: new Date() } })
     } else {
@@ -82,17 +91,21 @@ export async function processAgentJob(job: AgentJobRow) {
 
     // 2. Build system prompt
     let systemPrompt: string
+    let channelType: ChannelType | undefined
     if (job.workspaceId && job.chatId) {
-      const ws = await db.workspace.findUnique({
-        where: { id: job.workspaceId },
+      const ws = await db.workspace.findFirst({
+        where: { id: job.workspaceId, contractorId: job.contractorId },
         include: {
           project: { include: { customer: { select: { id: true, name: true, phone: true, email: true } } } },
           customer: { select: { id: true, name: true, phone: true, email: true, address: true } },
           subcontractor: { select: { id: true, name: true, company: true, specialty: true, phone: true } },
         },
       })
-      const chat = await db.workspaceChat.findFirst({ where: { id: job.chatId, workspaceId: job.workspaceId } })
+      const chat = await db.workspaceChat.findFirst({
+        where: { id: job.chatId, workspace: { id: job.workspaceId, contractorId: job.contractorId } },
+      })
       if (!ws || !chat) throw new Error('Workspace/chat not found')
+      channelType = chat.chatType as ChannelType
 
       const recentMemory = await db.workspaceMemory.findMany({ where: { workspaceId: job.workspaceId }, orderBy: { createdAt: 'desc' }, take: 30 })
       const otherChats = await db.workspaceChat.findMany({ where: { workspaceId: job.workspaceId, NOT: { id: job.chatId } }, select: { id: true, chatType: true } })
@@ -116,7 +129,7 @@ export async function processAgentJob(job: AgentJobRow) {
         customer: ws.customer, subcontractor: ws.subcontractor,
       }
       systemPrompt = buildChannelPrompt({
-        channelType: chat.chatType as ChannelType,
+        channelType,
         workspace: workspaceInfo,
         contractorName: contractor.company ?? contractor.name,
         recentMemory: recentMemory.map(m => ({ category: m.category, content: m.content, createdAt: m.createdAt.toISOString() })),
@@ -149,16 +162,7 @@ export async function processAgentJob(job: AgentJobRow) {
     let userMessage = input.message
     if (input.documentIds && input.documentIds.length > 0) {
       // Fetch document metadata so we can tell the AI what each doc is
-      const uploadedDocs = await Promise.all(
-        input.documentIds.map(async (docId) => {
-          const doc = await db.document.findUnique({
-            where: { id: docId },
-            select: { id: true, originalName: true, fileType: true, status: true, aiSummary: true },
-          })
-          return doc
-        })
-      )
-      const validDocs = uploadedDocs.filter(Boolean)
+      const validDocs = await assertDocumentsBelongToTenant(job.contractorId, input.documentIds)
       if (validDocs.length > 0) {
         const docList = validDocs.map(d => `  - documentId: "${d!.id}" | filename: "${d!.originalName}" | type: ${d!.fileType} | status: ${d!.status}${d!.aiSummary ? ` | summary: ${d!.aiSummary.slice(0, 100)}` : ''}`).join('\n')
         userMessage = `${input.message}
@@ -179,8 +183,11 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
       contractorId: contractor.id,
       workspaceId: job.workspaceId ?? undefined,
       chatId: job.chatId ?? undefined,
-      channelType: (job.workspaceId && job.chatId ? ((await db.workspaceChat.findUnique({ where: { id: job.chatId } }))?.chatType ?? undefined) : undefined) as ChannelType | undefined,
+      channelType,
       documentIds: input.documentIds,  // pass uploaded doc IDs so create_customer can auto-link
+      userId: execCtx.user?.id,
+      userRole: actorRole,
+      trustedDirectExecution: Boolean(execCtx.user),
       maxIterations: 4,
       onIteration: (iter) => {
         if (!iter.final) {

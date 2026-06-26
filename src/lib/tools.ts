@@ -24,7 +24,7 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
       case 'search_customers': return await searchCustomers(args.query as string, contractorId)
       case 'get_workspace_memory': return await getWorkspaceMemory(args.workspaceName as string, args.category as string | undefined, contractorId)
       case 'list_photos': return await listPhotos(args.workspaceName as string | undefined, contractorId)
-      case 'create_customer': return await createCustomer(args as { name: string; phone?: string; email?: string; address?: string }, contractorId)
+      case 'create_customer': return { success: false, data: null, error: 'Legacy customer creation is disabled. Use the approved tools-v2 execution path.' }
       default: return { success: false, data: null, error: `Unknown tool: ${name}` }
     }
   } catch (err) { console.error(`[tool] ${name} failed:`, err); return { success: false, data: null, error: err instanceof Error ? err.message : 'Tool failed' } }
@@ -38,7 +38,7 @@ async function searchMaterialPrices(query: string, contractorId: string) {
 
 async function getDocumentContent(documentId: string | undefined, filename: string | undefined, contractorId: string) {
   let doc
-  if (documentId) doc = await db.document.findUnique({ where: { id: documentId } })
+  if (documentId) doc = await db.document.findFirst({ where: { id: documentId, contractorId } })
   else if (filename) { const lower = filename.toLowerCase(); const all = await db.document.findMany({ where: { contractorId }, orderBy: { createdAt: 'desc' }, take: 50 }); doc = all.find(d => d.originalName.toLowerCase().includes(lower)) }
   if (!doc) return { success: false, data: null, error: 'Document not found. Call list_documents.' }
   let extractedData: unknown = null

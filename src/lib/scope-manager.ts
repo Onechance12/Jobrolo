@@ -56,8 +56,8 @@ export interface ScopeBreakdown {
 // ---------------------------------------------------------------------------
 
 export async function initScopeAnalysis(documentId: string, contractorId: string): Promise<ScopeBreakdown | null> {
-  const doc = await db.document.findUnique({ where: { id: documentId } })
-  if (!doc || doc.contractorId !== contractorId) return null
+  const doc = await db.document.findFirst({ where: { id: documentId, contractorId } })
+  if (!doc) return null
 
   const extractedData = doc.extractedData ? JSON.parse(doc.extractedData) : {}
   const rawLineItems = (extractedData.lineItems || []) as any[]

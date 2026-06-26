@@ -36,10 +36,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const payload = safeJson(reqRecord.payloadJson)
     if (parsed.data.decision === 'approved' && payload?.toolName) {
       const { executeTool } = await import('@/lib/agent/tools-v2')
+      const replayContext = { ...(payload.toolContext ?? {}) }
+      delete replayContext.approved
+      delete replayContext.approvalActionRequestId
+      delete replayContext.trustedDirectExecution
+      delete replayContext.userId
+      delete replayContext.userRole
       replayResult = await executeTool(payload.toolName, payload.args ?? {}, ctx.contractorId, {
-        ...(payload.toolContext ?? {}),
+        ...replayContext,
         userId: ctx.user?.id,
+        userRole: ctx.user?.role,
         approved: true,
+        approvalActionRequestId: id,
       })
       await db.actionRequest.update({
         where: { id },
