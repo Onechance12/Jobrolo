@@ -138,6 +138,15 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
 
   useEffect(() => { const ta = textareaRef.current; if (!ta) return; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }, [text])
 
+  useEffect(() => {
+    if (mode === 'field') return
+    setInspectionPickerOpen(false)
+    setInspectionSectionId(null)
+    if (!pendingFiles.length && isGeneratedInspectionPrompt(textRef.current)) {
+      setText('')
+    }
+  }, [mode, pendingFiles.length])
+
   const handleSend = useCallback(async () => {
     const t = text.trim()
     if (!t && !pendingFiles.length) return
@@ -360,7 +369,17 @@ function runFieldQuickPrompt(shortcut: CommandShortcut, openInspectionIntake: (s
 }
 
 function inspectionPromptForSection(section: InspectionPhotoSection) {
-  return `Upload these ${section.label.toLowerCase()} inspection photos for this job. Save them to the current project/job file, tag them as "${section.label}", analyze what they show, and tell me what photo section is still missing.`
+  const label = inspectionSectionUploadLabel(section)
+  return `Upload these ${label} for this job. Save them to the current project/job file, tag them as "${section.label}", analyze what they show, and tell me what photo section is still missing.`
+}
+
+function isGeneratedInspectionPrompt(value: string) {
+  return /^Upload these .+ for this job\. Save them to the current project\/job file, tag them as ".+", analyze what they show, and tell me what photo section is still missing\.$/.test(value.trim())
+}
+
+function inspectionSectionUploadLabel(section: InspectionPhotoSection) {
+  const label = section.label.toLowerCase()
+  return label.includes('photo') ? label : `${label} inspection photos`
 }
 
 function InspectionPhotoIntakeCard({
