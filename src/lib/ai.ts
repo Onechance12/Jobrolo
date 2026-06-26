@@ -42,21 +42,34 @@ export interface VisionOptions {
   maxTokens?: number
 }
 
-async function imageInputFromLocalReference(imageRef: string): Promise<string | null> {
+async function imageInputFromLocalReference(imageRef: string, contractorId?: string | null): Promise<string | null> {
   if (!imageRef.startsWith('/')) return null
 
   const fs = await import('node:fs')
   const path = await import('node:path')
+  const { db } = await import('@/lib/db')
   let buf: Buffer | null = null
   let filename = imageRef
 
   // New private storage URLs: /api/storage/{dir}/{filename}
   const storageMatch = imageRef.match(/^\/api\/storage\/(photos|thumbnails|docs)\/([^/?#]+)$/)
   if (storageMatch) {
-    const { readFile } = await import('@/lib/storage')
+    const { readFile, readStoredFile } = await import('@/lib/storage')
     const dir = storageMatch[1]
     filename = storageMatch[2]
-    buf = await readFile(filename, dir)
+    const document = await db.document.findFirst({
+      where: {
+        ...(contractorId ? { contractorId } : {}),
+        OR: [
+          { filename },
+          { filePath: { endsWith: `/${filename}` } },
+          { thumbnailPath: { endsWith: `/${filename}` } },
+        ],
+      },
+      select: { filePath: true, thumbnailPath: true },
+    }).catch(() => null)
+    const storagePath = dir === 'thumbnails' ? document?.thumbnailPath : document?.filePath
+    buf = storagePath ? await readStoredFile(storagePath) : await readFile(filename, dir)
   } else {
     // Legacy public URL fallback only. This does not expose private paths; it just
     // keeps old dev/demo image references working if they still exist.
@@ -229,15 +242,15 @@ export async function analyzeImage(imageUrl: string, prompt: string, opts: Visio
     return await openaiCompatibleVision(imageUrl, prompt, opts)
   }
   console.log('[ai-provider] using z-ai for image analysis')
-  return await zaiVision(imageUrl, prompt)
+    return await zaiVision(imageUrl, prompt, opts)
 }
 
-async function zaiVision(imageUrl: string, prompt: string): Promise<string> {
+async function zaiVision(imageUrl: string, prompt: string, opts: VisionOptions = {}): Promise<string> {
   try {
     const ai = await getZai()
     let imageInput = imageUrl
     if (imageUrl.startsWith('/')) {
-      const localInput = await imageInputFromLocalReference(imageUrl)
+      const localInput = await imageInputFromLocalReference(imageUrl, opts.contractorId)
       if (localInput) imageInput = localInput
     }
     const res: any = await (ai.chat.completions as any).createVision({
@@ -261,7 +274,7 @@ async function openaiCompatibleVision(imageUrl: string, prompt: string, opts: Vi
     // Convert local/private storage URL to base64
     let imageInput = imageUrl
     if (imageUrl.startsWith('/')) {
-      const localInput = await imageInputFromLocalReference(imageUrl)
+      const localInput = await imageInputFromLocalReference(imageUrl, opts.contractorId)
       if (!localInput) return ''
       imageInput = localInput
     }

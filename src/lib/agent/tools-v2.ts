@@ -15,7 +15,7 @@ import { db } from '@/lib/db'
 import type { ChannelType } from '@/lib/types'
 import { parseXactimateLineItems, ROOFING_SYNONYMS } from '@/lib/specialized-parsers'
 import { parseScope } from '@/lib/scope-parser'
-import { saveFile } from '@/lib/storage'
+import { deleteStoredFile, saveFile } from '@/lib/storage'
 import { initScopeAnalysis } from '@/lib/scope-manager'
 import { toFileUrl, toThumbnailUrl } from '@/lib/file-url'
 import { getProjectContextByContractor, getProjectDocumentPacket, linkDocumentToJobPacket, createProjectTimelineEvent, getProjectTimeline, getContractorOcrReviewQueue } from '@/lib/project-context'
@@ -1746,12 +1746,8 @@ export const TOOLS: ToolDef[] = [
       if (!doc || doc.contractorId !== contractorId) {
         return { success: false, data: null, error: 'Document not found' }
       }
-      // Delete the physical file too
-      try {
-        const fs = await import('node:fs/promises')
-        await fs.unlink(doc.filePath).catch(() => {})
-        if (doc.thumbnailPath) await fs.unlink(doc.thumbnailPath).catch(() => {})
-      } catch {}
+      await deleteStoredFile(doc.filePath).catch(() => false)
+      await deleteStoredFile(doc.thumbnailPath).catch(() => false)
       await db.document.delete({ where: { id: args.documentId } })
       console.log(`[tools-v2] delete_document: deleted ${doc.originalName} (${args.documentId})`)
       return { success: true, data: { id: args.documentId, name: doc.originalName, message: `Document "${doc.originalName}" deleted.` } }
@@ -1773,13 +1769,10 @@ export const TOOLS: ToolDef[] = [
       if (docs.length === 0) {
         return { success: true, data: { deleted: 0, message: `No documents found matching "${args.nameFilter}".` } }
       }
-      const fs = await import('node:fs/promises')
       let deletedCount = 0
       for (const doc of docs) {
-        try {
-          await fs.unlink(doc.filePath).catch(() => {})
-          if (doc.thumbnailPath) await fs.unlink(doc.thumbnailPath).catch(() => {})
-        } catch {}
+        await deleteStoredFile(doc.filePath).catch(() => false)
+        await deleteStoredFile(doc.thumbnailPath).catch(() => false)
         await db.document.delete({ where: { id: doc.id } })
         deletedCount++
       }

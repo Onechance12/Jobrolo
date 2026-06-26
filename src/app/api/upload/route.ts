@@ -6,6 +6,7 @@ import { requireCustomer, requireProject, requireWorkspace } from '@/lib/securit
 import { MAX_FILES_PER_UPLOAD, validateUpload, safeFilename } from '@/lib/security/upload-validation'
 import { enqueueAgentJob } from '@/lib/jobs/queue'
 import { toFileUrl } from '@/lib/file-url'
+import { v4 as uuidv4 } from 'uuid'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -36,6 +37,13 @@ function fileTypeFor(name: string, mimeType: string): string {
 
 function statusFor(fileType: string) {
   return fileType === 'photo' ? 'queued' : 'queued'
+}
+
+function storageKeyPrefix(input: { contractorId: string; documentId: string; projectId?: string; customerId?: string }) {
+  const base = `contractors/${input.contractorId}`
+  if (input.projectId) return `${base}/projects/${input.projectId}/documents/${input.documentId}`
+  if (input.customerId) return `${base}/customers/${input.customerId}/documents/${input.documentId}`
+  return `${base}/documents/${input.documentId}`
 }
 
 export async function POST(req: NextRequest) {
@@ -100,10 +108,18 @@ export async function POST(req: NextRequest) {
       if (!validation.ok) return NextResponse.json({ error: validation.error || `Invalid file: ${originalName}` }, { status: 400 })
 
       const mimeType = validation.detectedMime || file.type || 'application/octet-stream'
-      const saved = await saveUpload({ name: originalName, type: mimeType, size: file.size, data })
+      const documentId = uuidv4()
+      const saved = await saveUpload({
+        name: originalName,
+        type: mimeType,
+        size: file.size,
+        data,
+        storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId, customerId }),
+      })
       const fileType = fileTypeFor(originalName, mimeType)
       const document = await db.document.create({
         data: {
+          id: documentId,
           contractorId: ctx.contractorId,
           uploadedById: ctx.user.id,
           filename: saved.filename,

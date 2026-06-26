@@ -8,6 +8,8 @@ Follow-up patch note: live testing showed extracted document data exists, but th
 
 Prototype stabilization patch note: live testing showed a remaining disconnect between "file saved", "AI analysis finished", and "record linked/saved." This pass decouples upload save success from background document analysis in the chat UI and adds tools for upload status/recent uploads plus customer-file note saving.
 
+Storage hardening patch note: production uploads are moving from Render local filesystem toward private Cloudflare R2 object storage. This pass adds `STORAGE_PROVIDER=r2`, R2/S3-compatible private object pointers, authenticated file serving compatibility, storage health/usage endpoints, and a dry-run local-to-R2 migration script.
+
 ## Product north star
 
 Jobrolo should not feel like another CRM. The main chat is the product:
@@ -99,6 +101,72 @@ Patch status:
 Remaining:
 
 - Large photo batches still need guided sections, chunking, and production object storage.
+
+### P1 — Move production storage from Render local filesystem to Cloudflare R2
+
+Problem:
+
+Render local filesystem is not durable enough for contractor photos, PDFs, thumbnails, generated documents, and job packets.
+
+Need:
+
+- Cloudflare R2 private bucket for production uploads.
+- Database stores private storage keys/pointers, not public object URLs.
+- Jobrolo API controls authenticated access.
+- Local storage remains available for development.
+- Existing local files are not deleted.
+- A safe local-to-R2 migration path exists.
+
+Patch status:
+
+- `STORAGE_PROVIDER=r2` is supported.
+- New R2 objects use tenant-scoped keys under `contractors/{contractorId}/...`.
+- Existing `Document.filePath` and `thumbnailPath` fields are reused to avoid a risky schema migration.
+- `/api/storage/...` remains auth-gated and can serve old local files or new R2 objects.
+- `docs/storage-r2.md` documents Render and Cloudflare setup.
+
+### P1 — Storage usage / billing tracking
+
+Patch status:
+
+- `GET /api/admin/storage/usage` reports total document bytes, counts, file-type breakdown, thumbnail count, and last upload for the authenticated contractor.
+
+Remaining:
+
+- Future pricing tiers need included GB, overage GB, retention policy, and analysis/storage cost rollups.
+
+### P1 — Storage health check
+
+Patch status:
+
+- `GET /api/admin/storage/health` verifies write/read/delete for the active storage provider without exposing secrets.
+
+### P1 — Local-to-R2 migration script
+
+Patch status:
+
+- `scripts/migrate-local-storage-to-r2.mjs` defaults to dry-run.
+- `--execute` uploads local originals/thumbnails to R2 and updates `Document` rows only after upload succeeds.
+- Local files are never deleted automatically.
+
+### P1 — Private file access / signed URL strategy
+
+Patch status:
+
+- Private bucket is recommended.
+- Current strategy keeps file access behind authenticated Jobrolo API routes.
+- Raw private R2 URLs are not returned to the browser.
+
+Remaining:
+
+- Presigned URLs can be added later for specific share/download flows if needed.
+
+### P2 — Direct-to-R2 browser uploads later
+
+Deferred:
+
+- Current uploads still go through Jobrolo. CORS and presigned direct uploads are not required yet.
+- Direct-to-R2 should wait until large photo batch UX is designed.
 
 ### P1 — Photo/document analysis quality
 

@@ -34,6 +34,18 @@ export function toFileUrl(filePath: string | null | undefined): string | null {
 
   const normalized = filePath.replace(/\\/g, '/')
 
+  // Remote private object pointers, e.g.
+  // r2://bucket/contractors/{id}/documents/{documentId}/original/file.pdf
+  // r2://bucket/contractors/{id}/documents/{documentId}/thumb/file.jpg
+  const remoteMatch = normalized.match(/^(?:s3|r2):\/\/[^/]+\/.+\/(original|thumb)\/([^/?]+)$/)
+  if (remoteMatch) {
+    const ext = path.extname(remoteMatch[2]).toLowerCase()
+    const dir = remoteMatch[1] === 'thumb'
+      ? 'thumbnails'
+      : ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'].includes(ext) ? 'photos' : 'docs'
+    return `/api/storage/${dir}/${remoteMatch[2]}`
+  }
+
   // Try to match the uploads directory pattern
   // Matches: .../uploads/{dir}/{filename}
   const match = normalized.match(/\/uploads\/(photos|docs|thumbnails|tts-cache)\/([^/?]+)$/)
@@ -62,6 +74,10 @@ export function toThumbnailUrl(thumbPath: string | null | undefined): string | n
   if (!thumbPath || typeof thumbPath !== 'string') return null
   // Thumbnails are stored in the thumbnails/ directory
   const normalized = thumbPath.replace(/\\/g, '/')
+  const remoteMatch = normalized.match(/^(?:s3|r2):\/\/[^/]+\/.+\/thumb\/([^/?]+)$/)
+  if (remoteMatch) {
+    return `/api/storage/thumbnails/${remoteMatch[1]}`
+  }
   const match = normalized.match(/\/uploads\/thumbnails\/([^/?]+)$/)
   if (match) {
     return `/api/storage/thumbnails/${match[1]}`

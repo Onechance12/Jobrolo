@@ -2,6 +2,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import crypto from 'node:crypto'
 import { saveFile as storageSaveFile, readStoredFile } from '@/lib/storage'
+import { toFileUrl, toThumbnailUrl } from '@/lib/file-url'
 
 let heicDecode: any = null
 async function getHeicDecode() {
@@ -29,6 +30,8 @@ export async function ensureUploadDirs() {
 
 // SECURITY: Convert private file paths to authenticated API URLs.
 export function publicPathToUrl(p: string): string {
+  const resolved = toFileUrl(p)
+  if (resolved) return resolved
   const normalized = p.replace(/\\/g, '/')
   const match = normalized.match(/\/uploads\/(photos|docs|thumbnails|tts-cache)\/([^/?]+)$/)
   if (match) return `/api/storage/${match[1]}/${match[2]}`
@@ -36,6 +39,12 @@ export function publicPathToUrl(p: string): string {
   const ext = path.extname(basename).toLowerCase()
   const dir = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'].includes(ext) ? 'photos' : 'docs'
   return `/api/storage/${dir}/${basename}`
+}
+
+function remotePrefixFromStoredPath(filePath: string, child: 'original' | 'thumb') {
+  const normalized = filePath.replace(/\\/g, '/')
+  const match = normalized.match(/^(?:s3|r2):\/\/[^/]+\/(.+)\/(?:original|thumb)\/[^/]+$/)
+  return match ? `${match[1]}/${child}` : undefined
 }
 
 function isHeic(filename: string, mimeType: string): boolean {
@@ -53,7 +62,7 @@ function extensionFor(name: string, mimeType: string, isImage: boolean) {
   return isImage ? '.jpg' : '.bin'
 }
 
-export async function saveUpload(file: { name: string; type: string; size: number; data: ArrayBuffer | Buffer }): Promise<SavedFile> {
+export async function saveUpload(file: { name: string; type: string; size: number; data: ArrayBuffer | Buffer; storageKeyPrefix?: string }): Promise<SavedFile> {
   const isImage = file.type.startsWith('image/') || isHeic(file.name, file.type)
   const isHeicFile = isHeic(file.name, file.type)
   const buffer = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data)
@@ -66,6 +75,7 @@ export async function saveUpload(file: { name: string; type: string; size: numbe
     filename,
     mimeType: file.type || 'application/octet-stream',
     directory,
+    keyPrefix: file.storageKeyPrefix ? `${file.storageKeyPrefix}/original` : undefined,
   })
 
   let thumbnailPath: string | null = null
@@ -81,6 +91,7 @@ export async function saveUpload(file: { name: string; type: string; size: numbe
         filename: thumbName,
         mimeType: 'image/jpeg',
         directory: 'thumbnails',
+        keyPrefix: file.storageKeyPrefix ? `${file.storageKeyPrefix}/thumb` : undefined,
       })
       thumbnailPath = thumbStored.filePath
     } catch (e) {
@@ -106,13 +117,13 @@ export async function convertHeicInBackground(filePath: string): Promise<{ newFi
     const { width, height, data } = await decode({ buffer })
     const jpegBuffer = await sharp(Buffer.from(data), { raw: { width, height, channels: 4 } }).jpeg({ quality: 85 }).toBuffer()
     const newFilename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`
-    const stored = await storageSaveFile({ buffer: jpegBuffer, filename: newFilename, mimeType: 'image/jpeg', directory: 'photos' })
+    const stored = await storageSaveFile({ buffer: jpegBuffer, filename: newFilename, mimeType: 'image/jpeg', directory: 'photos', keyPrefix: remotePrefixFromStoredPath(filePath, 'original') })
 
     let thumbnailPath: string | null = null
     try {
       const thumbBuffer = await sharp(jpegBuffer).resize(400, 400, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer()
       const thumbName = newFilename.replace(/\.[^.]+$/, '.jpg')
-      const thumbStored = await storageSaveFile({ buffer: thumbBuffer, filename: thumbName, mimeType: 'image/jpeg', directory: 'thumbnails' })
+      const thumbStored = await storageSaveFile({ buffer: thumbBuffer, filename: thumbName, mimeType: 'image/jpeg', directory: 'thumbnails', keyPrefix: remotePrefixFromStoredPath(filePath, 'thumb') })
       thumbnailPath = thumbStored.filePath
     } catch {}
 
@@ -133,5 +144,5 @@ export function fileUrl(saved: Pick<SavedFile, 'filename'>): string {
 
 export function thumbnailUrl(saved: SavedFile): string | null {
   if (!saved.thumbnailPath) return null
-  return `/api/storage/thumbnails/${path.basename(saved.thumbnailPath)}`
+  return toThumbnailUrl(saved.thumbnailPath) ?? publicPathToUrl(saved.thumbnailPath).replace('/api/storage/photos/', '/api/storage/thumbnails/')
 }

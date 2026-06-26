@@ -28,6 +28,15 @@ if ((process.env.STORAGE_PROVIDER || 'local') === 's3') {
   }
 }
 
+if ((process.env.STORAGE_PROVIDER || 'local') === 'r2') {
+  for (const key of ['R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']) {
+    if (!process.env[key] && !process.env[key.replace('R2_', 'S3_')]) errors.push(`${key} is required when STORAGE_PROVIDER=r2`)
+  }
+  if (!process.env.R2_ENDPOINT && !process.env.R2_ACCOUNT_ID && !process.env.S3_ENDPOINT) {
+    errors.push('R2_ENDPOINT or R2_ACCOUNT_ID is required when STORAGE_PROVIDER=r2')
+  }
+}
+
 if (process.env.PROPERTY_RESEARCH_ENABLED === '1' && !process.env.PROPERTY_RESEARCH_WEBHOOK_URL) {
   warnings.push('PROPERTY_RESEARCH_ENABLED=1 but PROPERTY_RESEARCH_WEBHOOK_URL is not set. Active lookups will fall back to cached/imported property memory.')
 }

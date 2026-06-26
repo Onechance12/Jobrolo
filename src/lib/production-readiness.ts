@@ -58,9 +58,13 @@ export async function getProductionReadinessReport() {
   checks.push({
     key: 'storage_provider',
     label: 'Private storage',
-    status: storageProvider === 's3' ? requiredS3Configured() : (nodeEnv === 'production' ? 'warning' : 'ok'),
-    detail: storageProvider === 's3' ? 'S3/R2 storage selected.' : 'Local private storage selected.',
-    fix: storageProvider === 's3' ? 'Set S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, and optional S3_ENDPOINT.' : 'Use S3/R2/Supabase Storage for serverless production; local storage is only safe on persistent disk deployments.',
+    status: storageProvider === 'r2' ? requiredR2Configured() : storageProvider === 's3' ? requiredS3Configured() : (nodeEnv === 'production' ? 'warning' : 'ok'),
+    detail: storageProvider === 'r2' ? 'Cloudflare R2 private storage selected.' : storageProvider === 's3' ? 'S3-compatible private storage selected.' : 'Local private storage selected.',
+    fix: storageProvider === 'r2'
+      ? 'Set R2_BUCKET, R2_ACCOUNT_ID or R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_REGION=auto.'
+      : storageProvider === 's3'
+        ? 'Set S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, and optional S3_ENDPOINT.'
+        : 'Use R2/S3/Supabase Storage for production; local storage is only safe on persistent disk deployments.',
   })
 
   checks.push({
@@ -134,6 +138,12 @@ export async function getProductionReadinessReport() {
 
 function requiredS3Configured(): ReadinessSeverity {
   return ['S3_BUCKET', 'S3_REGION', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'].every(present) ? 'ok' : 'error'
+}
+function requiredR2Configured(): ReadinessSeverity {
+  const creds = (present('R2_ACCESS_KEY_ID') || present('S3_ACCESS_KEY_ID')) && (present('R2_SECRET_ACCESS_KEY') || present('S3_SECRET_ACCESS_KEY'))
+  const bucket = present('R2_BUCKET') || present('S3_BUCKET')
+  const endpoint = present('R2_ENDPOINT') || present('R2_ACCOUNT_ID') || present('S3_ENDPOINT')
+  return creds && bucket && endpoint ? 'ok' : 'error'
 }
 function emailReady() {
   const provider = env('EMAIL_PROVIDER') || env('RESET_EMAIL_PROVIDER')
