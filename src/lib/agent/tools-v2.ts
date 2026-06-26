@@ -30,6 +30,7 @@ import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCan
 import { sanitizeHtml } from '@/lib/security/html'
 import type { TenantContext } from '@/lib/security/context'
 import { normalizeRole } from '@/lib/security/permissions'
+import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
 
 export interface ToolContext {
   workspaceId?: string
@@ -1914,6 +1915,97 @@ export const TOOLS: ToolDef[] = [
           message: `Created/opened the ${args.chatType} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'}`,
         },
       }
+    },
+  },
+  {
+    name: 'invite_user_to_chat',
+    description: 'Invite an employee, crew member, subcontractor, sales rep, manager, or customer/homeowner to a Jobrolo workspace chat. Creates an invited user, workspace membership, in-app notification, and one-time invite link. Use for "add Jose to the crew chat", "invite homeowner to customer chat", or "add employee to this job chat". Requires approval because it grants chat access.',
+    schema: z.object({
+      workspaceId: z.string().max(200).optional(),
+      projectId: z.string().max(200).optional(),
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      chatId: z.string().max(200).optional(),
+      chatType: z.enum(['main', 'customer', 'crew', 'supplier', 'finance', 'management', 'sales', 'insurance']).optional(),
+      name: z.string().min(2).max(160),
+      email: z.string().email().max(240),
+      phone: z.string().max(60).optional(),
+      role: z.enum(['employee', 'manager', 'sales', 'crew', 'subcontractor', 'customer']).optional(),
+      sendEmail: z.boolean().optional(),
+      sendSms: z.boolean().optional(),
+      note: z.string().max(1000).optional(),
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'crew', 'customer'],
+    requiresApproval: true,
+    execute: async (args, contractorId, ctx) => {
+      let workspaceId = args.workspaceId || ctx.workspaceId || undefined
+      let chatId = args.chatId || ctx.chatId || undefined
+      let chatType = args.chatType || undefined
+
+      if (!workspaceId && args.projectId) {
+        const workspace = await db.workspace.findFirst({
+          where: { contractorId, projectId: args.projectId, status: 'active' },
+          select: { id: true },
+        })
+        if (!workspace) return { success: true, data: { needsWorkspace: true, message: 'No active workspace found for that project.' } }
+        workspaceId = workspace.id
+      }
+
+      if (!workspaceId && (args.customerId || args.customerName)) {
+        const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+        if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+        if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}.` } }
+        if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer should this invite attach to?` } }
+        const workspace = await db.workspace.findFirst({
+          where: {
+            contractorId,
+            status: 'active',
+            OR: [
+              { customerId: resolved.customer.id },
+              { project: { customerId: resolved.customer.id } },
+            ],
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true },
+        })
+        if (!workspace) return { success: true, data: { needsProject: true, customer: resolved.customer, message: `No active workspace/project found for ${resolved.customer.name}. Create a project first, then invite people to the chat.` } }
+        workspaceId = workspace.id
+      }
+
+      if (!workspaceId) return { success: true, data: { needsWorkspace: true, message: 'Which workspace or job chat should I invite them to?' } }
+
+      if (chatType) {
+        const workspace = await db.workspace.findFirst({
+          where: { id: workspaceId, contractorId, status: 'active' },
+          select: { id: true, name: true },
+        })
+        if (!workspace) return { success: false, data: null, error: 'Workspace not found' }
+        const chat = await db.workspaceChat.upsert({
+          where: { workspaceId_chatType: { workspaceId, chatType } },
+          update: { lastActivity: new Date() },
+          create: {
+            workspaceId,
+            chatType,
+            title: chatType.charAt(0).toUpperCase() + chatType.slice(1),
+            visibility: chatType === 'customer' ? 'customer' : 'internal',
+          },
+          select: { id: true },
+        })
+        chatId = chat.id
+      }
+
+      const invite = await createWorkspaceInvite(await buildTrustedToolTenantContext(contractorId, ctx), {
+        workspaceId,
+        chatId,
+        name: args.name,
+        email: args.email,
+        phone: args.phone,
+        role: args.role || (chatType === 'customer' ? 'customer' : chatType === 'crew' ? 'crew' : 'employee'),
+        sendEmail: args.sendEmail,
+        sendSms: args.sendSms,
+        note: args.note,
+      })
+      return { success: true, data: { ...invite, card: { cardType: 'chat_invite', ...invite } } }
     },
   },
   {

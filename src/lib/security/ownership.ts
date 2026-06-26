@@ -13,12 +13,33 @@
 import { db } from '@/lib/db'
 import type { TenantContext } from './context'
 
+export function hasCompanyWideAccess(ctx: TenantContext) {
+  if (!ctx.user) return true
+  return ['owner', 'admin', 'manager', 'project_manager'].includes(String(ctx.user.role ?? '').toLowerCase())
+}
+
+export function canAccessWorkspaceChat(ctx: TenantContext, chat: { chatType?: string | null; visibility?: string | null }) {
+  if (hasCompanyWideAccess(ctx)) return true
+  const role = String(ctx.user?.role ?? '').toLowerCase()
+  const chatType = String(chat.chatType ?? '').toLowerCase()
+  const visibility = String(chat.visibility ?? '').toLowerCase()
+  if (role === 'customer') return visibility === 'customer' || chatType === 'customer'
+  if (role === 'crew' || role === 'subcontractor') return chatType === 'crew'
+  if (role === 'sales') return ['sales', 'customer', 'main'].includes(chatType)
+  if (role === 'employee') return ['main', 'production', 'crew'].includes(chatType)
+  return chatType === 'main'
+}
+
 // ---------------------------------------------------------------------------
 // Workspace
 // ---------------------------------------------------------------------------
 export async function requireWorkspace(ctx: TenantContext, workspaceId: string) {
   return db.workspace.findFirst({
-    where: { id: workspaceId, contractorId: ctx.contractorId },
+    where: {
+      id: workspaceId,
+      contractorId: ctx.contractorId,
+      ...(hasCompanyWideAccess(ctx) ? {} : { members: { some: { userId: ctx.user?.id ?? '__none__' } } }),
+    },
   })
 }
 
@@ -30,9 +51,12 @@ export async function requireWorkspaceChat(ctx: TenantContext, workspaceId: stri
   const ws = await requireWorkspace(ctx, workspaceId)
   if (!ws) return null
   // Then verify the chat belongs to that workspace
-  return db.workspaceChat.findFirst({
+  const chat = await db.workspaceChat.findFirst({
     where: { id: chatId, workspaceId },
   })
+  if (!chat) return null
+  if (!canAccessWorkspaceChat(ctx, chat)) return null
+  return chat
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +64,11 @@ export async function requireWorkspaceChat(ctx: TenantContext, workspaceId: stri
 // ---------------------------------------------------------------------------
 export async function requireProject(ctx: TenantContext, projectId: string) {
   return db.project.findFirst({
-    where: { id: projectId, contractorId: ctx.contractorId },
+    where: {
+      id: projectId,
+      contractorId: ctx.contractorId,
+      ...(hasCompanyWideAccess(ctx) ? {} : { workspace: { members: { some: { userId: ctx.user?.id ?? '__none__' } } } }),
+    },
   })
 }
 
@@ -49,7 +77,16 @@ export async function requireProject(ctx: TenantContext, projectId: string) {
 // ---------------------------------------------------------------------------
 export async function requireCustomer(ctx: TenantContext, customerId: string) {
   return db.customer.findFirst({
-    where: { id: customerId, contractorId: ctx.contractorId },
+    where: {
+      id: customerId,
+      contractorId: ctx.contractorId,
+      ...(hasCompanyWideAccess(ctx) ? {} : {
+        OR: [
+          { workspace: { members: { some: { userId: ctx.user?.id ?? '__none__' } } } },
+          { projects: { some: { workspace: { members: { some: { userId: ctx.user?.id ?? '__none__' } } } } } },
+        ],
+      }),
+    },
   })
 }
 
@@ -61,10 +98,10 @@ export async function requireDocument(ctx: TenantContext, documentId: string) {
     where: {
       id: documentId,
       OR: [
-        { contractorId: ctx.contractorId },
-        { project: { contractorId: ctx.contractorId } },
-        { customer: { contractorId: ctx.contractorId } },
-        { workspace: { contractorId: ctx.contractorId } },
+        ...(hasCompanyWideAccess(ctx) ? [{ contractorId: ctx.contractorId }] : []),
+        { project: { contractorId: ctx.contractorId, ...(hasCompanyWideAccess(ctx) ? {} : { workspace: { members: { some: { userId: ctx.user?.id ?? '__none__' } } } }) } },
+        { customer: { contractorId: ctx.contractorId, ...(hasCompanyWideAccess(ctx) ? {} : { projects: { some: { workspace: { members: { some: { userId: ctx.user?.id ?? '__none__' } } } } } }) } },
+        { workspace: { contractorId: ctx.contractorId, ...(hasCompanyWideAccess(ctx) ? {} : { members: { some: { userId: ctx.user?.id ?? '__none__' } } }) } },
       ],
     },
   })
@@ -86,6 +123,7 @@ export async function requireTask(ctx: TenantContext, taskId: string) {
 // Conversation
 // ---------------------------------------------------------------------------
 export async function requireConversation(ctx: TenantContext, conversationId: string) {
+  if (!hasCompanyWideAccess(ctx)) return null
   return db.conversation.findFirst({
     where: { id: conversationId, contractorId: ctx.contractorId },
   })

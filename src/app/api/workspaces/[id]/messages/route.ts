@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireContext } from '@/lib/security/context'
+import { requireWorkspace } from '@/lib/security/ownership'
 export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -11,10 +12,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!chatId) return NextResponse.json({ messages: [] })
 
   // SECURITY: Verify workspace belongs to this contractor
-  const ws = await db.workspace.findFirst({
-    where: { id: workspaceId, contractorId: ctx.contractorId },
-    select: { id: true },
-  })
+  const ws = await requireWorkspace(ctx, workspaceId)
   if (!ws) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }

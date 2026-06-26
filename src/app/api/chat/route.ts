@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/security/rate-limit'
 import { sanitizeUserInput } from '@/lib/security/prompt-defense'
 import { enqueueAgentJob } from '@/lib/jobs/queue'
 import { assertDocumentsBelongToTenant, normalizeIdList } from '@/lib/security/agent-execution'
+import { hasCompanyWideAccess } from '@/lib/security/ownership'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest) {
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
   if (!ctx.user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  if (!hasCompanyWideAccess(ctx)) return NextResponse.json({ error: 'Use your shared workspace chat.' }, { status: 403 })
 
   // Rate limit per contractor
   const rl = rateLimit(ctx.contractorId, '/api/chat')

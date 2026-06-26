@@ -9,8 +9,9 @@ import { WorkspaceSidebar } from '@/components/jobrolo/workspace-sidebar'
 import { MessageBubble, StreamingBubble } from '@/components/jobrolo/message-bubble'
 import { ChatInput } from '@/components/jobrolo/chat-input'
 import { UploadProgressIndicator } from '@/components/jobrolo/upload-progress'
+import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
-import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
@@ -18,6 +19,8 @@ export default function Page() {
   const [initialLoading, setInitialLoading] = useState(true)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
   const [autoTTS, setAutoTTS] = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
   const proactiveRunKey = useRef<string | null>(null)
   const [userName, setUserName] = useState('')
   const uploadProgress = useChatStore(s => s.uploadProgress)
@@ -54,6 +57,7 @@ export default function Page() {
 
   const isInWorkspace = !!currentWorkspaceId && !!currentChatId
   const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId)
+  const currentChat = currentWorkspace?.chats.find(c => c.id === currentChatId) ?? null
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevMsgCount = useRef(0)
 
@@ -62,12 +66,14 @@ export default function Page() {
     let cancelled = false
     ;(async () => {
       try {
+        let currentUserRole = 'owner'
         const meRes = await fetch('/api/auth/me')
         if (meRes.ok) {
           const me = await meRes.json()
           if (!me.authenticated) { window.location.href = '/signup'; return }
           if (!me.onboardingComplete) { window.location.href = '/onboarding'; return }
           setUserName(me.user?.name || 'there')
+          currentUserRole = me.user?.role || currentUserRole
         }
         const [dr, cr, wr] = await Promise.all([
           fetch('/api/data'), fetch('/api/conversations'), fetch('/api/workspaces'),
@@ -86,6 +92,16 @@ export default function Page() {
         if (wr.ok) {
           const d = await wr.json()
           setWorkspaces(d.workspaces || [])
+          const invitedWorkspaceId = window.localStorage.getItem('jobroloInviteWorkspaceId')
+          const invitedChatId = window.localStorage.getItem('jobroloInviteChatId')
+          const invitedWorkspace = invitedWorkspaceId ? d.workspaces?.find((w: any) => w.id === invitedWorkspaceId) : null
+          if (invitedWorkspace) {
+            useWorkspaceStore.getState().enterWorkspace(invitedWorkspace.id, invitedChatId || undefined)
+            window.localStorage.removeItem('jobroloInviteWorkspaceId')
+            window.localStorage.removeItem('jobroloInviteChatId')
+          } else if (!hasCompanyWideUiRole(currentUserRole) && d.workspaces?.[0]) {
+            useWorkspaceStore.getState().enterWorkspace(d.workspaces[0].id)
+          }
         }
         const cid = useChatStore.getState().conversationId
         if (cid) {
@@ -394,6 +410,16 @@ export default function Page() {
                 </button>
               )}
 
+              {isInWorkspace && currentWorkspace && (
+                <button
+                  onClick={() => setInviteOpen(true)}
+                  className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-muted"
+                  aria-label="Invite people to this chat"
+                >
+                  <UserPlus className="h-3.5 w-3.5" /> Invite
+                </button>
+              )}
+
               {/* Theme toggle */}
               <ThemeToggle />
 
@@ -411,8 +437,40 @@ export default function Page() {
                 </button>
               )}
 
-              <div className="w-8 h-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-semibold">
-                {userName ? getInitials(userName) : 'U'}
+              <div className="relative">
+                <button
+                  onClick={() => setProfileMenuOpen(v => !v)}
+                  className="w-8 h-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-semibold hover:bg-muted/80"
+                  aria-label="Profile menu"
+                >
+                  {userName ? getInitials(userName) : 'U'}
+                </button>
+                {profileMenuOpen && (
+                  <div className="absolute right-0 top-10 z-30 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-xl">
+                    <div className="px-3 py-2">
+                      <div className="text-sm font-semibold">{userName || 'Jobrolo user'}</div>
+                      <div className="text-xs text-muted-foreground">Profile & settings</div>
+                    </div>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); window.location.href = '/settings/company' }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"
+                    >
+                      <Settings className="h-4 w-4" /> Company profile
+                    </button>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); window.location.href = '/settings/notifications' }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"
+                    >
+                      <Bell className="h-4 w-4" /> Notifications
+                    </button>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); handleLogout() }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                    >
+                      <LogOut className="h-4 w-4" /> Log out
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -480,6 +538,192 @@ export default function Page() {
         </div>
       </div>
 
+      {inviteOpen && currentWorkspace && (
+        <InvitePeopleModal
+          workspace={currentWorkspace}
+          chat={currentChat}
+          onClose={() => setInviteOpen(false)}
+        />
+      )}
+
     </div>
   )
+}
+
+function hasCompanyWideUiRole(role?: string | null) {
+  return ['owner', 'admin', 'manager', 'project_manager'].includes(String(role ?? '').toLowerCase())
+}
+
+function InvitePeopleModal({
+  workspace,
+  chat,
+  onClose,
+}: {
+  workspace: any
+  chat: any
+  onClose: () => void
+}) {
+  const [members, setMembers] = useState<any[]>([])
+  const [copied, setCopied] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    role: defaultInviteRole(chat?.chatType),
+    sendEmail: true,
+    sendSms: false,
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const res = await fetch(`/api/workspaces/${workspace.id}/members`).catch(() => null)
+      if (!res?.ok || cancelled) return
+      const data = await res.json().catch(() => ({}))
+      setMembers(data.members || [])
+    })()
+    return () => { cancelled = true }
+  }, [workspace.id])
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setInviteUrl(null)
+    setCopied(false)
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          chatId: chat?.id,
+          phone: form.phone.trim() || null,
+          note: chat?.chatType === 'crew' ? 'Please use this chat for job notes, crew updates, photos, and questions.' : null,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || 'Invite failed')
+        return
+      }
+      setInviteUrl(data.invite?.inviteUrl || null)
+      setMembers(prev => [
+        ...prev.filter(member => member.user?.id !== data.invite?.user?.id),
+        { id: data.invite?.member?.id, role: data.invite?.member?.role, permissions: data.invite?.member?.permissions, user: data.invite?.user },
+      ])
+      setForm(f => ({ ...f, name: '', email: '', phone: '' }))
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function copyInvite() {
+    if (!inviteUrl) return
+    await navigator.clipboard?.writeText(inviteUrl).catch(() => null)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1800)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="w-full max-w-lg rounded-t-3xl border border-border bg-background p-4 shadow-2xl sm:rounded-3xl">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">Invite people to this chat</div>
+            <div className="text-sm text-muted-foreground">
+              {workspace.name}{chat?.title ? ` · ${chat.title}` : ''}
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-full p-2 text-muted-foreground hover:bg-muted" aria-label="Close invite dialog">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Name</span>
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required className="w-full rounded-xl border border-border bg-background px-3 py-2 outline-none focus:border-blue-500" placeholder="Jose Ramirez" />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Role</span>
+              <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2 outline-none focus:border-blue-500">
+                <option value="employee">Employee</option>
+                <option value="manager">Manager</option>
+                <option value="sales">Sales</option>
+                <option value="crew">Crew</option>
+                <option value="subcontractor">Subcontractor</option>
+                <option value="customer">Customer/Homeowner</option>
+              </select>
+            </label>
+          </div>
+          <label className="space-y-1 text-sm block">
+            <span className="font-medium">Email for account invite</span>
+            <input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required type="email" className="w-full rounded-xl border border-border bg-background px-3 py-2 outline-none focus:border-blue-500" placeholder="name@example.com" />
+          </label>
+          <label className="space-y-1 text-sm block">
+            <span className="font-medium">Phone for SMS invite, optional</span>
+            <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full rounded-xl border border-border bg-background px-3 py-2 outline-none focus:border-blue-500" placeholder="817-555-1212" />
+          </label>
+          <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={form.sendEmail} onChange={e => setForm({ ...form, sendEmail: e.target.checked })} />
+              Send email invite
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={form.sendSms} onChange={e => setForm({ ...form, sendSms: e.target.checked })} />
+              Send SMS if Twilio is configured
+            </label>
+          </div>
+          {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">{error}</div> : null}
+          <Button type="submit" disabled={loading} className="w-full bg-blue-600 text-white hover:bg-blue-700">
+            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating invite…</> : 'Create invite'}
+          </Button>
+        </form>
+
+        {inviteUrl ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/30">
+            <div className="mb-1 font-medium text-blue-900 dark:text-blue-100">Invite link created</div>
+            <div className="break-all text-blue-800 dark:text-blue-200">{inviteUrl}</div>
+            <button onClick={copyInvite} className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? 'Copied' : 'Copy link'}
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shared with</div>
+          {members.length ? (
+            <div className="max-h-36 space-y-2 overflow-y-auto">
+              {members.map(member => (
+                <div key={member.id ?? member.user?.id} className="flex items-center justify-between rounded-xl border border-border px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{member.user?.name || member.user?.email}</div>
+                    <div className="truncate text-xs text-muted-foreground">{member.user?.email} · {member.user?.status}</div>
+                  </div>
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{member.role || member.user?.role}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border p-3 text-sm text-muted-foreground">No shared members yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function defaultInviteRole(chatType?: string | null) {
+  if (chatType === 'customer') return 'customer'
+  if (chatType === 'crew') return 'crew'
+  if (chatType === 'sales') return 'sales'
+  return 'employee'
 }
