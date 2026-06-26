@@ -955,7 +955,7 @@ export const TOOLS: ToolDef[] = [
     description: 'List saved customers/clients from the database. Use this before answering broad questions like "what clients do we have saved", "list customers", "who is in the CRM", or "show my clients". Never answer that there are no clients unless this tool returns count 0.',
     schema: z.object({
       query: z.string().max(200).optional(),
-      limit: z.number().int().min(1).max(50).optional(),
+      limit: z.coerce.number().int().min(1).optional(),
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
@@ -1927,16 +1927,51 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'link_document_to_customer',
-    description: 'Link an uploaded document to a customer. Use when a user asks to associate/attach/tie a document to a specific customer. Also links to the customer\'s active project if one exists.',
+    description: 'Link an uploaded document/photo to a customer file. Use when a user asks to associate/attach/tie a file or photo to a specific customer. A project is NOT required. If the customer has an active project, it also links there; otherwise it attaches to the customer file only.',
     schema: z.object({
-      documentId: z.string().min(1).max(200),
+      documentId: z.string().min(1).max(200).optional(),
+      filename: z.string().min(1).max(300).optional(),
       customerName: z.string().min(1).max(200),
     }),
     allowedChannels: 'all',
-    execute: async (args, contractorId) => {
-      const doc = await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+    execute: async (args, contractorId, ctx) => {
+      let doc = args.documentId
+        ? await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+        : null
+      if (!doc && args.filename) {
+        doc = await db.document.findFirst({
+          where: { contractorId, originalName: { contains: args.filename } },
+          orderBy: { createdAt: 'desc' },
+        })
+      }
+      if (!doc && ctx.documentIds?.length === 1) {
+        doc = await db.document.findFirst({ where: { id: ctx.documentIds[0], contractorId } })
+      }
+      if (!doc && ctx.userId) {
+        const recent = await db.document.findMany({
+          where: {
+            contractorId,
+            uploadedById: ctx.userId,
+            customerId: null,
+            createdAt: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        })
+        if (recent.length === 1) doc = recent[0]
+        if (recent.length > 1) {
+          return {
+            success: true,
+            data: {
+              needsClarification: true,
+              candidates: recent.map(d => ({ id: d.id, originalName: d.originalName, fileType: d.fileType, createdAt: d.createdAt })),
+              message: `I found ${recent.length} recent unlinked uploads. Which one should I attach to ${args.customerName}?`,
+            },
+          }
+        }
+      }
       if (!doc) {
-        return { success: false, data: null, error: 'Document not found' }
+        return { success: false, data: null, error: 'Document not found. Upload a file first or provide a documentId/filename.' }
       }
       // Find customer by name (partial match)
       const customer = await db.customer.findFirst({
@@ -1958,20 +1993,18 @@ export const TOOLS: ToolDef[] = [
           workspaceId: project?.workspace?.id ?? null,
         },
       })
-      if (project?.id) {
-        await linkDocumentToJobPacket({
-          contractorId,
-          documentId: args.documentId,
-          projectId: project.id,
-          customerId: customer.id,
-          entityType: 'project',
-          entityId: project.id,
-          role: 'attachment',
-          label: doc.originalName,
-          source: 'ai',
-          metadata: { linkedVia: 'link_document_to_customer' },
-        }).catch(() => null)
-      }
+      await linkDocumentToJobPacket({
+        contractorId,
+        documentId: doc.id,
+        projectId: project?.id ?? null,
+        customerId: customer.id,
+        entityType: project?.id ? 'project' : 'customer',
+        entityId: project?.id ?? customer.id,
+        role: doc.fileType === 'photo' ? 'inspection_photo' : 'attachment',
+        label: doc.originalName,
+        source: 'ai',
+        metadata: { linkedVia: 'link_document_to_customer', customerOnly: !project?.id },
+      }).catch(err => console.warn(`[tools-v2] link_document_to_customer: document link record failed for ${doc?.id}:`, err))
       console.log(`[tools-v2] link_document_to_customer: linked ${doc.originalName} to ${customer.name}`)
       return {
         success: true,
@@ -1981,7 +2014,11 @@ export const TOOLS: ToolDef[] = [
           customerId: customer.id,
           customerName: customer.name,
           projectId: project?.id ?? null,
-          message: `Document "${doc.originalName}" linked to ${customer.name}.`,
+          linkedToCustomer: true,
+          linkedToProject: Boolean(project?.id),
+          message: project?.id
+            ? `Document "${doc.originalName}" linked to ${customer.name} and active project "${project.title}".`
+            : `Document "${doc.originalName}" linked to ${customer.name}'s customer file. No active project exists yet.`,
         },
       }
     },
@@ -3093,11 +3130,11 @@ function extractParamsFromSchema(schema: z.ZodType<any>): Record<string, unknown
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(shape)) {
     const propDef: any = (v as any)._zod?.def ?? (v as any)._def
-    const typeName = propDef?.typeName ?? (v as any)._zod?.def?.type ?? ''
+    const typeName = String(propDef?.typeName ?? (v as any)._zod?.def?.type ?? propDef?.type ?? '').toLowerCase()
     let type = 'string'
-    if (typeName.includes('String')) type = 'string'
-    else if (typeName.includes('Number')) type = 'number'
-    else if (typeName.includes('Boolean')) type = 'boolean'
+    if (typeName.includes('string')) type = 'string'
+    else if (typeName.includes('number')) type = 'number'
+    else if (typeName.includes('boolean')) type = 'boolean'
     out[k] = { type, description: propDef?.description ?? '' }
   }
   return out
@@ -3111,8 +3148,8 @@ function extractRequiredParams(schema: z.ZodType<any>): string[] {
   const required: string[] = []
   for (const [k, v] of Object.entries(shape)) {
     const propDef: any = (v as any)._zod?.def ?? (v as any)._def
-    const typeName = propDef?.typeName ?? ''
-    if (!typeName.includes('Optional')) required.push(k)
+    const typeName = String(propDef?.typeName ?? propDef?.type ?? '').toLowerCase()
+    if (!typeName.includes('optional')) required.push(k)
   }
   return required
 }

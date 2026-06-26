@@ -201,6 +201,12 @@ function buildMissingToolInstruction(text: string) {
 
 If you are checking, saving, creating, updating, linking, attaching, importing, extracting, clearing, uploading, or retrieving system data, you MUST call the correct tool or include the correct action in strict JSON.
 
+Common recovery examples:
+- To list saved clients/customers, call list_customers.
+- To attach an uploaded photo/file to a customer, call link_document_to_customer. A projectId is not required.
+- To create a project/job for a customer, call create_project_for_customer.
+- If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
+
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.
 
 If a tool previously failed, say: "I tried, but it did not save. Here's the error: ..."
