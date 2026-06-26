@@ -9,15 +9,19 @@ import { serializeMessagesForAgentHistory } from '@/hooks/chat-history'
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
 const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review'])
 
-async function pollDoc(docId: string, userMessageId: string, postAnalysisFollowup = false): Promise<boolean> {
-  for (let i = 0; i < 60; i++) { // 60 * 2s = 120s max wait
+type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: string; doc?: any }
+
+async function pollDoc(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 60, signal?: AbortSignal): Promise<DocumentPollResult> {
+  for (let i = 0; i < maxAttempts; i++) { // default 60 * 2s = 120s max wait
+    if (signal?.aborted) return { reviewed: false, terminal: false, status: 'stopped' }
     await new Promise(r => setTimeout(r, 2000))
+    if (signal?.aborted) return { reviewed: false, terminal: false, status: 'stopped' }
     try {
       const res = await fetch(`/api/documents/${docId}`)
       if (!res.ok) continue
       const d = await res.json()
       const doc = d.document
-      if (!doc) return false
+      if (!doc) return { reviewed: false, terminal: true, status: 'missing' }
       if (DOC_TERMINAL_STATES.has(doc.status)) {
         const store = useWorkspaceStore.getState()
         const msg = store.messages.find(m => m.id === userMessageId)
@@ -48,11 +52,11 @@ async function pollDoc(docId: string, userMessageId: string, postAnalysisFollowu
             })
           }
         }
-        return doc.status === 'reviewed'
+        return { reviewed: doc.status === 'reviewed', terminal: true, status: doc.status, doc }
       }
     } catch {}
   }
-  return false
+  return { reviewed: false, terminal: false, status: 'timeout' }
 }
 
 export function useWorkspaceChat() {
@@ -163,8 +167,9 @@ export function useWorkspaceChat() {
           }
           for (const a of previewAttachments) URL.revokeObjectURL(a.url)
 
-          // Upload success means "file saved". Analysis runs in the background so
-          // workspace chat can keep moving even if OCR/AI processing is slow.
+          // Upload success means "file saved". If the user also typed instructions
+          // about the upload, wait for analysis before starting the agent so it
+          // doesn't call get_document_content while the file is still processing.
           const docs = data.documents
           if (docs.length > 0) {
             updateMessage(userMessageId, {
@@ -177,15 +182,44 @@ export function useWorkspaceChat() {
               addMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: data.deferLinkPrompt && data.suggestedPrompt
-                  ? data.suggestedPrompt
-                  : `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’ll analyze ${docs.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
+                content: text.trim()
+                  ? `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’m finishing the analysis before I answer so I don’t guess from a half-processed file.`
+                  : data.deferLinkPrompt && data.suggestedPrompt
+                    ? data.suggestedPrompt
+                    : `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’ll analyze ${docs.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
                 createdAt: new Date().toISOString(),
               })
             }
-            void (async () => {
-              for (const doc of docs) await pollDoc(doc.id, userMessageId, !text.trim())
-            })().catch(err => console.error('[ws-chat] background document polling:', err))
+            if (text.trim()) {
+              setTyping(true)
+              setStreamingText('Analyzing uploaded file...')
+              const results: DocumentPollResult[] = []
+              for (const doc of docs) {
+                if (abortRef.current || abortControllerRef.current.signal.aborted) break
+                const result = await pollDoc(doc.id, userMessageId, false, 60, abortControllerRef.current.signal)
+                results.push(result)
+              }
+              if (abortRef.current || abortControllerRef.current.signal.aborted) return { ok: false }
+              const unfinished = results.filter(r => !r.reviewed)
+              if (unfinished.length > 0) {
+                const timedOut = unfinished.some(r => !r.terminal || r.status === 'timeout')
+                addMessage({
+                  id: crypto.randomUUID(),
+                  role: 'assistant',
+                  content: timedOut
+                    ? `The file is saved, but analysis is still running longer than expected. I’m not going to fake an answer from a half-processed document. Try “analyze the uploaded scope” again in a minute, or use the file card once it finishes.`
+                    : `The file is saved, but analysis finished with status: ${unfinished.map(r => r.status || 'unknown').join(', ')}. I can still attach the saved file, but I don’t have reliable extracted scope text yet.`,
+                  createdAt: new Date().toISOString(),
+                })
+                setTyping(false)
+                clearStreamingText()
+                return { ok: false, keepAttachments: true }
+              }
+            } else {
+              void (async () => {
+                for (const doc of docs) await pollDoc(doc.id, userMessageId, true)
+              })().catch(err => console.error('[ws-chat] background document polling:', err))
+            }
           }
           if (data.failures.length > 0) {
             addMessage({
