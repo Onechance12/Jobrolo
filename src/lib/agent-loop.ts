@@ -27,6 +27,7 @@ export interface AgentLoopOptions {
   documentIds?: string[]  // IDs of documents uploaded with the current message
   maxIterations?: number
   onIteration?: (iter: AgentIteration) => void
+  isCancelled?: () => Promise<boolean>
 }
 
 export interface AgentLoopResult {
@@ -198,6 +199,120 @@ function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, e
   return hasOperationalIntent(parsed.text) || hasCompletionClaim(parsed.text)
 }
 
+function plainMessageText(text: string) {
+  return text
+    .replace(/<UNTRUSTED_CONTENT[^>]*>/gi, '')
+    .replace(/<\/UNTRUSTED_CONTENT>/gi, '')
+    .trim()
+}
+
+function isAffirmativeReply(text: string) {
+  return /^(yes|yeah|yea|yep|yup|ok|okay|sure|do it|go ahead|proceed|please do|sounds good|that works|correct)$/i.test(plainMessageText(text))
+}
+
+function lastMessageByRole(messages: ChatMessage[], role: ChatMessage['role'], beforeIndex = messages.length) {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    if (messages[i]?.role === role) return { index: i, message: messages[i] }
+  }
+  return null
+}
+
+function cleanCustomerName(raw: string) {
+  return raw
+    .replace(/'s\s+(customer\s+file|client\s+file|file|profile).*$/i, '')
+    .replace(/\s+(customer\s+file|client\s+file|file|profile)\b.*$/i, '')
+    .replace(/\b(if so|first|before|using|with|and|please|would|should|then)\b.*$/i, '')
+    .replace(/["“”]/g, '')
+    .replace(/[?.!,;:]+$/g, '')
+    .trim()
+}
+
+function extractPendingProjectCustomerName(text: string) {
+  const patterns = [
+    /creating (?:a |the )?(?:new )?(?:project|job) for ([A-Za-z][^?.\n]+)/i,
+    /create (?:a |the )?(?:new )?(?:project|job) for ([A-Za-z][^?.\n]+)/i,
+    /no (?:active )?(?:project|job) (?:created |found )?for ([A-Za-z][^?.\n]+)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const name = match?.[1] ? cleanCustomerName(match[1]) : ''
+    if (name && name.length <= 120) return name
+  }
+  return null
+}
+
+function extractPendingLinkCustomerName(text: string) {
+  const patterns = [
+    /(?:link|attach|tie|save).{0,120}\bto\s+([A-Za-z][^?.\n]+)/i,
+    /\bto\s+([A-Za-z][^'?.\n]+)'?s\s+(?:file|profile|customer file|client file)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const name = match?.[1] ? cleanCustomerName(match[1]) : ''
+    if (name && name.length <= 120) return name
+  }
+  return null
+}
+
+function findRecentDocumentReference(messages: ChatMessage[], beforeIndex: number) {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    const content = messages[i]?.content ?? ''
+    const documentId = content.match(/documentId="([^"]+)"/)?.[1]
+    const filename = content.match(/name="([^"]+)"/)?.[1]
+    if (documentId || filename) return { documentId, filename }
+  }
+  return null
+}
+
+function inferChatType(text: string): string | null {
+  const lower = plainMessageText(text).toLowerCase()
+  if (/\b(customer|homeowner|client)\b/.test(lower)) return 'customer'
+  if (/\b(crew|roofer|roofing crew|installer|install crew|subcontractor|sub contractor|sub)\b/.test(lower)) return 'crew'
+  if (/\bsales\b/.test(lower)) return 'sales'
+  if (/\binsurance|adjuster|carrier\b/.test(lower)) return 'insurance'
+  if (/\bsupplier|material\b/.test(lower)) return 'supplier'
+  if (/\bfinance|billing|invoice\b/.test(lower)) return 'finance'
+  if (/\bmanagement|manager|admin\b/.test(lower)) return 'management'
+  return null
+}
+
+function buildAffirmativeContinuationInstruction(messages: ChatMessage[]) {
+  const latestUser = lastMessageByRole(messages, 'user')
+  if (!latestUser || !isAffirmativeReply(latestUser.message.content)) return null
+  const previousAssistant = lastMessageByRole(messages, 'assistant', latestUser.index)
+  if (!previousAssistant) return null
+
+  const customerName = extractPendingProjectCustomerName(previousAssistant.message.content)
+  if (!customerName) {
+    const linkCustomerName = extractPendingLinkCustomerName(previousAssistant.message.content)
+    const documentRef = linkCustomerName ? findRecentDocumentReference(messages, latestUser.index) : null
+    if (linkCustomerName && documentRef) {
+      return `The latest user reply "${plainMessageText(latestUser.message.content)}" confirms the previous assistant offer to link/attach the recent uploaded file to customer "${linkCustomerName}".
+
+Do not narrate. Do not ask again.
+
+Call link_document_to_customer with customerName "${linkCustomerName}"${documentRef.documentId ? ` and documentId "${documentRef.documentId}"` : documentRef.filename ? ` and filename "${documentRef.filename}"` : ''}.
+
+Only say linked/attached after the tool result confirms success. Respond as JSON only.`
+    }
+    return null
+  }
+
+  const previousUser = lastMessageByRole(messages, 'user', previousAssistant.index)
+  const requestedChatType = previousUser?.message.content && /creat|chat|crew|subcontractor|homeowner|customer|sales|insurance|supplier|finance/i.test(previousUser.message.content)
+    ? inferChatType(previousUser.message.content)
+    : null
+
+  return `The latest user reply "${plainMessageText(latestUser.message.content)}" is an explicit confirmation of the previous assistant offer to create a project/job for customer "${customerName}".
+
+Do not narrate. Do not ask again.
+
+Call create_project_for_customer with customerName "${customerName}".
+${requestedChatType ? `The user's original request also asked for a ${requestedChatType} chat. After create_project_for_customer returns a real projectId, continue the workflow by calling create_project_chat with that projectId and chatType "${requestedChatType}".` : ''}
+
+Only say created/done after the relevant tool result confirms success. Respond as JSON only.`
+}
+
 function buildMissingToolInstruction(text: string) {
   return `You said "${text.slice(0, 160)}" but did not include any tool_calls or actions.
 
@@ -248,11 +363,24 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxIterations = opts.maxIterations ?? 4
   const messages = [...opts.messages]
+  const continuationInstruction = buildAffirmativeContinuationInstruction(messages)
+  if (continuationInstruction) {
+    const insertAt = Math.max(0, messages.length - 1)
+    console.log(`[agent-loop] affirmative continuation detected contractorId=${opts.contractorId}`)
+    messages.splice(insertAt, 0, { role: 'system', content: continuationInstruction })
+  }
   const iterations: AgentIteration[] = []
   let totalToolCalls = 0
   let lastBlockedReason: string | null = null
 
   for (let i = 0; i < maxIterations; i++) {
+    if (await opts.isCancelled?.()) {
+      return {
+        final: { text: 'Stopped. No further actions were run.', actions: [], tool_calls: [], final: true },
+        iterations,
+        totalToolCalls,
+      }
+    }
     const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
     const parsed = parseAIResponse(raw)
     const normalizedWork = normalizeParsedWork(parsed)
@@ -330,6 +458,10 @@ Respond as JSON only.`,
       console.log(`[agent-loop] tool calls detected; forcing post-tool final response contractorId=${opts.contractorId} count=${toolCalls.length}`)
       const results: AgentIteration['toolResults'] = [...blockedToolResults]
       for (const tc of toolCalls) {
+        if (await opts.isCancelled?.()) {
+          console.warn(`[agent-loop] stopped before executing tool '${tc.name}' contractorId=${opts.contractorId}`)
+          break
+        }
         console.log(`[agent-loop] executing tool '${tc.name}' contractorId=${opts.contractorId}`)
         const result = await executeTool(tc.name, tc.args, opts.contractorId, {
           userId: opts.userId,
@@ -360,7 +492,7 @@ Respond as JSON only.`,
       })
       messages.push({
         role: 'user',
-        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success with saved=true, created record ids, linked ids, or an executed mutation result.${hasNonSavedResult ? '\n\nIMPORTANT: At least one tool result did not complete the requested save/mutation or requires clarification/approval. Say exactly what is missing or what failed. Do not say the action is done.' : ''} If tools returned errors or approvalRequired, acknowledge that clearly.\n\nIf tool results include photos/images, include structured attachments using the exact relative url/thumbnailUrl returned by the tool. Do not write markdown image URLs. Never invent or use https://yourdomain.com.`,
+        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow continue from these real tool results. If the user's requested workflow requires a follow-up tool using a real id returned above, call that next tool with final=false instead of giving a final answer. Otherwise answer the user's original question using these real tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success with saved=true, created record ids, linked ids, or an executed mutation result.${hasNonSavedResult ? '\n\nIMPORTANT: At least one tool result did not complete the requested save/mutation or requires clarification/approval. Say exactly what is missing or what failed. Do not say the action is done.' : ''} If tools returned errors or approvalRequired, acknowledge that clearly.\n\nIf tool results include photos/images, include structured attachments using the exact relative url/thumbnailUrl returned by the tool. Do not write markdown image URLs. Never invent or use https://yourdomain.com.`,
       })
       iterations.push(iteration)
       continue

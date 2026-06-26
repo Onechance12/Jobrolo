@@ -2497,7 +2497,7 @@ export const TOOLS: ToolDef[] = [
         include: { workspace: true },
       })
       await db.document.update({
-        where: { id: args.documentId },
+        where: { id: doc.id },
         data: {
           customerId: customer.id,
           projectId: project?.id ?? null,
@@ -2520,7 +2520,7 @@ export const TOOLS: ToolDef[] = [
       return {
         success: true,
         data: {
-          documentId: args.documentId,
+          documentId: doc.id,
           documentName: doc.originalName,
           customerId: customer.id,
           customerName: customer.name,

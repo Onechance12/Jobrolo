@@ -838,8 +838,12 @@ function PayloadSummary({ payload }: { payload: Record<string, unknown> }) {
 function parsePayload(item?: InboxLike | null): Record<string, unknown> | null {
   if (!item) return null
   if (item.payload && typeof item.payload === 'object') return item.payload
-  if (!item.payloadJson) return null
-  try { return JSON.parse(item.payloadJson) as Record<string, unknown> } catch { return null }
+  if (item.payloadJson) {
+    try { return JSON.parse(item.payloadJson) as Record<string, unknown> } catch {}
+  }
+  const direct = item as Record<string, unknown>
+  if (direct.approvalDetails || direct.toolName || direct.args || direct.actionRequestId) return direct
+  return null
 }
 
 function replayMessage(replay: any): string | null {

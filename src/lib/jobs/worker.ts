@@ -8,7 +8,7 @@ import { type ChatMessage } from '@/lib/ai'
 import { buildCommandCenterPrompt, buildChannelPrompt } from '@/lib/prompts'
 import { runAgentLoop } from '@/lib/agent-loop'
 import { executeActions } from '@/lib/actions'
-import { heartbeat, appendThinking, completeJob, failJob } from '@/lib/jobs/queue'
+import { heartbeat, appendThinking, completeJob, failJob, isJobCancelled } from '@/lib/jobs/queue'
 import { wrapUntrusted, sanitizeAIOutput, validateAction } from '@/lib/security/prompt-defense'
 import type { AiAction, ChannelType, WorkspaceInfo, MessageAttachment } from '@/lib/types'
 import { assertDocumentsBelongToTenant, normalizeIdList, resolveJobExecutionContext } from '@/lib/security/agent-execution'
@@ -114,6 +114,35 @@ function mergeAttachments(primary: unknown[], derived: MessageAttachment[]): Mes
     if (isUsableFileUrl(attachment.url)) out.set(attachment.documentId || attachment.url, attachment)
   }
   return [...out.values()]
+}
+
+function deriveApprovalCardFromToolResults(iterations: Array<{ toolResults?: Array<{ data: unknown }> }>) {
+  for (const iter of iterations) {
+    for (const result of iter.toolResults ?? []) {
+      const data = result.data as Record<string, unknown> | null
+      if (!data?.approvalRequired || !data.actionRequestId) continue
+      return {
+        contextType: 'approval_request',
+        contextData: {
+          cardType: 'approval_request',
+          actionRequestId: data.actionRequestId,
+          id: data.actionRequestId,
+          type: 'tool_approval',
+          title: data.title ?? 'Approval needed',
+          summary: data.summary ?? 'Review and approve before Jobrolo runs this action.',
+          status: data.status ?? 'needs_approval',
+          toolName: data.toolName,
+          approvalDetails: data.approvalDetails,
+          payload: {
+            actionRequestId: data.actionRequestId,
+            toolName: data.toolName,
+            approvalDetails: data.approvalDetails,
+          },
+        },
+      }
+    }
+  }
+  return null
 }
 
 export async function processAgentJob(job: AgentJobRow) {
@@ -280,6 +309,7 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
       userRole: actorRole,
       trustedDirectExecution: Boolean(execCtx.user),
       maxIterations: 4,
+      isCancelled: () => isJobCancelled(job.id),
       onIteration: (iter) => {
         if (!iter.final) {
           appendThinking(job.id, {
@@ -292,9 +322,15 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
     })
 
     const finalText = sanitizeAIOutput(loopResult.final.text || '(no response)')
-    const finalContextType = loopResult.final.contextType ?? null
-    const finalContextData = loopResult.final.contextData ?? null
+    const approvalCard = deriveApprovalCardFromToolResults(loopResult.iterations)
+    const finalContextType = loopResult.final.contextType ?? approvalCard?.contextType ?? null
+    const finalContextData = loopResult.final.contextData ?? approvalCard?.contextData ?? null
     let finalActions = (loopResult.final.actions ?? []) as AiAction[]
+
+    if (await isJobCancelled(job.id)) {
+      console.log(`[worker] job ${job.id} cancelled before persisting assistant output/actions`)
+      return
+    }
 
     // 5. Validate every action before executing
     finalActions = finalActions.filter(a => {
@@ -311,6 +347,10 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
     // their message — that was completely broken. When you're already IN a workspace
     // chat, the workspace context is implicit and actions should always execute.
     if (finalActions.length > 0 && job.workspaceId) {
+      if (await isJobCancelled(job.id)) {
+        console.log(`[worker] job ${job.id} cancelled before executing final actions`)
+        return
+      }
       const ws = await db.workspace.findFirst({
         where: { id: job.workspaceId, contractorId: contractor.id },
         include: { chats: { select: { id: true, chatType: true } } },

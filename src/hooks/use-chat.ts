@@ -3,6 +3,7 @@ import { useCallback, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
 import { attachmentFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
+import { serializeMessagesForAgentHistory } from '@/hooks/chat-history'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
@@ -215,7 +216,8 @@ export function useChat() {
     const history = store.messages
       .filter(m => m.id !== userMessageId)
       .slice(-20)
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+    const serializedHistory = serializeMessagesForAgentHistory(history)
 
     setTyping(true); setStreaming(true); setStreamingText('Starting...')
     try {
@@ -228,7 +230,7 @@ export function useChat() {
           conversationId: activeConversationId,
           businessContext: useChatStore.getState().businessContext,
           documentIds: uploadedDocIds,
-          history,
+          history: serializedHistory,
         }),
       })
       if (!res.ok) throw new Error(res.status === 502 ? 'Server took too long. Try again.' : `HTTP ${res.status}`)
