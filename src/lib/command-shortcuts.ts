@@ -53,6 +53,28 @@ function cleanShortcut(item: any, fallbackId: string): CommandShortcut | null {
   }
 }
 
+function mergeDefaultShortcutUpdates(shortcuts: CommandShortcut[]) {
+  const defaultsById = new Map(DEFAULT_COMMAND_SHORTCUTS.map(shortcut => [shortcut.id, shortcut]))
+  const requiredDefaults = ['open-map', 'field', 'canvassing-run']
+  const next = shortcuts.map(shortcut => {
+    if (shortcut.id === 'field' && shortcut.label.trim().toLowerCase() === 'field') {
+      return { ...shortcut, label: defaultsById.get('field')?.label ?? 'Field check-in' }
+    }
+    return shortcut
+  })
+
+  for (const id of requiredDefaults) {
+    if (next.some(shortcut => shortcut.id === id)) continue
+    const shortcut = defaultsById.get(id)
+    if (!shortcut) continue
+    const anchorId = id === 'open-map' ? 'research-website' : id === 'canvassing-run' ? 'field' : 'open-map'
+    const anchorIndex = next.findIndex(item => item.id === anchorId)
+    next.splice(anchorIndex >= 0 ? anchorIndex + 1 : Math.min(next.length, 5), 0, shortcut)
+  }
+
+  return next.slice(0, 24)
+}
+
 export function parseStoredCommandShortcuts(raw: string | null, legacyRaw?: string | null): CommandShortcut[] {
   try {
     const parsed = raw ? JSON.parse(raw) : null
@@ -60,7 +82,7 @@ export function parseStoredCommandShortcuts(raw: string | null, legacyRaw?: stri
       const cleaned = parsed
         .map((item, index) => cleanShortcut(item, `custom-${index}`))
         .filter(Boolean) as CommandShortcut[]
-      return cleaned.slice(0, 24)
+      return mergeDefaultShortcutUpdates(cleaned)
     }
   } catch {}
 
