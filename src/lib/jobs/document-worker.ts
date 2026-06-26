@@ -73,6 +73,98 @@ function truncateText(text: string): string {
   return text.slice(0, headLen) + '\n\n[...truncated for length...]\n\n' + text.slice(-tailLen)
 }
 
+function hasValue(value: unknown) {
+  if (Array.isArray(value)) return value.length > 0
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(hasValue)
+  return value !== null && value !== undefined && String(value).trim().length > 0
+}
+
+function buildDocumentReviewProfile(input: {
+  documentId: string
+  category?: string | null
+  fileType?: string | null
+  extractedData: Record<string, any>
+  materialItemCount?: number
+  lineItemCount?: number
+  comparisonMissingData: Record<string, unknown>
+}) {
+  const rawType = String(input.category || input.fileType || 'unknown')
+  const lower = rawType.toLowerCase()
+  const documentType =
+    lower.includes('price') ? 'price_sheet' :
+    lower.includes('scope') ? 'scope_of_loss' :
+    lower.includes('estimate') ? 'carrier_estimate' :
+    lower.includes('claim') ? 'insurance_claim_doc' :
+    lower.includes('contract') ? 'contract' :
+    lower.includes('invoice') ? 'invoice' :
+    lower.includes('photo') || lower.includes('image') ? 'photo' :
+    'unknown'
+
+  const data = input.extractedData ?? {}
+  let expectedFields: string[] = []
+  let missingFields: string[] = []
+  let missingDataFlags: Record<string, boolean> = {}
+
+  if (documentType === 'price_sheet') {
+    expectedFields = ['supplier name', 'effective date', 'item name', 'category', 'SKU/code', 'unit', 'unit price', 'market/region', 'expiration date', 'notes/terms']
+    const supplier = data.supplier ?? data.supplierName
+    const effectiveDate = data.validDate ?? data.effectiveDate ?? data.validFrom
+    const rows = Array.isArray(data.materialItems) ? data.materialItems : []
+    const hasRows = input.materialItemCount ? input.materialItemCount > 0 : rows.length > 0
+    const rowHas = (field: string, alt?: string) => rows.some((row: any) => hasValue(row?.[field]) || (alt ? hasValue(row?.[alt]) : false))
+    missingDataFlags = {
+      supplierName: !hasValue(supplier),
+      effectiveDate: !hasValue(effectiveDate),
+      itemName: !hasRows,
+      category: hasRows && !rowHas('category'),
+      skuOrCode: hasRows && !rowHas('sku', 'code'),
+      unit: hasRows && !rowHas('unit'),
+      unitPrice: hasRows && !rowHas('unitCost', 'unitPrice'),
+      marketOrRegion: !hasValue(data.market) && !hasValue(data.region),
+      expirationDate: !hasValue(data.validUntil) && !hasValue(data.expirationDate),
+      notesOrTerms: !hasValue(data.notes) && !hasValue(data.terms),
+    }
+  } else if (documentType === 'scope_of_loss' || documentType === 'carrier_estimate' || documentType === 'insurance_claim_doc') {
+    expectedFields = ['insured/customer', 'property address', 'carrier', 'claim number', 'date of loss', 'deductible', 'RCV', 'ACV', 'depreciation', 'trade/category', 'line items', 'quantities', 'unit prices', 'totals']
+    const claimInfo = data.claimInfo ?? {}
+    const rows = Array.isArray(data.lineItems) ? data.lineItems : []
+    const rowHas = (field: string) => rows.some((row: any) => hasValue(row?.[field]))
+    missingDataFlags = {
+      insuredOrCustomer: !hasValue(data.customer?.name) && !hasValue(data.customerName) && !hasValue(data.insuredName),
+      propertyAddress: !hasValue(data.projectAddress) && !hasValue(data.propertyAddress) && !hasValue(data.customer?.address),
+      carrier: !hasValue(claimInfo.carrier) && !hasValue(data.carrier),
+      claimNumber: !hasValue(claimInfo.claimNumber) && !hasValue(data.claimNumber),
+      dateOfLoss: !hasValue(claimInfo.dateOfLoss) && !hasValue(data.dateOfLoss),
+      deductible: !hasValue(claimInfo.deductible) && !hasValue(data.deductible),
+      rcv: !hasValue(claimInfo.rcv) && !hasValue(data.totalAmount) && !rowHas('rcv'),
+      acv: !hasValue(claimInfo.acv) && !rowHas('acv'),
+      depreciation: !hasValue(claimInfo.depreciation) && !rowHas('depreciation'),
+      tradeOrCategory: rows.length > 0 && !rowHas('trade') && !rowHas('category'),
+      lineItems: rows.length === 0 && !input.lineItemCount,
+      quantities: rows.length > 0 && !rowHas('quantity'),
+      unitPrices: rows.length > 0 && !rowHas('unitPrice'),
+      totals: rows.length > 0 && !rowHas('total') && !rowHas('rcv'),
+    }
+  } else {
+    expectedFields = ['document type', 'visible text', 'summary', 'linked customer/project']
+    missingDataFlags = input.comparisonMissingData as Record<string, boolean>
+  }
+
+  missingFields = Object.entries(missingDataFlags).filter(([, missing]) => Boolean(missing)).map(([field]) => field)
+  console.log(`[document-review] type detected documentId=${input.documentId} type=${documentType}`)
+  console.log(`[document-review] validation profile applied documentId=${input.documentId} type=${documentType}`)
+  console.log(`[document-review] missing fields by document type documentId=${input.documentId} type=${documentType} missing=${missingFields.join(',') || 'none'}`)
+  return {
+    documentType,
+    expectedFields,
+    missingFields,
+    missingDataFlags,
+    warnings: documentType === 'price_sheet'
+      ? ['Price sheet review does not require insurance claim fields. Import requires explicit approval.']
+      : [],
+  }
+}
+
 export async function processDocumentJob(job: AgentJobRow) {
   const input = JSON.parse(job.inputJson) as DocAnalysisInput
   const { documentId, heicConversionNeeded } = input
@@ -233,6 +325,28 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     ...(analysis.materialItems?.length ? { materialItems: analysis.materialItems } : {}),
   }
 
+  if (analysis?.category === 'price_sheet' && analysis?.materialItems?.length) {
+    fullData.priceSheetReview = {
+      status: 'pending_review',
+      extractedRowCount: analysis.materialItems.length,
+      importRequired: true,
+      message: `Found ${analysis.materialItems.length} material rows. Review/import confirmation is required before changing the material database.`,
+    }
+    console.log(`[price-sheet] extracted rows pending review documentId=${documentId} count=${analysis.materialItems.length}`)
+    console.log(`[price-sheet] auto-import skipped pending user confirmation documentId=${documentId}`)
+  }
+
+  const imageReview = buildDocumentReviewProfile({
+    documentId,
+    category: analysis.category,
+    fileType: current.fileType,
+    extractedData: fullData as Record<string, any>,
+    materialItemCount: analysis.materialItems?.length ?? 0,
+    lineItemCount: analysis.lineItems?.length ?? 0,
+    comparisonMissingData: comparisonResult.missingData as Record<string, unknown>,
+  })
+  fullData.documentReview = imageReview
+
   // PASS 6: Additive scope intelligence with real document + contractor IDs.
   // For images, the merged OCR/vision text is `visionText`. Failure is
   // non-blocking; base parsing/processing remains intact.
@@ -265,7 +379,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
       ocrText: visionText ? truncateText(visionText) : null,
       extractionComparison: JSON.stringify(comparisonResult.comparison),
       extractionConfidence: comparisonResult.confidence,
-      missingDataFlags: JSON.stringify(comparisonResult.missingData),
+      missingDataFlags: JSON.stringify(imageReview.missingDataFlags),
       conflictFlags: JSON.stringify(comparisonResult.conflicts),
       fileType: analysis.category !== 'document_analysis' && analysis.category !== 'unknown' ? analysis.category : current.fileType,
     },
@@ -580,6 +694,17 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     console.log(`[price-sheet] auto-import skipped pending user confirmation documentId=${documentId}`)
   }
 
+  const documentReview = buildDocumentReviewProfile({
+    documentId,
+    category: analysis?.category,
+    fileType: current.fileType,
+    extractedData: finalData as Record<string, any>,
+    materialItemCount: analysis?.materialItems?.length ?? 0,
+    lineItemCount: analysis?.lineItems?.length ?? 0,
+    comparisonMissingData: comparisonResult.missingData as Record<string, unknown>,
+  })
+  finalData.documentReview = documentReview
+
   // PASS 6: Additive scope intelligence with real document + contractor IDs.
   // Failure is non-blocking; base parsing/processing remains intact.
   if ((analysis?.category === 'estimate' || analysis?.category === 'scope_of_loss' || analysis?.lineItems?.length) && mergedText.trim().length > 0) {
@@ -608,7 +733,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
       ocrText: truncateText(mergedText),
       extractionComparison: JSON.stringify(comparisonResult.comparison),
       extractionConfidence: comparisonResult.confidence,
-      missingDataFlags: JSON.stringify(comparisonResult.missingData),
+      missingDataFlags: JSON.stringify(documentReview.missingDataFlags),
       conflictFlags: JSON.stringify(comparisonResult.conflicts),
       fileType: analysis?.category && analysis.category !== 'document_analysis' && analysis.category !== 'unknown' && analysis.category !== 'scanned_pdf'
         ? analysis.category

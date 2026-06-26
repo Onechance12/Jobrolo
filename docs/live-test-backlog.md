@@ -4,6 +4,8 @@ Last reviewed: 2026-06-25
 
 Patch note: production hardening now routes configured AI/OCR analysis through the OpenAI-compatible provider when available, records internal AI usage, stops silent price-sheet imports, and adds the `get_customer_file`, `import_price_sheet_items`, and `create_scope_from_text` workflows.
 
+Follow-up patch note: live testing showed extracted document data exists, but the chat needed tools to retrieve/review/link/save it. This pass adds backend-first workflows for price sheet row review, project/job creation, project creation from extracted documents, customer/document conflict detection, document-type-specific review profiles, and safer photo URL/attachment handling.
+
 ## Product north star
 
 Jobrolo should not feel like another CRM. The main chat is the product:
@@ -120,6 +122,11 @@ Required behavior:
 
 Never use `https://yourdomain.com/...`.
 
+Patch status:
+
+- Bad placeholder storage URLs are sanitized before assistant messages are saved/returned.
+- Saved photos returned by tools can be surfaced as structured image attachments if the model does not include attachments itself.
+
 ### P1 — Customer/project/job hierarchy
 
 The system needs reliable linkage:
@@ -138,6 +145,31 @@ Needed workflows:
 - save_chat_to_project
 - list_project_chats
 
+Patch status:
+
+- `create_project_for_customer` creates a real Project and project workspace/chats using existing schema fields.
+- 6-digit job numbers can be generated and are stored in setup notes/metadata because the current schema has no dedicated jobNumber column.
+
+### P1 — Create project from document
+
+Uploaded estimates/scopes can contain enough customer/project data to create a job, but linking blindly is dangerous.
+
+Patch status:
+
+- `create_project_from_document` reads extracted document data, resolves customer candidates, detects name/phone/address conflicts, asks for resolution when needed, then creates the project and links the document only after a safe path is available.
+
+### P1 — Customer/document conflict detection
+
+The Timothy test revealed a high-risk conflict:
+
+- saved Timothy Dison: `806-678-0907`, `12701 Harvest Grove`
+- extracted document: Timothy Disen, `(214) 263-6363`, `4524 Lakecrest Dr`
+
+Patch status:
+
+- Conflict detection compares normalized name, phone, email, and address.
+- Phone/address mismatches block auto-linking and ask the user to resolve whether this is the same customer, a different customer, or a new project.
+
 ### P1 — Scope/document persistence
 
 When pasted scope text is understood, it still needs a real save workflow.
@@ -150,6 +182,10 @@ Needed:
 
 If no project exists, ask to create one first.
 
+Patch status:
+
+- Prompt/tool behavior now supports chaining: create project first, then call `create_scope_from_text` with the returned projectId.
+
 ### P1 — Price sheet review/import flow
 
 The test price sheet saved 157 material items, but the product did not clearly say what actually saved or ask for replacement confirmation before risky clearing/replacement workflows.
@@ -158,7 +194,39 @@ Patch status:
 
 - Auto-import from the document worker is stopped.
 - Extracted material rows stay pending on the Document.
+- `review_price_sheet_items` can retrieve the first N extracted rows and report pending/imported status without changing prices.
 - `import_price_sheet_items` imports rows only after explicit confirmation/approval.
+- Document review profiles now treat supplier price sheets as price sheets, not insurance claim documents.
+
+### P1 — Document-type-specific missing fields
+
+Price sheets were being reviewed with insurance claim requirements such as claim number, deductible, RCV, ACV, carrier, and date of loss.
+
+Patch status:
+
+- Price sheets now expect supplier/effective-date/material-row fields.
+- Scopes/estimates still use insurance/claim/scope fields.
+- Unknown documents stay in needs-review style guidance instead of pretending claim fields apply.
+
+### P1 — Need document review tools, not only extraction
+
+Extraction is working, but users need chat workflows to review extracted rows, attach documents to customers/projects, create projects from documents, save scopes, and import only after confirmation.
+
+Patch status:
+
+- Backend tools now cover price sheet review, project creation, project-from-document, scope save, and price sheet import approval.
+
+### P2 — Document card action buttons later
+
+The UI cards are useful but should eventually expose direct action buttons:
+
+- Review extracted rows
+- Attach to customer/project
+- Create project
+- Save as scope
+- Import price sheet
+- Leave unassigned
+- Mark needs review
 
 Needed:
 

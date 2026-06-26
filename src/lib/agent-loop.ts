@@ -344,7 +344,7 @@ Respond as JSON only.`,
       })
       messages.push({
         role: 'user',
-        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success with saved=true, created record ids, linked ids, or an executed mutation result.${hasNonSavedResult ? '\n\nIMPORTANT: At least one tool result did not complete the requested save/mutation or requires clarification/approval. Say exactly what is missing or what failed. Do not say the action is done.' : ''} If tools returned errors or approvalRequired, acknowledge that clearly.`,
+        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success with saved=true, created record ids, linked ids, or an executed mutation result.${hasNonSavedResult ? '\n\nIMPORTANT: At least one tool result did not complete the requested save/mutation or requires clarification/approval. Say exactly what is missing or what failed. Do not say the action is done.' : ''} If tools returned errors or approvalRequired, acknowledge that clearly.\n\nIf tool results include photos/images, include structured attachments using the exact relative url/thumbnailUrl returned by the tool. Do not write markdown image URLs. Never invent or use https://yourdomain.com.`,
       })
       iterations.push(iteration)
       continue

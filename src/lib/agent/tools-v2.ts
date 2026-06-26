@@ -121,6 +121,29 @@ function normalizeMaterialItems(value: unknown) {
     .filter(item => item.name && Number.isFinite(item.unitCost) && item.unitCost >= 0)
 }
 
+function safeJsonParse<T = Record<string, unknown>>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback
+  try { return JSON.parse(value) as T } catch { return fallback }
+}
+
+function pendingMaterialItemsFromExtractedData(data: Record<string, any>) {
+  return normalizeMaterialItems(
+    data.materialItems ??
+    data.priceSheetReview?.materialItems ??
+    data.priceSheetReview?.items ??
+    data.extractedRows ??
+    data.rows,
+  )
+}
+
+function supplierFromExtractedData(data: Record<string, any>) {
+  return String(data.supplier ?? data.supplierName ?? data.priceSheetReview?.supplier ?? '').trim() || null
+}
+
+function effectiveDateFromExtractedData(data: Record<string, any>) {
+  return String(data.validDate ?? data.effectiveDate ?? data.validFrom ?? data.priceSheetReview?.effectiveDate ?? '').trim() || null
+}
+
 function numberFromMoney(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   const parsed = Number(String(value ?? '').replace(/[$,()<>\s]/g, ''))
@@ -176,6 +199,212 @@ function compactDocument(d: { id: string; originalName: string; fileType: string
     thumbnailUrl: toThumbnailUrl(d.thumbnailPath),
     createdAt: d.createdAt,
   }
+}
+
+function normalizePhone(value?: string | null) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+function normalizeText(value?: string | null) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function firstLastName(name?: string | null) {
+  const parts = normalizeText(name).split(/\s+/).filter(Boolean)
+  return { first: parts[0] ?? '', last: parts.length > 1 ? parts[parts.length - 1] : '' }
+}
+
+function detectCustomerDocumentConflict(
+  saved: { name: string; phone?: string | null; email?: string | null; address?: string | null },
+  extracted: { name?: string | null; phone?: string | null; email?: string | null; address?: string | null },
+) {
+  const issues: string[] = []
+  const savedName = firstLastName(saved.name)
+  const extractedName = firstLastName(extracted.name)
+  const sameFirst = Boolean(savedName.first && extractedName.first && savedName.first === extractedName.first)
+  const sameLast = Boolean(savedName.last && extractedName.last && savedName.last === extractedName.last)
+  const savedPhone = normalizePhone(saved.phone)
+  const extractedPhone = normalizePhone(extracted.phone)
+  const savedEmail = normalizeText(saved.email)
+  const extractedEmail = normalizeText(extracted.email)
+  const savedAddress = normalizeText(saved.address)
+  const extractedAddress = normalizeText(extracted.address)
+
+  if (extracted.name && normalizeText(saved.name) !== normalizeText(extracted.name)) {
+    issues.push(sameFirst || sameLast ? 'minor_name_variation' : 'name_mismatch')
+  }
+  if (savedPhone && extractedPhone && savedPhone !== extractedPhone) issues.push('phone_mismatch')
+  if (savedEmail && extractedEmail && savedEmail !== extractedEmail) issues.push('email_mismatch')
+  if (savedAddress && extractedAddress && savedAddress !== extractedAddress) issues.push('address_mismatch')
+
+  let level: 'none' | 'minor_name_variation' | 'address_mismatch' | 'phone_mismatch' | 'high_conflict' = 'none'
+  if (issues.includes('phone_mismatch')) level = 'phone_mismatch'
+  if (issues.includes('address_mismatch')) level = level === 'phone_mismatch' ? 'high_conflict' : 'address_mismatch'
+  if (issues.includes('name_mismatch') && (issues.includes('phone_mismatch') || issues.includes('address_mismatch'))) level = 'high_conflict'
+  if (level === 'none' && issues.includes('minor_name_variation')) level = 'minor_name_variation'
+
+  return {
+    level,
+    hasConflict: level !== 'none' && level !== 'minor_name_variation',
+    issues,
+    saved,
+    extracted,
+  }
+}
+
+async function resolveCustomerForTool(contractorId: string, input: { customerId?: string; customerName?: string; name?: string }) {
+  if (input.customerId) {
+    const customer = await db.customer.findFirst({
+      where: { id: input.customerId, contractorId },
+      select: { id: true, name: true, email: true, phone: true, address: true },
+    })
+    return customer ? { customer } : { error: 'Customer not found' as const }
+  }
+  const raw = input.customerName || input.name || ''
+  const terms = customerSearchTerms(raw)
+  if (terms.length === 0) return { error: 'Customer name or customerId is required' as const }
+  const customers = await db.customer.findMany({
+    where: {
+      contractorId,
+      OR: terms.flatMap(term => [
+        { name: { contains: term } },
+        { phone: { contains: term } },
+        { email: { contains: term } },
+        { address: { contains: term } },
+      ]),
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 5,
+    select: { id: true, name: true, email: true, phone: true, address: true },
+  })
+  if (customers.length === 0) return { notFound: true as const, query: raw }
+  const normalized = normalizeText(normalizeCustomerFileQuery(raw))
+  const exact = customers.find(c => normalizeText(c.name) === normalized || normalizeText(c.email) === normalized || normalizePhone(c.phone) === normalizePhone(raw))
+  if (!exact && customers.length > 1) return { needsClarification: true as const, matches: customers, query: raw }
+  return { customer: exact ?? customers[0] }
+}
+
+function inferProjectTitle(input: { title?: string | null; customerName?: string | null; address?: string | null; projectType?: string | null; claimNumber?: string | null; jobNumber?: string | null }) {
+  if (input.title?.trim()) return input.title.trim()
+  const type = input.projectType?.trim() || (input.claimNumber ? 'Claim' : 'Roof Project')
+  const base = input.customerName?.trim() || input.address?.trim() || 'New Project'
+  const title = `${base} ${type}`.trim()
+  return input.jobNumber ? `Job #${input.jobNumber} — ${title}` : title
+}
+
+async function generateUniqueJobNumber(contractorId: string) {
+  for (let i = 0; i < 20; i++) {
+    const candidate = String(Math.floor(100000 + Math.random() * 900000))
+    const existing = await db.project.findFirst({
+      where: { contractorId, title: { contains: `Job #${candidate}` } },
+      select: { id: true },
+    }).catch(() => null)
+    if (!existing) return candidate
+  }
+  return String(Math.floor(100000 + Math.random() * 900000))
+}
+
+async function createProjectRecordForCustomer(contractorId: string, ctx: ToolContext, input: {
+  customer: { id: string; name: string; address: string | null; phone?: string | null; email?: string | null }
+  title?: string | null
+  address?: string | null
+  projectType?: string | null
+  stage?: string | null
+  value?: number | null
+  deductible?: number | null
+  claimNumber?: string | null
+  carrier?: string | null
+  dateOfLoss?: string | null
+  jobNumber?: string | null
+  notes?: string | null
+  sourceDocumentId?: string | null
+}) {
+  const jobNumber = input.jobNumber || null
+  const address = input.address?.trim() || input.customer.address || null
+  const title = inferProjectTitle({
+    title: input.title,
+    customerName: input.customer.name,
+    address,
+    projectType: input.projectType,
+    claimNumber: input.claimNumber,
+    jobNumber,
+  })
+  const project = await db.project.create({
+    data: {
+      contractorId,
+      customerId: input.customer.id,
+      title,
+      address,
+      value: typeof input.value === 'number' && Number.isFinite(input.value) ? input.value : undefined,
+      status: input.stage?.trim() || 'active',
+      priority: 'medium',
+    },
+  })
+
+  const metadata = {
+    jobNumber,
+    projectType: input.projectType ?? null,
+    deductible: input.deductible ?? null,
+    claimNumber: input.claimNumber ?? null,
+    carrier: input.carrier ?? null,
+    dateOfLoss: input.dateOfLoss ?? null,
+    sourceDocumentId: input.sourceDocumentId ?? null,
+  }
+  const noteLines = [
+    jobNumber ? `Job #${jobNumber}` : null,
+    input.projectType ? `Project type: ${input.projectType}` : null,
+    input.claimNumber ? `Claim number: ${input.claimNumber}` : null,
+    input.carrier ? `Carrier: ${input.carrier}` : null,
+    typeof input.deductible === 'number' ? `Deductible: $${input.deductible.toLocaleString()}` : null,
+    input.dateOfLoss ? `Date of loss: ${input.dateOfLoss}` : null,
+    input.notes?.trim() || null,
+  ].filter(Boolean)
+  if (noteLines.length) {
+    await db.note.create({
+      data: {
+        projectId: project.id,
+        customerId: input.customer.id,
+        type: 'project_setup',
+        content: noteLines.join('\n'),
+        isAiGenerated: true,
+        createdById: ctx.userId ?? undefined,
+      },
+    }).catch(() => null)
+  }
+
+  const workspace = await db.workspace.create({
+    data: {
+      contractorId,
+      projectId: project.id,
+      name: title,
+      type: 'project',
+      description: `Project workspace for ${input.customer.name}`,
+      color: 'bg-blue-600',
+      chats: {
+        create: [
+          { chatType: 'main', title: 'Main', visibility: 'internal' },
+          { chatType: 'production', title: 'Production', visibility: 'internal' },
+          { chatType: 'customer', title: 'Customer', visibility: 'customer' },
+        ],
+      },
+    },
+  }).catch(() => null)
+
+  await createProjectTimelineEvent({
+    contractorId,
+    projectId: project.id,
+    customerId: input.customer.id,
+    eventType: 'project_created',
+    title: `Project created: ${title}`,
+    body: input.sourceDocumentId ? 'Created from extracted document data.' : 'Created from chat request.',
+    relatedType: input.sourceDocumentId ? 'document' : 'project',
+    relatedId: input.sourceDocumentId ?? project.id,
+    source: 'ai',
+    actorUserId: ctx.userId ?? null,
+    metadata,
+  })
+
+  return { project, workspace, jobNumber, metadata }
 }
 
 // ---------------------------------------------------------------------------
@@ -765,6 +994,295 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'review_price_sheet_items',
+    description: 'Review extracted material rows from a supplier price sheet document. Read-only. Use for "show the first 10 price sheet items", "are they pending or imported?", or "review this supplier price sheet". Does not import or change prices.',
+    schema: z.object({
+      documentId: z.string().max(200).optional(),
+      filename: z.string().max(300).optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+      status: z.enum(['pending', 'imported', 'all']).optional(),
+    }).refine(v => Boolean(v.documentId || v.filename), 'documentId or filename is required'),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      console.log(`[price-sheet] review requested contractorId=${contractorId} documentId=${args.documentId ?? ''} filename=${args.filename ?? ''}`)
+      let doc
+      if (args.documentId) {
+        doc = await db.document.findFirst({
+          where: { id: args.documentId, contractorId },
+          select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, status: true, extractionConfidence: true },
+        })
+      } else {
+        const needle = args.filename!.toLowerCase()
+        const docs = await db.document.findMany({
+          where: { contractorId },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, status: true, extractionConfidence: true },
+        })
+        doc = docs.find(d => d.originalName.toLowerCase().includes(needle))
+      }
+      if (!doc) return { success: false, data: null, error: 'Price sheet document not found. Call list_documents first if you need the documentId.' }
+
+      const data = safeJsonParse<Record<string, any>>(doc.extractedData, {})
+      const rows = pendingMaterialItemsFromExtractedData(data)
+      const isPriceSheet = doc.fileType === 'price_sheet' || doc.aiCategory === 'price_sheet' || rows.length > 0
+      if (!isPriceSheet) {
+        return { success: true, data: { documentId: doc.id, filename: doc.originalName, isPriceSheet: false, message: 'This document is not classified as a supplier price sheet and has no extracted material rows.' } }
+      }
+      const importStatus = data.priceSheetReview?.status === 'imported'
+        ? 'imported'
+        : rows.length > 0
+          ? 'pending review'
+          : 'unknown'
+      if (rows.length === 0) {
+        return {
+          success: true,
+          data: {
+            documentId: doc.id,
+            filename: doc.originalName,
+            supplier: supplierFromExtractedData(data),
+            effectiveDate: effectiveDateFromExtractedData(data),
+            totalExtractedRowCount: Number(data.priceSheetReview?.extractedRowCount ?? 0),
+            importStatus,
+            rows: [],
+            message: 'This price sheet was detected, but extracted row data is not available for review yet.',
+          },
+        }
+      }
+      const limit = args.limit ?? 10
+      return {
+        success: true,
+        data: {
+          documentId: doc.id,
+          filename: doc.originalName,
+          supplier: supplierFromExtractedData(data),
+          effectiveDate: effectiveDateFromExtractedData(data),
+          confidence: doc.extractionConfidence,
+          totalExtractedRowCount: rows.length,
+          importStatus,
+          rows: rows.slice(0, limit).map((row, index) => ({
+            rowNumber: index + 1,
+            itemName: row.name,
+            category: row.category,
+            sku: row.sku,
+            unit: row.unit,
+            unitPrice: row.unitCost,
+            confidence: null,
+            notes: null,
+          })),
+          message: `Found ${rows.length} extracted material row(s). They are ${importStatus}; no material prices were changed by this review.`,
+        },
+      }
+    },
+  },
+  {
+    name: 'create_project_for_customer',
+    description: 'Create a real project/job for an existing customer, optionally generating a 6-digit job number and project workspace. Use for "create a job/project for Timothy", "create a new 6-digit project/job", or before saving scope text to a job file.',
+    schema: z.object({
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      title: z.string().max(300).optional(),
+      address: z.string().max(500).optional(),
+      projectType: z.string().max(120).optional(),
+      stage: z.string().max(80).optional(),
+      value: z.number().optional(),
+      deductible: z.number().optional(),
+      claimNumber: z.string().max(120).optional(),
+      carrier: z.string().max(160).optional(),
+      dateOfLoss: z.string().max(80).optional(),
+      jobNumber: z.string().max(40).optional(),
+      generateJobNumber: z.boolean().optional(),
+      notes: z.string().max(2000).optional(),
+    }).refine(v => Boolean(v.customerId || v.customerName), 'customerId or customerName is required'),
+    allowedChannels: ['main', 'management', 'sales', 'insurance'],
+    execute: async (args, contractorId, ctx) => {
+      const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+      if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+      if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}. Create or select the customer before creating a project.` } }
+      if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer should this project belong to?` } }
+      const customer = resolved.customer
+      const jobNumber = args.jobNumber || (args.generateJobNumber ? await generateUniqueJobNumber(contractorId) : null)
+      const created = await createProjectRecordForCustomer(contractorId, ctx, {
+        customer,
+        title: args.title,
+        address: args.address,
+        projectType: args.projectType,
+        stage: args.stage,
+        value: args.value,
+        deductible: args.deductible,
+        claimNumber: args.claimNumber,
+        carrier: args.carrier,
+        dateOfLoss: args.dateOfLoss,
+        jobNumber,
+        notes: args.notes,
+      })
+      return {
+        success: true,
+        data: {
+          created: true,
+          projectId: created.project.id,
+          title: created.project.title,
+          customer: { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address },
+          address: created.project.address,
+          status: created.project.status,
+          value: created.project.value,
+          jobNumber: created.jobNumber,
+          workspaceId: created.workspace?.id ?? null,
+          message: `Created project "${created.project.title}" for ${customer.name}.`,
+        },
+      }
+    },
+  },
+  {
+    name: 'create_project_from_document',
+    description: 'Create a project/job from an extracted estimate, scope, or claim document after checking customer/document conflicts. Use when the user says "create a project from this uploaded estimate/document". If saved customer data conflicts with extracted name/phone/address, ask for resolution before linking.',
+    schema: z.object({
+      documentId: z.string().min(1).max(200),
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      confirmConflictResolution: z.boolean().optional(),
+      conflictResolution: z.enum(['attach_existing', 'create_new_customer', 'update_existing_customer', 'create_new_project_under_existing_customer', 'leave_unassigned']).optional(),
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'insurance'],
+    execute: async (args, contractorId, ctx) => {
+      const doc = await db.document.findFirst({
+        where: { id: args.documentId, contractorId },
+        select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, ocrText: true, customerId: true, projectId: true, extractionConfidence: true },
+      })
+      if (!doc) return { success: false, data: null, error: 'Document not found' }
+      const data = safeJsonParse<Record<string, any>>(doc.extractedData, {})
+      const extractedCustomer = {
+        name: String(data.customer?.name ?? data.customerName ?? data.insuredName ?? data.name ?? '').trim() || null,
+        phone: String(data.customer?.phone ?? data.phone ?? data.insuredPhone ?? '').trim() || null,
+        email: String(data.customer?.email ?? data.email ?? '').trim() || null,
+        address: String(data.projectAddress ?? data.customer?.address ?? data.propertyAddress ?? data.address ?? '').trim() || null,
+      }
+      const value = numberFromMoney(data.totalAmount ?? data.rcv ?? data.claimInfo?.rcv ?? data.claimInfo?.total)
+      const deductible = numberFromMoney(data.claimInfo?.deductible ?? data.deductible)
+      const carrier = String(data.claimInfo?.carrier ?? data.carrier ?? '').trim() || undefined
+      const claimNumber = String(data.claimInfo?.claimNumber ?? data.claimNumber ?? '').trim() || undefined
+      const projectType = doc.fileType === 'price_sheet' || doc.aiCategory === 'price_sheet' ? 'price sheet review' : 'roof/claim project'
+
+      let resolved
+      if (args.customerId || args.customerName) {
+        resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+      } else if (doc.customerId) {
+        resolved = await resolveCustomerForTool(contractorId, { customerId: doc.customerId })
+      } else if (extractedCustomer.name) {
+        resolved = await resolveCustomerForTool(contractorId, { customerName: extractedCustomer.name })
+      }
+
+      if (!resolved || 'notFound' in resolved || 'error' in resolved) {
+        if (args.conflictResolution !== 'create_new_customer' || !args.confirmConflictResolution || !extractedCustomer.name) {
+          return {
+            success: true,
+            data: {
+              needsCustomer: true,
+              documentId: doc.id,
+              extractedCustomer,
+              message: extractedCustomer.name
+                ? `I found extracted customer info for ${extractedCustomer.name}, but no saved customer was selected. Confirm whether to create a new customer/project from this document.`
+                : 'I could not identify a customer from this document. Select or create a customer before creating a project from it.',
+            },
+          }
+        }
+        const customer = await db.customer.create({
+          data: {
+            contractorId,
+            name: extractedCustomer.name,
+            phone: extractedCustomer.phone,
+            email: extractedCustomer.email,
+            address: extractedCustomer.address,
+          },
+        })
+        resolved = { customer }
+      }
+
+      if ('needsClarification' in resolved) {
+        return { success: true, data: { needsClarification: true, matches: resolved.matches, extractedCustomer, message: `Multiple customers matched. Which saved customer should this document/project attach to?` } }
+      }
+
+      const customer = resolved.customer
+      const conflict = detectCustomerDocumentConflict(customer, extractedCustomer)
+      if (conflict.hasConflict && !args.confirmConflictResolution) {
+        console.warn(`[customer-resolver] document conflict detected contractorId=${contractorId} documentId=${doc.id} customerId=${customer.id} level=${conflict.level}`)
+        console.warn(`[customer-resolver] awaiting user resolution contractorId=${contractorId} documentId=${doc.id}`)
+        return {
+          success: true,
+          data: {
+            needsConflictResolution: true,
+            documentId: doc.id,
+            customerCandidate: customer,
+            extractedCustomer,
+            conflict,
+            message: `I found saved ${customer.name}, but this document appears to be for ${extractedCustomer.name ?? 'a customer'}${extractedCustomer.address ? ` at ${extractedCustomer.address}` : ''}${extractedCustomer.phone ? ` with phone ${extractedCustomer.phone}` : ''}. Is this the same customer, a different customer, or a new project?`,
+          },
+        }
+      }
+
+      if (args.conflictResolution === 'leave_unassigned') {
+        return { success: true, data: { leftUnassigned: true, documentId: doc.id, message: 'Left the document unassigned. No project was created.' } }
+      }
+
+      if (args.conflictResolution === 'update_existing_customer' && args.confirmConflictResolution) {
+        await db.customer.update({
+          where: { id: customer.id },
+          data: {
+            phone: extractedCustomer.phone || customer.phone,
+            email: extractedCustomer.email || customer.email,
+            address: extractedCustomer.address || customer.address,
+          },
+        }).catch(() => null)
+      }
+
+      const created = await createProjectRecordForCustomer(contractorId, ctx, {
+        customer,
+        title: `${customer.name} ${doc.fileType === 'scope_of_loss' || doc.aiCategory === 'estimate' ? 'Estimate/Scope' : 'Project'}`,
+        address: extractedCustomer.address ?? customer.address,
+        projectType,
+        value,
+        deductible,
+        claimNumber,
+        carrier,
+        sourceDocumentId: doc.id,
+        notes: `Created from ${doc.originalName}. Extraction confidence: ${doc.extractionConfidence ?? 'unknown'}.`,
+      })
+      await db.document.update({
+        where: { id: doc.id },
+        data: { customerId: customer.id, projectId: created.project.id },
+      })
+      const link = await linkDocumentToJobPacket({
+        contractorId,
+        documentId: doc.id,
+        projectId: created.project.id,
+        customerId: customer.id,
+        entityType: 'project',
+        entityId: created.project.id,
+        role: doc.fileType === 'scope_of_loss' || doc.aiCategory === 'estimate' ? 'carrier_estimate' : 'source',
+        source: 'ai',
+        confidence: conflict.level === 'minor_name_variation' ? 0.85 : 1,
+        metadata: { extractedCustomer, conflict },
+      })
+      if (doc.fileType === 'scope_of_loss' || doc.aiCategory === 'estimate' || Array.isArray(data.lineItems)) {
+        await initScopeAnalysis(doc.id, contractorId).catch(() => null)
+      }
+      console.log(`[customer-resolver] conflict resolved contractorId=${contractorId} documentId=${doc.id} projectId=${created.project.id} level=${conflict.level}`)
+      return {
+        success: true,
+        data: {
+          created: true,
+          documentId: doc.id,
+          projectId: created.project.id,
+          title: created.project.title,
+          customer: { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address },
+          documentLinked: Boolean(link),
+          conflict,
+          message: `Created project "${created.project.title}" from ${doc.originalName} and linked the document.`,
+        },
+      }
+    },
+  },
+  {
     name: 'create_scope_from_text',
     description: 'Save pasted scope/estimate text as a real Document and ScopeAnalysis linked to a customer/project. Use when the user pastes scope text and asks to save it, create a scope breakdown, or attach it to a customer/job file.',
     schema: z.object({
@@ -880,7 +1398,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'import_price_sheet_items',
     description: 'Import pending extracted material rows from a reviewed price sheet document into the contractor material database. Requires explicit user confirmation/approval. Never use this to clear or replace existing prices unless the user separately approved clearing.',
-    schema: z.object({ documentId: z.string().min(1).max(200) }),
+    schema: z.object({
+      documentId: z.string().min(1).max(200),
+      mode: z.enum(['append', 'replace']).optional(),
+      confirm: z.boolean().optional(),
+    }),
     allowedChannels: ['main', 'management', 'supplier', 'finance'],
     requiresApproval: true,
     execute: async (args, contractorId) => {
@@ -889,38 +1411,55 @@ export const TOOLS: ToolDef[] = [
         select: { id: true, originalName: true, fileType: true, extractedData: true },
       })
       if (!doc) return { success: false, data: null, error: 'Price sheet document not found' }
-      const data = doc.extractedData ? JSON.parse(doc.extractedData) : {}
-      const items = normalizeMaterialItems(data.materialItems)
+      const data = safeJsonParse<Record<string, any>>(doc.extractedData, {})
+      const items = pendingMaterialItemsFromExtractedData(data)
       if (items.length === 0) return { success: false, data: null, error: 'No pending material rows found on this document' }
 
-      console.log(`[price-sheet] import confirmed documentId=${doc.id} count=${items.length}`)
+      const mode = args.mode ?? 'append'
+      if (mode === 'replace' && args.confirm !== true) {
+        return { success: true, data: { confirmationRequired: true, documentId: doc.id, totalRows: items.length, message: 'Replacing existing material prices requires explicit confirmation. Ask whether to replace all existing prices or append/update only.' }, error: 'Replacement confirmation required' }
+      }
+      console.log(`[price-sheet] importing confirmed rows documentId=${doc.id} count=${items.length} mode=${mode}`)
       const existingItems = await db.materialItem.findMany({
         where: { contractorId },
-        select: { name: true, unit: true, unitCost: true },
+        select: { id: true, name: true, unit: true, unitCost: true, sku: true },
       })
-      const existingKeys = new Set(existingItems.map(i => `${i.name.toLowerCase()}|${i.unit}|${i.unitCost}`))
+      if (mode === 'replace') {
+        await db.materialItem.deleteMany({ where: { contractorId } })
+      }
+      const existingKeys = new Map(existingItems.map(i => [`${i.name.toLowerCase()}|${i.unit}|${i.sku ?? ''}`, i]))
       let created = 0
+      let updated = 0
       let skipped = 0
       for (const item of items) {
-        const key = `${item.name.toLowerCase()}|${item.unit}|${item.unitCost}`
-        if (existingKeys.has(key)) { skipped++; continue }
-        existingKeys.add(key)
-        await db.materialItem.create({
-          data: {
-            contractorId,
-            name: item.name,
-            sku: item.sku,
-            category: item.category,
-            unit: item.unit,
-            unitCost: item.unitCost,
-          },
-        })
-        created++
+        const key = `${item.name.toLowerCase()}|${item.unit}|${item.sku ?? ''}`
+        const existing = mode === 'append' ? existingKeys.get(key) : undefined
+        if (existing) {
+          if (existing.unitCost !== item.unitCost) {
+            await db.materialItem.update({ where: { id: existing.id }, data: { unitCost: item.unitCost, category: item.category, sku: item.sku } })
+            updated++
+          } else {
+            skipped++
+          }
+        } else {
+          const createdItem = await db.materialItem.create({
+            data: {
+              contractorId,
+              name: item.name,
+              sku: item.sku,
+              category: item.category,
+              unit: item.unit,
+              unitCost: item.unitCost,
+            },
+          })
+          existingKeys.set(key, createdItem)
+          created++
+        }
       }
-      data.priceSheetReview = { ...(data.priceSheetReview ?? {}), status: 'imported', importedAt: new Date().toISOString(), created, skipped }
+      data.priceSheetReview = { ...(data.priceSheetReview ?? {}), status: 'imported', importedAt: new Date().toISOString(), mode, created, updated, skipped }
       await db.document.update({ where: { id: doc.id }, data: { extractedData: JSON.stringify(data), status: 'reviewed' } })
-      console.log(`[price-sheet] import complete documentId=${doc.id} created=${created} skipped=${skipped}`)
-      return { success: true, data: { documentId: doc.id, originalName: doc.originalName, created, skipped, totalRows: items.length, message: `Imported ${created} material item(s); skipped ${skipped} duplicate(s).` } }
+      console.log(`[price-sheet] import complete documentId=${doc.id} created=${created} updated=${updated} skipped=${skipped}`)
+      return { success: true, data: { documentId: doc.id, originalName: doc.originalName, mode, created, updated, skipped, totalRows: items.length, message: `Imported ${created} material item(s), updated ${updated}, skipped ${skipped}.` } }
     },
   },
   {
