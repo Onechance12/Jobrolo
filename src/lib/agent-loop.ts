@@ -221,10 +221,21 @@ function cleanCustomerName(raw: string) {
   return raw
     .replace(/'s\s+(customer\s+file|client\s+file|file|profile).*$/i, '')
     .replace(/\s+(customer\s+file|client\s+file|file|profile)\b.*$/i, '')
-    .replace(/\b(if so|first|before|using|with|and|please|would|should|then)\b.*$/i, '')
+    .replace(/\b(if so|first|before|using|with|and|also|please|would|should|then)\b.*$/i, '')
+    .replace(/^(yes|yeah|yea|yep|yup|ok|okay|sure|correct)\s+/i, '')
     .replace(/["“”]/g, '')
     .replace(/[?.!,;:]+$/g, '')
     .trim()
+}
+
+function extractCustomerNameFromReply(text: string) {
+  const cleaned = cleanCustomerName(plainMessageText(text))
+  const candidate = cleaned
+    .replace(/\b(?:customer|client|project|job|file|profile)\b.*$/i, '')
+    .trim()
+  if (!candidate || candidate.length < 2 || candidate.length > 120) return null
+  if (/^(yes|yeah|yea|yep|yup|ok|okay|sure|correct|project|job|chat|file|document)$/i.test(candidate)) return null
+  return candidate
 }
 
 function extractPendingProjectCustomerName(text: string) {
@@ -290,9 +301,24 @@ function findRecentOperationalCustomerName(messages: ChatMessage[], beforeIndex:
 function findRecentDocumentReference(messages: ChatMessage[], beforeIndex: number) {
   for (let i = beforeIndex - 1; i >= 0; i--) {
     const content = messages[i]?.content ?? ''
-    const documentId = content.match(/documentId="([^"]+)"/)?.[1]
-    const filename = content.match(/name="([^"]+)"/)?.[1]
+    const documentId =
+      content.match(/documentId="([^"]+)"/i)?.[1] ??
+      content.match(/\bdocumentId\s*[:=]?\s*([a-z0-9][a-z0-9-]{10,})/i)?.[1] ??
+      content.match(/\bdocument\s+id\s*[:=]?\s*([a-z0-9][a-z0-9-]{10,})/i)?.[1]
+    const filename =
+      content.match(/name="([^"]+)"/i)?.[1] ??
+      content.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|png|jpe?g|heic|webp|docx?|xlsx?|csv))\b/i)?.[1]
     if (documentId || filename) return { documentId, filename }
+  }
+  return null
+}
+
+function findRecentUploadAttachPrompt(messages: ChatMessage[], beforeIndex: number) {
+  for (let i = beforeIndex - 1; i >= Math.max(0, beforeIndex - 8); i--) {
+    const text = plainMessageText(messages[i]?.content ?? '')
+    if (/which customer or project should i attach|which client or project should i attach|attach this upload|which customer or project would you like to attach/i.test(text)) {
+      return { index: i, text }
+    }
   }
   return null
 }
@@ -380,16 +406,14 @@ function buildUploadLinkContinuationInstruction(messages: ChatMessage[]) {
   if (!latestUser) return null
   const latest = plainMessageText(latestUser.message.content)
   if (!latest || latest.length > 160) return null
-  const previousAssistant = lastMessageByRole(messages, 'assistant', latestUser.index)
-  if (!previousAssistant) return null
-  const previousText = plainMessageText(previousAssistant.message.content)
-  if (!/which customer or project should i attach|which client or project should i attach|attach this upload/i.test(previousText)) return null
+  const prompt = findRecentUploadAttachPrompt(messages, latestUser.index)
+  if (!prompt) return null
   const documentRef = findRecentDocumentReference(messages, latestUser.index)
   if (!documentRef) return null
-  const customerName = cleanCustomerName(latest)
+  const customerName = extractCustomerNameFromReply(latest)
   if (!customerName || /^(project|customer|client|job)$/i.test(customerName)) return null
 
-  return `The previous assistant asked which customer/project to attach the recent upload to. The latest user answered "${customerName}".
+  return `A recent assistant message asked which customer/project to attach the recent upload to. The latest user answered "${customerName}".
 
 Do not ask again and do not require a project for customer-file attachment.
 
@@ -408,6 +432,8 @@ Common recovery examples:
 - To attach an uploaded photo/file to a customer, call link_document_to_customer. A projectId is not required.
 - If you previously asked whether to link/attach a document/photo and the user replied "yes" or "yea", call link_document_to_customer or the appropriate save/link tool using the prior document/customer context.
 - To create a project/job for a customer, call create_project_for_customer.
+- To remove a file from a customer/project but keep it saved, call detach_document_from_customer. Do not delete unless the user explicitly asked to permanently delete the file.
+- To move a supplier price sheet out of a customer file and into company pricing, call detach_document_from_customer, then review_price_sheet_items; ask for confirmation before import_price_sheet_items.
 - To delete a customer/client, call delete_customer, not delete_documents_by_name.
 - To approve pending requests after the user says "yes approved", "yes delete", "yes", or "approved", call decide_pending_action_requests or decide_action_request. If the pending request is delete_customer, pass toolName="delete_customer" and do NOT create a new delete_customer approval.
 - To create a crew/customer/project chat, call create_project_chat.
@@ -482,6 +508,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
 If the user requested a database/system operation, use tool_calls.
 If it can only be done inside a workspace/project chat, say that clearly and do not claim it was saved or completed.
+If the user asked to attach/link/detach/remove a document from a customer or project, use link_document_to_customer or detach_document_from_customer as tool_calls.
 
 Respond as JSON only.`,
       })

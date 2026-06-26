@@ -2441,6 +2441,87 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'detach_document_from_customer',
+    description: 'Detach/unlink a saved document/photo from a customer, project, or workspace without deleting the file. Use when the user says "remove this file from Bhuvana", "this price sheet is not for this customer", "move it out of the customer file", or wants to keep a file for company pricing instead of a job file. This never deletes the document.',
+    schema: z.object({
+      documentId: z.string().min(1).max(200).optional(),
+      filename: z.string().min(1).max(300).optional(),
+      customerName: z.string().min(1).max(200).optional(),
+    }).refine(v => Boolean(v.documentId || v.filename), 'documentId or filename is required'),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      let doc = args.documentId
+        ? await db.document.findFirst({ where: { id: args.documentId, contractorId } })
+        : null
+      if (!doc && args.filename) {
+        doc = await db.document.findFirst({
+          where: { contractorId, originalName: { contains: args.filename } },
+          orderBy: { createdAt: 'desc' },
+        })
+      }
+      if (!doc) return { success: false, data: null, error: 'Document not found. Provide a documentId or filename to detach.' }
+
+      let customer: { id: string; name: string } | null = null
+      if (args.customerName?.trim()) {
+        const resolved = await resolveCustomerForTool(contractorId, { customerName: args.customerName })
+        if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+        if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}. I did not detach the file.` } }
+        if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer should I detach this file from?` } }
+        customer = { id: resolved.customer.id, name: resolved.customer.name }
+      }
+
+      const previous = {
+        customerId: doc.customerId,
+        projectId: doc.projectId,
+        workspaceId: doc.workspaceId,
+      }
+      const mismatchCustomer = customer && doc.customerId && doc.customerId !== customer.id ? customer : null
+      const customerMismatch = Boolean(mismatchCustomer)
+      if (customerMismatch) {
+        return {
+          success: true,
+          data: {
+            needsClarification: true,
+            documentId: doc.id,
+            filename: doc.originalName,
+            currentCustomerId: doc.customerId,
+            requestedCustomer: mismatchCustomer,
+            message: `The file is not currently linked to ${mismatchCustomer!.name}. Confirm which customer/project link should be removed before I detach it.`,
+          },
+        }
+      }
+
+      await db.document.update({
+        where: { id: doc.id },
+        data: { customerId: null, projectId: null, workspaceId: null },
+      })
+      const deletedLinks = await db.documentLink.deleteMany({
+        where: {
+          contractorId,
+          documentId: doc.id,
+          ...(customer ? { customerId: customer.id } : {}),
+        },
+      }).catch(() => ({ count: 0 }))
+
+      console.log(`[tools-v2] detach_document_from_customer: detached ${doc.originalName} (${doc.id}) links=${deletedLinks.count}`)
+      return {
+        success: true,
+        data: {
+          detached: true,
+          documentId: doc.id,
+          filename: doc.originalName,
+          previous,
+          removedDocumentLinks: deletedLinks.count,
+          customerName: customer?.name ?? null,
+          fileSaved: true,
+          message: customer?.name
+            ? `Detached "${doc.originalName}" from ${customer.name}. The file was kept and can still be reviewed, relinked, or imported if it is a price sheet.`
+            : `Detached "${doc.originalName}" from its customer/project links. The file was kept and can still be reviewed, relinked, or imported if it is a price sheet.`,
+        },
+      }
+    },
+  },
+  {
     name: 'link_document_to_customer',
     description: 'Link an uploaded document/photo to a customer file. Use when a user asks to associate/attach/tie a file or photo to a specific customer. A project is NOT required. If the customer has an active project, it also links there; otherwise it attaches to the customer file only.',
     schema: z.object({
