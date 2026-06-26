@@ -3764,12 +3764,13 @@ export const TOOLS: ToolDef[] = [
         sessionId,
         type: 'inspection_set',
         status: 'inspection_set',
-        summary: args.notes || 'Inspection landed from field canvassing.',
+        summary: args.notes || 'Inspection landed from the field.',
         notes: args.notes,
         location: args.location,
         metadata: { fieldInspection: true },
       })
-      const propertyResearch = args.searchPropertyInfo
+      const shouldResearchProperty = args.searchPropertyInfo !== false
+      const propertyResearch = shouldResearchProperty
         ? await researchPropertyNow(tenant, {
             mode: 'approaching_house',
             query: args.address || 'current GPS location',
@@ -3786,9 +3787,9 @@ export const TOOLS: ToolDef[] = [
           lead,
           activity,
           propertyResearch,
-          message: 'Saved the current-location inspection as an inspection lead. Convert it to a customer/project after the owner confirms details.',
+          message: 'Saved the current-location inspection as an inspection lead. Confirm the property/customer details before converting it to a customer/project.',
           card: {
-            cardType: 'canvassing_lead',
+            cardType: 'field_inspection_lead',
             leadId: lead.id,
             sessionId,
             address: lead.address,
@@ -3797,7 +3798,9 @@ export const TOOLS: ToolDef[] = [
             status: lead.status,
             latitude: lead.latitude,
             longitude: lead.longitude,
-            summary: args.notes || 'Inspection landed from field canvassing.',
+            propertyResearch: propertyResearch && typeof propertyResearch === 'object' ? propertyResearch : null,
+            photoSections: ['Front elevation', 'All elevations', 'Roof overview', 'Roof slopes/facets', 'Hail/wind damage', 'Soft metals / gutters / vents', 'Interior', 'Attic', 'Detached structures', 'Documents / scope'],
+            summary: args.notes || 'Inspection landed from the field.',
           },
         },
       }

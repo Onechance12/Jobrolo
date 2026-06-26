@@ -29,7 +29,7 @@ export const DEFAULT_COMMAND_SHORTCUTS: CommandShortcut[] = [
   { id: 'company-info', label: 'Company profile', prompt: 'Show my saved company profile.', icon: 'building' },
   { id: 'update-company', label: 'Update company info', prompt: 'Update my company profile: company name, phone, email, website, and address are ', icon: 'building' },
   { id: 'research-website', label: 'Research website', prompt: 'Research my company website and suggest updates to my company profile: ', icon: 'globe' },
-  { id: 'field', label: 'Field', prompt: 'Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I am not at a saved job, help me canvass from here.', icon: 'field' },
+  { id: 'field', label: 'Field', prompt: 'Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I just landed an inspection, use my location, research the property if configured, confirm the owner/address with me, then start the inspection photo workflow.', icon: 'field' },
   { id: 'create-client', label: 'Create client', prompt: 'Create a client named ', icon: 'client' },
   { id: 'create-job', label: 'Create job', prompt: 'Create a project/job for ', icon: 'job' },
   { id: 'create-crew-chat', label: 'Create crew chat', prompt: 'Create a crew chat for ', icon: 'crew' },

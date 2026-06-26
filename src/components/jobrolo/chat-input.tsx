@@ -15,7 +15,14 @@ import {
 } from '@/lib/command-shortcuts'
 
 type SendResult = { ok?: boolean; keepAttachments?: boolean } | void
-interface Props { onSend: (args: { text: string; displayText?: string; attachments?: File[] }) => SendResult | Promise<SendResult>; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
+interface Props {
+  onSend: (args: { text: string; displayText?: string; attachments?: File[] }) => SendResult | Promise<SendResult>
+  onStop?: () => void
+  disabled?: boolean
+  isWorking?: boolean
+  placeholder?: string
+  mode?: 'command' | 'field'
+}
 
 function shouldRequestBrowserLocation(prompt: string) {
   const t = prompt.toLowerCase().replace(/[’']/g, "'")
@@ -60,7 +67,7 @@ capturedAt: ${new Date().toISOString()}
 Use this location for the user's "where I am / here / near me" request. Do not ask the user to type GPS coordinates again unless you need a street name or landmark for a specific tool.`
 }
 
-export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: Props) {
+export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mode = 'command' }: Props) {
   const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -191,7 +198,25 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
       {pendingFiles.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{pendingFiles.map((f, i) => <PendingFileChip key={i} file={f} onRemove={() => setPendingFiles(p => p.filter((_, idx) => idx !== i))} />)}</div>}
       {localError ? <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{localError}</div> : null}
-      {text === '' && !pendingFiles.length && !listening && <div className="mb-2 flex flex-wrap gap-1.5">{shortcuts.slice(0, 6).map(s => <button key={s.id} onClick={() => setText(s.prompt)} className="px-3 py-1.5 rounded-full text-xs bg-muted text-muted-foreground hover:bg-muted-foreground/20 min-h-[32px]">{s.label}</button>)}</div>}
+      {text === '' && !pendingFiles.length && !listening && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {(mode === 'field' ? FIELD_QUICK_PROMPTS : shortcuts.slice(0, 6)).map(s => (
+            <button
+              key={s.id}
+              onClick={() => setText(s.prompt)}
+              className={cn(
+                'inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors',
+                mode === 'field'
+                  ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/50'
+                  : 'bg-muted text-muted-foreground hover:bg-muted-foreground/20'
+              )}
+            >
+              {mode === 'field' ? shortcutIcon({ ...s, icon: 'field' } as CommandShortcut) : null}
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
       <div className="flex items-end gap-2">
         <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center"><Plus className="w-5 h-5" /></button>
@@ -235,6 +260,15 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
     </div>
   )
 }
+
+const FIELD_QUICK_PROMPTS: CommandShortcut[] = [
+  makeCommandShortcut('Start inspection', 'I landed an inspection here. Use my location, research the property if configured, and start an inspection photo workflow.', 'field'),
+  makeCommandShortcut('Photo checklist', 'Give me the first inspection photo checklist for this property: front elevation, all elevations, roof slopes, damage, soft metals, interior, attic, detached structures, and documents.', 'field'),
+  makeCommandShortcut('Roof photos', 'Start roof photo capture. Ask me for roof overview, slopes/facets, penetrations, ridges, valleys, gutters, vents, and damage photos by section.', 'field'),
+  makeCommandShortcut('Interior', 'Log interior inspection notes/photos. Ask me for room, ceiling/wall damage, moisture, and supporting photos.', 'field'),
+  makeCommandShortcut('Attic', 'Log attic inspection notes/photos. Ask me for decking, moisture, daylight, ventilation, and structural concerns.', 'field'),
+  makeCommandShortcut('Detached', 'Log detached structure inspection notes/photos for this property.', 'field'),
+]
 
 function MenuButton({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint: string; onClick: () => void }) {
   return (

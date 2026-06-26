@@ -101,6 +101,11 @@ type CompanyProfileLike = {
   profile?: Record<string, unknown> | null
 } & Record<string, unknown>
 
+function insertJobroloPrompt(text: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+}
+
 type RoofReportLike = {
   id?: string
   reportId?: string
@@ -150,6 +155,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('template_review')) {
     return <TemplateReviewCard template={contextData as TemplateReviewLike} />
+  }
+  if (cardType.includes('field_inspection_lead')) {
+    return <FieldInspectionLeadCard data={contextData as any} />
   }
   if (cardType.includes('canvassing_session')) {
     return <CanvassingSessionCard data={contextData as any} />
@@ -765,24 +773,121 @@ export function TemplateReviewCard({ template }: { template?: TemplateReviewLike
 }
 
 
+export function FieldInspectionLeadCard({ data }: { data?: any }) {
+  const leadId = data?.leadId || data?.lead?.id || data?.id
+  const address = data?.address || data?.lead?.address || data?.propertyResearch?.card?.bestCandidate?.address || 'Current GPS location'
+  const homeowner = data?.homeownerName || data?.lead?.homeownerName || data?.propertyResearch?.card?.bestCandidate?.ownerName
+  const status = data?.status || data?.lead?.status || 'inspection_set'
+  const researchCard = data?.propertyResearch?.card || data?.propertyResearch
+  const best = researchCard?.bestCandidate || researchCard?.candidate || researchCard?.candidates?.[0]
+  const researchSummary = data?.propertyResearch?.summary || researchCard?.summary
+  const providerDisabled = String(researchSummary || '').toLowerCase().includes('not configured') || String(data?.propertyResearch?.error || '').toLowerCase().includes('not configured')
+  const unverifiedGpsOnly = best && ['gps_unverified', 'manual_unverified'].includes(String(best.source || '').toLowerCase()) && !best.ownerName
+  const photoSections = Array.isArray(data?.photoSections) && data.photoSections.length
+    ? data.photoSections
+    : ['Front elevation', 'All elevations', 'Roof overview', 'Roof slopes/facets', 'Damage closeups', 'Soft metals', 'Interior', 'Attic', 'Detached structures', 'Documents']
+
+  const startPrompt = `Start the inspection workflow for this field lead${leadId ? ` (lead ID: ${leadId})` : ''}. Walk me through the photo sections one at a time: front elevation, all elevations, roof overview, roof slopes/facets, hail/wind damage, soft metals/gutters/vents, interior, attic, detached structures, and documents.`
+  const researchPrompt = `Research the property for this field inspection lead${leadId ? ` (lead ID: ${leadId})` : ''} using the saved GPS/address. If public property research is not configured, tell me exactly what provider/API is missing.`
+  const convertPrompt = `Convert this field inspection lead${leadId ? ` (lead ID: ${leadId})` : ''} into a customer and project only after confirming the owner/address details.`
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Camera className="h-4 w-4" /> Inspection lead started
+          </CardTitle>
+          <Badge variant="secondary" className="text-[10px]">field</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="rounded-xl border bg-background/70 p-3">
+          <div className="flex items-start gap-2">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            <div className="min-w-0">
+              <div className="font-semibold text-foreground">{address}</div>
+              {homeowner ? <div className="text-xs text-muted-foreground">Possible homeowner: {homeowner}</div> : null}
+              <div className="mt-1 text-xs text-muted-foreground">Saved as a field lead. Confirm the property/customer before converting it into a real customer or job.</div>
+            </div>
+          </div>
+        </div>
+
+        {best ? (
+          <div className="rounded-xl border bg-background/70 p-3 text-xs">
+            <div className="font-semibold text-foreground">Possible property match</div>
+            <div className="mt-1 space-y-0.5 text-muted-foreground">
+              {best.address ? <div>{best.address}</div> : null}
+              {best.ownerName ? <div>Owner: {best.ownerName}</div> : null}
+              {typeof best.confidence === 'number' ? <div>Confidence: {Math.round(best.confidence * 100)}%</div> : null}
+              {best.reason ? <div>{best.reason}</div> : null}
+              {unverifiedGpsOnly ? <div className="mt-1 text-amber-700 dark:text-amber-300">GPS/address is saved, but public owner lookup still needs a property-data provider before Jobrolo can verify homeowner records automatically.</div> : null}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            {providerDisabled
+              ? 'Property lookup is not configured yet. GPS is saved, but Jobrolo needs a property-data/web-search provider before it can pull county owner records automatically.'
+              : researchSummary || 'No confident property match yet. Confirm the address or add a property-data provider for owner lookup.'}
+          </div>
+        )}
+
+        <div>
+          <div className="mb-1.5 text-xs font-semibold text-muted-foreground">First inspection photo set</div>
+          <div className="flex flex-wrap gap-1.5">
+            {photoSections.slice(0, 12).map((section: string) => (
+              <button
+                key={section}
+                type="button"
+                onClick={() => insertJobroloPrompt(`Start the ${section.toLowerCase()} photo section for this inspection${leadId ? ` lead ${leadId}` : ''}. Tell me exactly what photos to capture and let me upload them in small batches.`)}
+                className="rounded-full border border-emerald-200 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-emerald-900 hover:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100"
+              >
+                {section}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="outline" className="text-[10px]">{humanize(String(status))}</Badge>
+          {leadId ? <Badge variant="outline" className="text-[10px]">lead saved</Badge> : null}
+          {researchCard?.runId ? <Badge variant="outline" className="text-[10px]">research run saved</Badge> : null}
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" onClick={() => insertJobroloPrompt(startPrompt)}>
+          Start inspection
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(researchPrompt)}>
+          Research property
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(convertPrompt)}>
+          Create customer/job
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
 export function CanvassingSessionCard({ data }: { data?: any }) {
   return (
     <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-sm"><Route className="h-4 w-4" /> {data?.title || 'Canvassing session active'}</CardTitle>
-          <Badge variant="secondary" className="text-[10px]">canvassing</Badge>
+          <CardTitle className="flex items-center gap-2 text-sm"><Route className="h-4 w-4" /> {data?.title || 'Field run active'}</CardTitle>
+          <Badge variant="secondary" className="text-[10px]">field</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <p className="text-muted-foreground">{data?.summary || data?.territoryName || 'Use map mode to create pins, log knocks, and convert interested homeowners into jobs.'}</p>
+        <p className="text-muted-foreground">{data?.summary || data?.territoryName || 'Field run is active. Keep working from chat: log knocks, start inspections, save notes, and convert confirmed leads when ready.'}</p>
         <div className="flex flex-wrap gap-1.5">
           {data?.sessionId ? <Badge variant="outline" className="text-[10px]">session ready</Badge> : null}
           {data?.territoryName ? <Badge variant="outline" className="text-[10px]">{data.territoryName}</Badge> : null}
         </div>
       </CardContent>
       <CardFooter className="border-t bg-background/60 py-2">
-        <Button size="sm" asChild><Link href="/canvassing">Open map mode</Link></Button>
+        <Button size="sm" onClick={() => insertJobroloPrompt(`Keep this field run in chat${data?.sessionId ? ` (session ID: ${data.sessionId})` : ''}. Ask what I want to do next and offer: log a door, start inspection, research current property, add note, or end run.`)}>Continue in chat</Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Use my current location and start an inspection lead if I am at a house. Ask me to confirm owner/address before creating a customer or project.')}>Start inspection</Button>
       </CardFooter>
     </Card>
   )
@@ -795,12 +900,12 @@ export function CanvassingLeadCard({ data }: { data?: any }) {
     <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-sm"><Home className="h-4 w-4" /> {data?.address || data?.homeownerName || 'Canvassing lead'}</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-sm"><Home className="h-4 w-4" /> {data?.address || data?.homeownerName || 'Field lead'}</CardTitle>
           <Badge variant="outline" className="text-[10px]">{humanize(String(status))}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <p className="text-muted-foreground">{data?.summary || data?.notes || 'A canvassing lead was logged from the field.'}</p>
+        <p className="text-muted-foreground">{data?.summary || data?.notes || 'A field lead was logged from chat.'}</p>
         <div className="flex flex-wrap gap-1.5">
           {data?.homeownerName ? <Badge variant="secondary" className="text-[10px]">{data.homeownerName}</Badge> : null}
           {data?.phone ? <Badge variant="outline" className="text-[10px]">{data.phone}</Badge> : null}
@@ -808,9 +913,9 @@ export function CanvassingLeadCard({ data }: { data?: any }) {
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" asChild><Link href="/canvassing">Open map</Link></Button>
-        {data?.projectId ? <Button size="sm" variant="outline" asChild><Link href="/">Open job thread</Link></Button> : null}
-        {leadId && !data?.projectId ? <Button size="sm" variant="outline" asChild><Link href="/canvassing">Convert in map</Link></Button> : null}
+        <Button size="sm" onClick={() => insertJobroloPrompt(`Start an inspection workflow for this field lead${leadId ? ` (lead ID: ${leadId})` : ''}. Walk me through the photo sections and notes in chat.`)}>Start inspection</Button>
+        {data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Open the job chat/thread for project ${data.projectId} and brief me on what to do next.`)}>Open job chat</Button> : null}
+        {leadId && !data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Convert this field lead into a customer and project after confirming the owner/address details. Lead ID: ${leadId}`)}>Create customer/job</Button> : null}
       </CardFooter>
     </Card>
   )
@@ -844,7 +949,7 @@ export function PropertyMemoryCard({ data }: { data?: any }) {
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" variant="outline" asChild><Link href="/canvassing">Open canvassing</Link></Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Use this property memory in the current field chat. Tell me what we know, what is missing, and what I should do next at ${address}.`)}>Use in field chat</Button>
       </CardFooter>
     </Card>
   )
@@ -857,12 +962,12 @@ export function CanvassingGamePlanCard({ data }: { data?: any }) {
     <Card className="mt-2 w-full overflow-hidden border-purple-200 bg-purple-50/50 shadow-sm dark:border-purple-900/60 dark:bg-purple-950/20 sm:max-w-xl">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-sm"><Sparkles className="h-4 w-4" /> {data?.title || 'Canvassing game plan'}</CardTitle>
-          <Badge variant="secondary" className="text-[10px]">partner mode</Badge>
+          <CardTitle className="flex items-center gap-2 text-sm"><Sparkles className="h-4 w-4" /> {data?.title || 'Field game plan'}</CardTitle>
+          <Badge variant="secondary" className="text-[10px]">field partner</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <p className="text-foreground/90">{data?.strategySummary || 'A supportive route plan based on mindset, property memory, follow-ups, and canvassing history.'}</p>
+        <p className="text-foreground/90">{data?.strategySummary || 'A supportive field plan based on mindset, property memory, follow-ups, and nearby work history.'}</p>
         <div className="grid grid-cols-3 gap-2 text-xs">
           <div className="rounded-lg border bg-background/70 p-2"><div className="font-semibold">Doors</div><div className="text-muted-foreground">{goals?.doors ?? '—'}</div></div>
           <div className="rounded-lg border bg-background/70 p-2"><div className="font-semibold">Talks</div><div className="text-muted-foreground">{goals?.conversations ?? '—'}</div></div>
@@ -872,8 +977,8 @@ export function CanvassingGamePlanCard({ data }: { data?: any }) {
         {recs.length ? <div className="space-y-1 text-xs text-muted-foreground">{recs.slice(0, 3).map((r: any, i: number) => <div key={i}>• {r.label}: {r.count ?? 0}</div>)}</div> : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" asChild><Link href="/canvassing">Start run</Link></Button>
-        <Button size="sm" variant="outline" asChild><Link href="/canvassing">Adjust plan</Link></Button>
+        <Button size="sm" onClick={() => insertJobroloPrompt(`Start this field plan in chat${data?.gamePlanId ? ` (plan ID: ${data.gamePlanId})` : ''}. Give me the first three actions and help me log each result.`)}>Start in chat</Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Adjust this field plan. Ask whether I want fresh hail, follow-ups, higher-value roofs, easy conversations, old damage, or close-to-current-jobs.')}>Adjust focus</Button>
       </CardFooter>
     </Card>
   )
@@ -932,7 +1037,7 @@ export function PropertyResearchCard({ data }: { data?: any }) {
           {state === 'saving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
           {state === 'saved' ? 'Saved' : 'Confirm & save'}
         </Button>
-        <Button size="sm" variant="outline" asChild><Link href="/canvassing">Use in canvassing</Link></Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Use this property research in the field chat${data?.runId ? ` (research run ID: ${data.runId})` : ''}. Ask me to confirm if this is the correct house before saving or converting.`)}>Use in field chat</Button>
       </CardFooter>
     </Card>
   )
@@ -951,7 +1056,7 @@ export function StreetGamePlanCard({ data }: { data?: any }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <p className="text-foreground/90">{data?.summary || 'A supportive canvassing plan based on street research, property memory, follow-ups, and your mindset for the day.'}</p>
+        <p className="text-foreground/90">{data?.summary || 'A supportive field plan based on street research, property memory, follow-ups, and your mindset for the day.'}</p>
         <div className="grid grid-cols-3 gap-2 text-xs">
           <div className="rounded-lg border bg-background/70 p-2"><div className="font-semibold">Doors</div><div className="text-muted-foreground">{goals.doors ?? '—'}</div></div>
           <div className="rounded-lg border bg-background/70 p-2"><div className="font-semibold">Talks</div><div className="text-muted-foreground">{goals.conversations ?? '—'}</div></div>
@@ -968,8 +1073,8 @@ export function StreetGamePlanCard({ data }: { data?: any }) {
         ) : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" asChild><Link href="/canvassing">Start run</Link></Button>
-        <Button size="sm" variant="outline" asChild><Link href="/canvassing">Adjust focus</Link></Button>
+        <Button size="sm" onClick={() => insertJobroloPrompt(`Start this street/field plan in chat${data?.streetRunId ? ` (street run ID: ${data.streetRunId})` : ''}. Give me the first action and let me log each door or inspection.`)}>Start in chat</Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Adjust this street field plan. Ask me what kind of run I want and update the focus without opening a separate map page.')}>Adjust focus</Button>
       </CardFooter>
     </Card>
   )

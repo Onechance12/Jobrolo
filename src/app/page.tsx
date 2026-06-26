@@ -393,6 +393,11 @@ export default function Page() {
   const displayMessages = isInWorkspace ? workspaceMessages : messages
   const inputDisabled = isInWorkspace ? isWorkspaceTyping : (isStreaming && !uploadProgress.length)
   const isAIWorking = isInWorkspace ? isWorkspaceTyping : (isTyping || isStreaming)
+  const recentFieldContext = displayMessages.slice(-8).some(message => {
+    const cardType = String((message.contextData as any)?.cardType || message.contextType || '').toLowerCase()
+    return cardType.includes('field') || cardType.includes('canvassing') || cardType.includes('property_research') || cardType.includes('property_memory') || cardType.includes('street_game_plan')
+  })
+  const inputMode = (isInWorkspace && currentWorkspace?.projectId) || recentFieldContext ? 'field' : 'command'
 
   useEffect(() => {
     if (!autoTTS || isStreaming || isWorkspaceTyping || !displayMessages.length || displayMessages.length === prevMsgCount.current) return
@@ -663,6 +668,7 @@ export default function Page() {
             disabled={inputDisabled}
             isWorking={isAIWorking}
             placeholder={isInWorkspace ? 'Message Jobrolo about this job…' : 'Message Jobrolo…'}
+            mode={inputMode}
           />
         </div>
       </div>
@@ -739,9 +745,9 @@ function StartCreateMenu({
         />
         <StartMenuItem
           icon={<MapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
-          title="Field / Canvassing"
-          detail="Use current location for field work."
-          onClick={() => onPrompt('Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I am not at a saved job, help me canvass from here.')}
+          title="Field"
+          detail="Use current location for inspections, door notes, photos, and jobsite work."
+          onClick={() => onPrompt('Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I just landed an inspection, use my location, research the property if configured, confirm the owner/address with me, then start the inspection photo workflow.')}
         />
         <StartMenuItem
           icon={<Upload className="h-4 w-4 text-slate-600 dark:text-slate-300" />}
