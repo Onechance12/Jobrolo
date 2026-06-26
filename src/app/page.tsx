@@ -9,6 +9,8 @@ import { WorkspaceSidebar } from '@/components/jobrolo/workspace-sidebar'
 import { MessageBubble, StreamingBubble } from '@/components/jobrolo/message-bubble'
 import { ChatInput } from '@/components/jobrolo/chat-input'
 import { UploadProgressIndicator } from '@/components/jobrolo/upload-progress'
+import { FieldCopilotDrawer } from '@/components/jobrolo/field-copilot-drawer'
+import { FieldEntryStrip } from '@/components/jobrolo/field-entry-strip'
 import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
 import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell } from 'lucide-react'
@@ -21,6 +23,7 @@ export default function Page() {
   const [autoTTS, setAutoTTS] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [fieldCopilotOpen, setFieldCopilotOpen] = useState(false)
   const proactiveRunKey = useRef<string | null>(null)
   const [userName, setUserName] = useState('')
   const uploadProgress = useChatStore(s => s.uploadProgress)
@@ -206,6 +209,29 @@ export default function Page() {
   const handleStop = useCallback(() => {
     isInWorkspace ? stopWorkspaceMessage() : stopMessage()
   }, [isInWorkspace, stopMessage, stopWorkspaceMessage])
+
+  const insertPrompt = useCallback((text: string) => {
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+  }, [])
+
+  const handleFieldEvent = useCallback((event: { action: string; title: string; summary?: string; mode?: string }) => {
+    if (!isInWorkspace) return
+    addWorkspaceMessage({
+      id: `field-local-${Date.now()}`,
+      role: 'system',
+      content: event.summary ? `${event.title}\n${event.summary}` : event.title,
+      contextType: 'field_event',
+      contextData: {
+        cardType: 'field_event',
+        action: event.action,
+        mode: event.mode ?? 'field',
+        title: event.title,
+        summary: event.summary,
+        projectId: currentWorkspace?.projectId ?? null,
+      },
+      createdAt: new Date().toISOString(),
+    })
+  }, [isInWorkspace, addWorkspaceMessage, currentWorkspace?.projectId])
 
   const appendProactiveMessages = useCallback((newMessages: ClientMessage[]) => {
     if (!newMessages.length) return
@@ -408,11 +434,21 @@ export default function Page() {
 
               {isInWorkspace && currentWorkspace?.projectId && (
                 <button
-                  onClick={() => runProactiveOperator(true)}
+                  onClick={() => setFieldCopilotOpen(true)}
                   className="hidden sm:flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
-                  aria-label="Post field briefing to chat"
+                  aria-label="Open field briefing"
                 >
                   <MapPin className="h-3.5 w-3.5" /> Field brief
+                </button>
+              )}
+
+              {!isInWorkspace && (
+                <button
+                  onClick={() => insertPrompt('Help me canvass where I am right now.')}
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-background p-2 text-xs font-medium text-foreground shadow-sm hover:bg-muted sm:px-3 sm:py-1.5"
+                  aria-label="Canvass from my current location"
+                >
+                  <MapPin className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Canvass</span>
                 </button>
               )}
 
@@ -481,6 +517,15 @@ export default function Page() {
             </div>
           </div>
         </header>
+
+        {isInWorkspace && currentWorkspace?.projectId && (
+          <FieldEntryStrip
+            workspace={currentWorkspace}
+            onOpenFieldCopilot={() => setFieldCopilotOpen(true)}
+            onSendPrompt={insertPrompt}
+            onFieldEvent={handleFieldEvent}
+          />
+        )}
 
         {/* Conversation — the heart of the app */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-2">
@@ -551,6 +596,14 @@ export default function Page() {
           onClose={() => setInviteOpen(false)}
         />
       )}
+
+      {currentWorkspace?.projectId ? (
+        <FieldCopilotDrawer
+          open={fieldCopilotOpen}
+          onOpenChange={setFieldCopilotOpen}
+          projectId={currentWorkspace.projectId}
+        />
+      ) : null}
 
     </div>
   )

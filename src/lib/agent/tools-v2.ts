@@ -3393,7 +3393,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'log_field_action',
-    description: 'Log a Field Copilot quick action such as arrived, inspection started, no answer, adjuster present, customer signed, production started, need material, issue found, or completed. This writes to the field visit, appointment status, project timeline, workspace event cards, and role inbox routing. Requires approval in chat; direct field UI buttons can call the API.',
+    description: 'Log a Field Copilot quick action such as arrived, inspection started, no answer, adjuster present, customer signed, production started, need material, issue found, or completed. This writes to the field visit, appointment status, project timeline, workspace event cards, and role inbox routing. Low-risk field logs run directly; actions like material requests/issues still create review items for the right role.',
     schema: z.object({
       projectId: z.string().min(1),
       appointmentId: z.string().optional(),
@@ -3407,7 +3407,6 @@ export const TOOLS: ToolDef[] = [
       signatureRequestId: z.string().optional(),
     }),
     allowedChannels: ['main', 'crew', 'management', 'sales', 'insurance', 'customer'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await executeFieldAction(await buildTrustedToolTenantContext(contractorId, ctx), args)
       if (!result) return { success: false, data: null, error: 'Project not found or field action failed' }
@@ -3568,12 +3567,11 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'upsert_property_memory',
-    description: 'Create or update a property memory record for a house without making it a lead/customer. Store property/workflow observations like new roof, missing shingles, renter, no soliciting, visible damage, follow-up reason, and roof opportunity score. Requires approval.',
+    description: 'Create or update a property memory record for a house without making it a lead/customer. Store property/workflow observations like new roof, missing shingles, renter, no soliciting, visible damage, follow-up reason, and roof opportunity score.',
     schema: z.object({
       address: z.string().optional(), city: z.string().optional(), state: z.string().optional(), postalCode: z.string().optional(), homeownerName: z.string().optional(), phone: z.string().optional(), primaryLeadId: z.string().optional(), customerId: z.string().optional(), projectId: z.string().optional(), sessionId: z.string().optional(), propertyType: z.string().optional(), occupancyStatus: z.string().optional(), solicitationStatus: z.string().optional(), roofCondition: z.string().optional(), roofAgeSignal: z.string().optional(), damageSignal: z.string().optional(), opportunityScore: z.number().optional(), priority: z.string().optional(), status: z.string().optional(), summary: z.string().optional(), notes: z.string().optional(), tags: z.array(z.string()).optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional(),
     }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const property = await upsertPropertyMemory(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { property, card: { cardType: 'property_memory', propertyMemoryId: property.id, address: property.address, roofCondition: property.roofCondition, damageSignal: property.damageSignal, solicitationStatus: property.solicitationStatus, occupancyStatus: property.occupancyStatus, opportunityScore: property.opportunityScore, status: property.status } } }
@@ -3581,10 +3579,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_property_observation',
-    description: 'Record a property-level observation such as new roof, visible missing shingles, tarp/felt paper, hail/wind damage, no-soliciting sign, renter, dog/gate, or general note. Requires approval.',
+    description: 'Record a property-level observation such as new roof, visible missing shingles, tarp/felt paper, hail/wind damage, no-soliciting sign, renter, dog/gate, or general note.',
     schema: z.object({ propertyMemoryId: z.string().optional(), canvassingLeadId: z.string().optional(), sessionId: z.string().optional(), type: z.string().min(1), title: z.string().optional(), summary: z.string().optional(), roofCondition: z.string().optional(), damageSignal: z.string().optional(), severity: z.string().optional(), confidence: z.number().optional(), photoDocumentId: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const observation = await recordPropertyObservation(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { observation, card: { cardType: 'property_observation', observationId: observation.id, propertyMemoryId: observation.propertyMemoryId, type: observation.type, title: observation.title, summary: observation.summary } } }
@@ -3592,10 +3589,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_door_attempt',
-    description: 'Record a door attempt/outcome against property memory: no answer, spoke, interested, follow-up, not interested, renter, no soliciting, do not knock, or inspection set. Requires approval.',
+    description: 'Record a door attempt/outcome against property memory: no answer, spoke, interested, follow-up, not interested, renter, no soliciting, do not knock, or inspection set.',
     schema: z.object({ propertyMemoryId: z.string().optional(), canvassingLeadId: z.string().optional(), sessionId: z.string().optional(), outcome: z.string().min(1), contactName: z.string().optional(), contactRole: z.string().optional(), summary: z.string().optional(), scriptUsed: z.string().optional(), objection: z.string().optional(), nextStep: z.string().optional(), followUpAt: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const attempt = await recordDoorAttempt(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { attempt, card: { cardType: 'door_attempt', attemptId: attempt.id, propertyMemoryId: attempt.propertyMemoryId, outcome: attempt.outcome, summary: attempt.summary, followUpAt: attempt.followUpAt } } }
@@ -3603,10 +3599,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_canvassing_game_plan',
-    description: 'Create a partner-style canvassing game plan from property memory, follow-ups, opportunity signals, rep energy/mindset, focus mode, and territory history. Should feel like a supportive partner, not a boss. Requires approval.',
+    description: 'Create a partner-style canvassing game plan from property memory, follow-ups, opportunity signals, rep energy/mindset, focus mode, and territory history. Should feel like a supportive partner, not a boss.',
     schema: z.object({ sessionId: z.string().optional(), title: z.string().optional(), territoryName: z.string().optional(), focusMode: z.string().optional(), energyLevel: z.string().optional(), customerFocus: z.string().optional(), timeBudgetMinutes: z.number().optional(), goalDoors: z.number().optional(), goalConversations: z.number().optional(), goalInspections: z.number().optional(), notes: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await createCanvassingGamePlan(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { ...result, card: { cardType: 'canvassing_game_plan', planId: result.plan.id, title: result.plan.title, focusMode: result.plan.focusMode, strategySummary: result.plan.strategySummary, recommendedStart: result.plan.recommendedStart, goals: { doors: result.plan.goalDoors, conversations: result.plan.goalConversations, inspections: result.plan.goalInspections }, recommendations: result.recommendations.recommendations } } }
@@ -3614,13 +3609,12 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'research_property_now',
-    description: 'Actively research a house/property on demand from an address or current GPS context. Use when the rep says "I am approaching this house", "research this property", or asks who owns/what is known about a house. Creates a research run and candidate cards; candidates should be confirmed before saving to long-term property memory. Requires approval because it stores research history.',
+    description: 'Actively research a house/property on demand from an address or current GPS context. Use when the rep says "I am approaching this house", "research this property", or asks who owns/what is known about a house. Creates a research run and candidate cards; candidates should be confirmed before saving to long-term property memory.',
     schema: z.object({
       mode: z.string().optional(), query: z.string().optional(), address: z.string().optional(), city: z.string().optional(), state: z.string().optional(), postalCode: z.string().optional(), streets: z.array(z.string()).optional(), focusMode: z.string().optional(), energyLevel: z.string().optional(), mindset: z.string().optional(), timeBudgetMinutes: z.number().optional(), goalDoors: z.number().optional(), goalConversations: z.number().optional(), goalInspections: z.number().optional(), notes: z.string().optional(), allowProviderLookup: z.boolean().optional(),
       location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional(),
     }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await researchPropertyNow(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
@@ -3628,10 +3622,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'confirm_property_research_candidate',
-    description: 'Confirm a researched property candidate and optionally save it into long-term PropertyMemory. Use after the user confirms the correct house/owner/address. Requires approval.',
+    description: 'Confirm a researched property candidate and optionally save it into long-term PropertyMemory. Use after the user confirms the correct house/owner/address.',
     schema: z.object({ researchRunId: z.string().min(1), candidateId: z.string().optional(), createMemory: z.boolean().optional(), status: z.string().optional(), notes: z.string().optional(), confirmedOwnerName: z.string().optional(), confirmedAddress: z.string().optional() }),
     allowedChannels: ['main', 'sales', 'management', 'crew'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await confirmPropertyResearchCandidate(await buildTrustedToolTenantContext(contractorId, ctx), args.researchRunId, args)
       return { success: true, data: result }
@@ -3650,10 +3643,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'research_streets_for_canvassing',
-    description: 'Research streets on demand and build a supportive partner-style street game plan. Use when the user says they want to work Elm Street/Zoe Street or asks for a canvassing plan. Pulls cached property memory first and optionally configured property data provider results. Requires approval because it stores a research run/game plan.',
+    description: 'Research streets on demand and build a supportive partner-style street game plan. Use when the user says they want to work Elm Street/Zoe Street or asks for a canvassing plan. Pulls cached property memory first and optionally configured property data provider results.',
     schema: z.object({ streets: z.array(z.string()).min(1), city: z.string().optional(), state: z.string().optional(), postalCode: z.string().optional(), focusMode: z.string().optional(), energyLevel: z.string().optional(), mindset: z.string().optional(), timeBudgetMinutes: z.number().optional(), goalDoors: z.number().optional(), goalConversations: z.number().optional(), goalInspections: z.number().optional(), notes: z.string().optional(), allowProviderLookup: z.boolean().optional() }),
     allowedChannels: ['main', 'sales', 'management'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await researchPropertyNow(await buildTrustedToolTenantContext(contractorId, ctx), { ...args, mode: 'street_game_plan' })
       return { success: true, data: result }
@@ -3672,7 +3664,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'create_canvassing_lead_at_location',
-    description: 'Create a canvassing lead/pin from the current field GPS location when the user is standing at a house that does not yet have a customer or project. Requires approval in chat.',
+    description: 'Create a canvassing lead/pin from the current field GPS location when the user is standing at a house that does not yet have a customer or project.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),
@@ -3683,7 +3675,6 @@ export const TOOLS: ToolDef[] = [
       location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional(),
     }),
     allowedChannels: ['main', 'sales', 'management'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const lead = await createCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { lead, card: { cardType: 'canvassing_lead', leadId: lead.id, address: lead.address, homeownerName: lead.homeownerName, phone: lead.phone, status: lead.status, latitude: lead.latitude, longitude: lead.longitude } } }
@@ -3701,10 +3692,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'start_canvassing_session',
-    description: 'Start a canvassing session/territory for a rep or crew. This creates a field session and posts a chat-native canvassing session card. Requires approval.',
+    description: 'Start a canvassing session/territory for a rep or crew. This creates a field session and posts a chat-native canvassing session card.',
     schema: z.object({ title: z.string().optional(), territoryName: z.string().optional(), notes: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const session = await startCanvassingSession(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { session, card: { cardType: 'canvassing_session', sessionId: session.id, title: session.title, territoryName: session.territoryName, status: session.status } } }
@@ -3712,10 +3702,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'log_canvassing_activity',
-    description: 'Log a canvassing activity for a lead/session such as knock, no_answer, interested, follow_up, not_interested, note, or photo. Updates the lead status when supplied. Requires approval.',
+    description: 'Log a canvassing activity for a lead/session such as knock, no_answer, interested, follow_up, not_interested, note, or photo. Updates the lead status when supplied.',
     schema: z.object({ leadId: z.string().optional(), sessionId: z.string().optional(), type: z.string().min(1), summary: z.string().optional(), status: z.string().optional(), notes: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const result = await logCanvassingActivity(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
