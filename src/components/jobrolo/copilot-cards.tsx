@@ -111,6 +111,11 @@ function openInspectionPhotoIntake(section?: string | null) {
   window.dispatchEvent(new CustomEvent('jobrolo:open-inspection-photo-intake', { detail: { section: section || null } }))
 }
 
+function openFieldMap() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event('jobrolo:open-field-map'))
+}
+
 function inspectionSectionId(label: string) {
   const value = String(label || '').toLowerCase()
   if (value.includes('front')) return 'front_elevation'
@@ -877,6 +882,9 @@ export function FieldInspectionLeadCard({ data }: { data?: any }) {
         <Button size="sm" onClick={() => openInspectionPhotoIntake(null)}>
           Start inspection
         </Button>
+        <Button size="sm" variant="outline" onClick={openFieldMap}>
+          Open map
+        </Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(researchPrompt)}>
           Research property
         </Button>
@@ -907,6 +915,7 @@ export function CanvassingSessionCard({ data }: { data?: any }) {
       <CardFooter className="border-t bg-background/60 py-2">
         <Button size="sm" onClick={() => insertJobroloPrompt(`Keep this field run in chat${data?.sessionId ? ` (session ID: ${data.sessionId})` : ''}. Ask what I want to do next and offer: log a door, start inspection, research current property, add note, or end run.`)}>Continue in chat</Button>
         <Button size="sm" variant="outline" onClick={() => openInspectionPhotoIntake(null)}>Start inspection</Button>
+        <Button size="sm" variant="outline" onClick={openFieldMap}>Open map</Button>
       </CardFooter>
     </Card>
   )
@@ -933,6 +942,7 @@ export function CanvassingLeadCard({ data }: { data?: any }) {
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
         <Button size="sm" onClick={() => openInspectionPhotoIntake(null)}>Start inspection</Button>
+        <Button size="sm" variant="outline" onClick={openFieldMap}>Open map</Button>
         {data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Open the job chat/thread for project ${data.projectId} and brief me on what to do next.`)}>Open job chat</Button> : null}
         {leadId && !data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Convert this field lead into a customer and project after confirming the owner/address details. Lead ID: ${leadId}`)}>Create customer/job</Button> : null}
       </CardFooter>

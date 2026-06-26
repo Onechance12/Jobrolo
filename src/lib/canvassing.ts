@@ -73,6 +73,12 @@ function sessionMetadata(input: StartCanvassingSessionInput) {
   })
 }
 
+function isFieldLeadInput(input: CreateCanvassingLeadInput) {
+  const source = String(input.source ?? '').toLowerCase()
+  const status = String(input.status ?? '').toLowerCase()
+  return source.includes('field') || source.includes('inspection') || status === 'inspection_set' || Boolean(input.metadata?.fieldInspection)
+}
+
 async function createSessionActivity(ctx: TenantContext, sessionId: string, input: { type: string; summary: string; location?: CanvassingLocationInput | null; metadata?: Record<string, unknown> | null }) {
   const loc = normalizeLocation(input.location)
   return db.canvassingActivity.create({
@@ -118,6 +124,8 @@ export async function startCanvassingSession(ctx: TenantContext, input: StartCan
 export async function updateCanvassingSession(ctx: TenantContext, sessionId: string, input: { status?: string | null; title?: string | null; territoryName?: string | null; notes?: string | null }) {
   const existing = await db.canvassingSession.findFirst({ where: { id: sessionId, contractorId: ctx.contractorId } })
   if (!existing) return null
+  const existingMeta = safeJson<any>(existing.metadataJson, {})
+  const isFieldMode = existingMeta?.startedFrom === 'field_chat' || /field/i.test(existing.title ?? '')
   const status = input.status ?? undefined
   const session = await db.canvassingSession.update({
     where: { id: existing.id },
@@ -130,16 +138,18 @@ export async function updateCanvassingSession(ctx: TenantContext, sessionId: str
     },
   })
   if (status) {
-    await createSessionActivity(ctx, session.id, { type: `session_${status}`, summary: `Canvassing session ${status}` })
+    await createSessionActivity(ctx, session.id, { type: `session_${status}`, summary: `${isFieldMode ? 'Field session' : 'Canvassing session'} ${status}` })
   }
   return session
 }
 
 export async function createCanvassingLead(ctx: TenantContext, input: CreateCanvassingLeadInput) {
   const loc = normalizeLocation(input.location)
+  const isFieldLead = isFieldLeadInput(input)
+  const leadLabel = isFieldLead ? 'field inspection lead' : 'canvassing lead'
   if (input.sessionId) {
     const session = await db.canvassingSession.findFirst({ where: { id: input.sessionId, contractorId: ctx.contractorId } })
-    if (!session) throw new Error('Canvassing session not found')
+    if (!session) throw new Error(`${isFieldLead ? 'Field session' : 'Canvassing session'} not found`)
   }
   const lead = await db.canvassingLead.create({
     data: {
@@ -151,7 +161,7 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
       phone: input.phone?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
       status: input.status ?? 'new',
-      source: input.source ?? 'canvassing_map',
+      source: input.source ?? (isFieldLead ? 'field_chat' : 'canvassing_map'),
       latitude: loc?.lat,
       longitude: loc?.lng,
       metadataJson: input.metadata ? JSON.stringify(input.metadata) : undefined,
@@ -165,8 +175,8 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
     phone: lead.phone,
     status: lead.status === 'follow_up' ? 'follow_up' : 'watch',
     notes: lead.notes,
-    location: loc ? { lat: loc.lat, lng: loc.lng, accuracyMeters: loc.accuracyMeters ?? undefined, source: loc.source ?? 'canvassing_lead' } : undefined,
-    dataSource: { source: 'canvassing_lead_created', leadId: lead.id, sessionId: input.sessionId ?? null },
+    location: loc ? { lat: loc.lat, lng: loc.lng, accuracyMeters: loc.accuracyMeters ?? undefined, source: loc.source ?? (isFieldLead ? 'field_lead' : 'canvassing_lead') } : undefined,
+    dataSource: { source: isFieldLead ? 'field_lead_created' : 'canvassing_lead_created', leadId: lead.id, sessionId: input.sessionId ?? null },
   }).catch(() => null)
 
   if (propertyMemory && lead.notes) {
@@ -175,9 +185,9 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
       canvassingLeadId: lead.id,
       sessionId: input.sessionId,
       type: 'note',
-      title: 'Initial canvassing note',
+      title: isFieldLead ? 'Initial field note' : 'Initial canvassing note',
       summary: lead.notes,
-      location: loc ? { lat: loc.lat, lng: loc.lng, accuracyMeters: loc.accuracyMeters ?? undefined, source: loc.source ?? 'canvassing_lead' } : undefined,
+      location: loc ? { lat: loc.lat, lng: loc.lng, accuracyMeters: loc.accuracyMeters ?? undefined, source: loc.source ?? (isFieldLead ? 'field_lead' : 'canvassing_lead') } : undefined,
       metadata: { leadId: lead.id },
     }).catch(() => null)
   }
@@ -189,10 +199,10 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
       leadId: lead.id,
       userId: ctx.user?.id,
       type: 'lead_created',
-      summary: `Created canvassing lead${lead.address ? ` at ${lead.address}` : ''}`,
+      summary: `Created ${leadLabel}${lead.address ? ` at ${lead.address}` : ''}`,
       latitude: loc?.lat,
       longitude: loc?.lng,
-      metadataJson: JSON.stringify({ source: input.source ?? 'canvassing_map' }),
+      metadataJson: JSON.stringify({ source: input.source ?? (isFieldLead ? 'field_chat' : 'canvassing_map') }),
     },
   }).catch(() => null)
 
@@ -205,17 +215,17 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
         latitude: loc.lat,
         longitude: loc.lng,
         accuracyMeters: loc.accuracyMeters ?? undefined,
-        source: loc.source ?? 'canvassing_lead',
+        source: loc.source ?? (isFieldLead ? 'field_lead' : 'canvassing_lead'),
         metadataJson: JSON.stringify({ leadId: lead.id, sessionId: input.sessionId ?? null }),
       },
     }).catch(() => null)
   }
 
   await createGlobalCanvassingInbox(ctx, {
-    type: 'canvassing_lead',
-    title: `New canvassing lead${lead.address ? `: ${lead.address}` : ''}`,
-    summary: lead.homeownerName ? `${lead.homeownerName}${lead.phone ? ` · ${lead.phone}` : ''}` : (lead.notes || 'A new canvassing lead was created.'),
-    payload: { cardType: 'canvassing_lead', leadId: lead.id, sessionId: lead.sessionId, address: lead.address, homeownerName: lead.homeownerName, phone: lead.phone, status: lead.status, latitude: lead.latitude, longitude: lead.longitude },
+    type: isFieldLead ? 'field_inspection_lead' : 'canvassing_lead',
+    title: `${isFieldLead ? 'New field inspection lead' : 'New canvassing lead'}${lead.address ? `: ${lead.address}` : ''}`,
+    summary: lead.homeownerName ? `${lead.homeownerName}${lead.phone ? ` · ${lead.phone}` : ''}` : (lead.notes || `A new ${leadLabel} was created.`),
+    payload: { cardType: isFieldLead ? 'field_inspection_lead' : 'canvassing_lead', leadId: lead.id, sessionId: lead.sessionId, address: lead.address, homeownerName: lead.homeownerName, phone: lead.phone, status: lead.status, latitude: lead.latitude, longitude: lead.longitude },
   })
 
   return lead

@@ -17,6 +17,12 @@ import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, C
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
+function isOpenMapRequest(text: string) {
+  const firstLine = text.split('\n')[0]?.toLowerCase().replace(/[’']/g, "'").replace(/[?.!]/g, '').trim() || ''
+  return /^(open|show|pull up|bring up|launch)\s+(the\s+)?(field\s+|job\s+|current\s+)?map\b/.test(firstLine)
+    || /^(map)(\s+where i am|\s+where i'm at|\s+my location|\s+current location|\s+here)?$/.test(firstLine)
+}
+
 export default function Page() {
   const [initialLoading, setInitialLoading] = useState(true)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
@@ -203,9 +209,43 @@ export default function Page() {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, workspaceMessages, isStreaming, isWorkspaceTyping, streamingText, workspaceStreamingText])
 
-  const handleSend = useCallback((args: { text: string; displayText?: string; attachments?: File[] }) => {
+  const openFieldMap = useCallback(() => {
+    const current = `${window.location.pathname}${window.location.search}` || '/'
+    const returnTo = current.startsWith('/canvassing') ? '/' : current
+    window.location.assign(`/canvassing?returnTo=${encodeURIComponent(returnTo)}`)
+  }, [])
+
+  const handleSend = useCallback((args: { text: string; displayText?: string; attachments?: File[]; uploadFields?: Record<string, string> }) => {
+    const visibleText = (args.displayText ?? args.text).trim()
+    if (visibleText && !args.attachments?.length && isOpenMapRequest(visibleText)) {
+      const userMessage: ClientMessage = { id: crypto.randomUUID(), role: 'user', content: visibleText, createdAt: new Date().toISOString() }
+      const assistantMessage: ClientMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Opening the field map. This is just the map overlay — I am not starting a canvassing run or creating a lead.',
+        contextType: 'field_event',
+        contextData: {
+          cardType: 'field_event',
+          action: 'open_map',
+          mode: 'field',
+          title: 'Opening field map',
+          summary: 'Map opened without creating a field lead, canvassing run, customer, or project.',
+          projectId: currentWorkspace?.projectId ?? null,
+        },
+        createdAt: new Date().toISOString(),
+      }
+      if (isInWorkspace) {
+        addWorkspaceMessage(userMessage)
+        addWorkspaceMessage(assistantMessage)
+      } else {
+        addGlobalMessage(userMessage)
+        addGlobalMessage(assistantMessage)
+      }
+      window.setTimeout(openFieldMap, 80)
+      return { ok: true }
+    }
     return isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
-  }, [isInWorkspace, sendWorkspaceMessage, sendMessage])
+  }, [addGlobalMessage, addWorkspaceMessage, currentWorkspace?.projectId, isInWorkspace, openFieldMap, sendWorkspaceMessage, sendMessage])
 
   const handleStop = useCallback(() => {
     isInWorkspace ? stopWorkspaceMessage() : stopMessage()
@@ -314,6 +354,11 @@ export default function Page() {
     window.dispatchEvent(new Event('jobrolo:open-file-picker'))
   }, [])
 
+  const handleStartMap = useCallback(() => {
+    setStartMenuOpen(false)
+    openFieldMap()
+  }, [openFieldMap])
+
   const openWorkspaceChat = useCallback(async (workspaceId: string, chatId?: string | null, opts?: { updateUrl?: boolean }) => {
     if (!workspaceId) return
     setStartMenuOpen(false)
@@ -357,6 +402,10 @@ export default function Page() {
       void openWorkspaceChat(String(detail.workspaceId), detail.chatId ? String(detail.chatId) : undefined)
     }
 
+    function onOpenFieldMap() {
+      openFieldMap()
+    }
+
     function onPopState() {
       const params = new URLSearchParams(window.location.search)
       const workspaceId = params.get('workspaceId')
@@ -366,12 +415,14 @@ export default function Page() {
     }
 
     window.addEventListener('jobrolo:open-workspace-chat', onOpenWorkspaceChat)
+    window.addEventListener('jobrolo:open-field-map', onOpenFieldMap)
     window.addEventListener('popstate', onPopState)
     return () => {
       window.removeEventListener('jobrolo:open-workspace-chat', onOpenWorkspaceChat)
+      window.removeEventListener('jobrolo:open-field-map', onOpenFieldMap)
       window.removeEventListener('popstate', onPopState)
     }
-  }, [exitWorkspace, openWorkspaceChat])
+  }, [exitWorkspace, openFieldMap, openWorkspaceChat])
 
   const handleExitToCommandCenter = useCallback(() => {
     exitWorkspace()
@@ -556,6 +607,7 @@ export default function Page() {
                         onPrivateChat={handleNewChat}
                         onPrompt={handleStartPrompt}
                         onUpload={handleStartUpload}
+                        onOpenMap={handleStartMap}
                       />
                     </>
                   )}
@@ -701,10 +753,12 @@ function StartCreateMenu({
   onPrivateChat,
   onPrompt,
   onUpload,
+  onOpenMap,
 }: {
   onPrivateChat: () => void
   onPrompt: (prompt: string) => void
   onUpload: () => void
+  onOpenMap: () => void
 }) {
   return (
     <div className="absolute right-0 top-11 z-30 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl">
@@ -745,7 +799,13 @@ function StartCreateMenu({
         />
         <StartMenuItem
           icon={<MapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
-          title="Field"
+          title="Open map"
+          detail="Map overlay only. Does not create a lead or canvassing run."
+          onClick={onOpenMap}
+        />
+        <StartMenuItem
+          icon={<MapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
+          title="Field check-in"
           detail="Use current location for inspections, door notes, photos, and jobsite work."
           onClick={() => onPrompt('Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I just landed an inspection, use my location, research the property if configured, confirm the owner/address with me, then start the inspection photo workflow.')}
         />

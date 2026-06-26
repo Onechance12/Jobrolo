@@ -3713,7 +3713,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'start_field_inspection_lead',
-    description: 'Save a newly landed field inspection from the current GPS location when the user is canvassing or at an unknown house and there is not yet a customer/project/appointment. Use for phrases like "walking up for an inspection", "I just landed this inspection", "they were outside mowing", "add this inspection at my location", or "search customer info and add my location". Creates or reuses an active canvassing session, creates an inspection-set lead/pin, logs the door outcome, and optionally runs property lookup. Does not create a real customer/project until the user confirms conversion.',
+    description: 'Save a newly landed field inspection from the current GPS/location when the user is at an unknown house and there is not yet a confirmed customer/project/appointment. Use for phrases like "walking up for an inspection", "I just landed this inspection", "they were outside mowing", "add this inspection at my location", or "search customer info and add my location". Creates or reuses an active FIELD session, creates an inspection-set lead/pin, logs the field outcome, and optionally runs property lookup. This is not a door-knocking canvassing run and it does not create a real customer/project until the user confirms conversion.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),
@@ -3815,7 +3815,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'create_canvassing_lead_at_location',
-    description: 'Create a canvassing lead/pin from the current field GPS location when the user is standing at a house that does not yet have a customer or project.',
+    description: 'Create a door-knocking canvassing lead/pin from the current GPS location when the user is working a canvassing territory and wants to log a house/door that does not yet have a customer or project. Do NOT use this for a newly landed inspection; use start_field_inspection_lead instead.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),
@@ -3833,7 +3833,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'get_canvassing_map',
-    description: 'Get the canvassing map/session state: active sessions, GPS lead pins, statuses, recent activity, and counts. Use when the user asks what has been canvassed, where reps are, or which leads need follow-up.',
+    description: 'Read saved field/canvassing map data: active sessions, GPS lead pins, statuses, recent activity, and counts. Use for questions like "what has been canvassed", "which leads need follow-up", or "show saved field pins". This is read-only data retrieval; it does NOT open the visual map UI and must not create a session/lead.',
     schema: z.object({ sessionId: z.string().optional(), status: z.string().optional(), includeConverted: z.boolean().optional(), limit: z.number().optional() }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
@@ -3843,7 +3843,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'start_canvassing_session',
-    description: 'Start a door-knocking canvassing session/territory for a rep or crew only when the user explicitly wants canvassing, a street run, or territory work. Do NOT use this for "where I am", "at this house", "I landed an inspection", or property lookup; use research_property_now or start_field_inspection_lead instead.',
+    description: 'Start a door-knocking canvassing session/territory for a rep or crew only when the user explicitly wants canvassing, a street run, or territory work. Do NOT use this for "open map", "where I am", "at this house", "I landed an inspection", "walking up for an inspection", or property lookup; use read-only map navigation, research_property_now, or start_field_inspection_lead instead.',
     schema: z.object({ title: z.string().optional(), territoryName: z.string().optional(), notes: z.string().optional(), location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional() }),
     allowedChannels: ['main', 'sales', 'management'],
     execute: async (args, contractorId, ctx) => {
