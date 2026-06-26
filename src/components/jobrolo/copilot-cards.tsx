@@ -722,6 +722,7 @@ export function StreetGamePlanCard({ data }: { data?: any }) {
 
 export function InboxActionCard({ item, onChanged, className }: { item?: InboxLike | null; onChanged?: () => void; className?: string }) {
   const [decisionState, setDecisionState] = useState<'idle' | 'approving' | 'rejecting' | 'done' | 'failed'>('idle')
+  const [decisionMessage, setDecisionMessage] = useState<string | null>(null)
   const payload = useMemo(() => parsePayload(item), [item])
   if (!item) return null
   const currentItem = item
@@ -734,16 +735,32 @@ export function InboxActionCard({ item, onChanged, className }: { item?: InboxLi
   async function decide(decision: 'approved' | 'rejected') {
     if (!currentItem.actionRequestId) return
     setDecisionState(decision === 'approved' ? 'approving' : 'rejecting')
+    setDecisionMessage(null)
     try {
       const res = await fetch(`/api/action-requests/${currentItem.actionRequestId}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision }),
       })
-      if (!res.ok) throw new Error('Decision failed')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(String(data?.error || 'Decision failed'))
+      const replay = data?.replayResult
+      if (decision === 'rejected') {
+        setDecisionMessage('Rejected. Jobrolo will not run this action.')
+      } else if (replay && typeof replay === 'object') {
+        if (replay.success) {
+          const msg = replayMessage(replay)
+          setDecisionMessage(msg ? `Approved and completed: ${msg}` : 'Approved and completed.')
+        } else {
+          setDecisionMessage(`Approved, but it did not complete: ${String(replay.error || 'the saved action failed to run')}`)
+        }
+      } else {
+        setDecisionMessage('Decision logged. This request is waiting for its routed workflow.')
+      }
       setDecisionState('done')
       onChanged?.()
-    } catch {
+    } catch (err) {
+      setDecisionMessage(err instanceof Error ? err.message : 'Could not update this request. Try again.')
       setDecisionState('failed')
     }
   }
@@ -764,16 +781,16 @@ export function InboxActionCard({ item, onChanged, className }: { item?: InboxLi
       <CardContent className="space-y-2 text-sm">
         {currentItem.summary ? <p className="text-foreground/90">{currentItem.summary}</p> : null}
         {payload ? <PayloadSummary payload={payload} /> : null}
-        {decisionState === 'failed' ? <p className="text-xs text-rose-600">Could not update this request. Try again.</p> : null}
-        {decisionState === 'done' ? <p className="flex items-center gap-1 text-xs text-blue-700 dark:text-blue-300"><ShieldCheck className="h-3.5 w-3.5" /> Decision logged and routed.</p> : null}
+        {decisionState === 'failed' ? <p className="text-xs text-rose-600">{decisionMessage || 'Could not update this request. Try again.'}</p> : null}
+        {decisionState === 'done' ? <p className="flex items-center gap-1 text-xs text-blue-700 dark:text-blue-300"><ShieldCheck className="h-3.5 w-3.5" /> {decisionMessage || 'Decision logged.'}</p> : null}
       </CardContent>
       {isApproval ? (
         <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-          <Button size="sm" disabled={decisionState !== 'idle'} onClick={() => decide('approved')}>
+          <Button size="sm" disabled={decisionState === 'approving' || decisionState === 'rejecting' || decisionState === 'done'} onClick={() => decide('approved')}>
             {decisionState === 'approving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
             Approve
           </Button>
-          <Button size="sm" variant="outline" disabled={decisionState !== 'idle'} onClick={() => decide('rejected')}>
+          <Button size="sm" variant="outline" disabled={decisionState === 'approving' || decisionState === 'rejecting' || decisionState === 'done'} onClick={() => decide('rejected')}>
             {decisionState === 'rejecting' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-1.5 h-3.5 w-3.5" />}
             Reject
           </Button>
@@ -794,12 +811,23 @@ export function InboxStack({ items, onChanged }: { items: InboxLike[]; onChanged
 }
 
 function PayloadSummary({ payload }: { payload: Record<string, unknown> }) {
+  const approvalRows = approvalRowsFromPayload(payload)
   const material = [payload.quantity, payload.materialName].filter(Boolean).join(' ')
   const note = typeof payload.note === 'string' ? payload.note : null
   const photoCount = Array.isArray(payload.photoDocumentIds) ? payload.photoDocumentIds.length : 0
-  if (!material && !note && !photoCount) return null
+  if (!approvalRows.length && !material && !note && !photoCount) return null
   return (
     <div className="rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">
+      {approvalRows.length ? (
+        <div className="space-y-1">
+          <div className="font-semibold text-foreground">You’re approving:</div>
+          {approvalRows.map((row, index) => (
+            <div key={`${row.label}-${index}`}>
+              {row.label ? <span className="font-medium text-foreground">{row.label}:</span> : null} {row.value}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {material ? <div><span className="font-medium text-foreground">Material:</span> {material}</div> : null}
       {note ? <div><span className="font-medium text-foreground">Note:</span> {note}</div> : null}
       {photoCount ? <div><span className="font-medium text-foreground">Photos:</span> {photoCount} attached</div> : null}
@@ -812,6 +840,64 @@ function parsePayload(item?: InboxLike | null): Record<string, unknown> | null {
   if (item.payload && typeof item.payload === 'object') return item.payload
   if (!item.payloadJson) return null
   try { return JSON.parse(item.payloadJson) as Record<string, unknown> } catch { return null }
+}
+
+function replayMessage(replay: any): string | null {
+  const data = replay?.data
+  const nested = data?.replayResult?.data
+  const candidates = [
+    data?.message,
+    nested?.message,
+    data?.replayResult?.message,
+    replay?.message,
+  ]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+  }
+  return null
+}
+
+function approvalRowsFromPayload(payload: Record<string, unknown>) {
+  const approvalDetails = (payload.approvalDetails && typeof payload.approvalDetails === 'object')
+    ? payload.approvalDetails as Record<string, any>
+    : null
+  const rows: Array<{ label: string; value: string }> = []
+
+  if (approvalDetails?.targetLabel) {
+    rows.push({ label: 'Target', value: String(approvalDetails.targetLabel) })
+  }
+  if (Array.isArray(approvalDetails?.details)) {
+    for (const detail of approvalDetails.details.slice(0, 10)) {
+      if (!detail || detail.value === null || typeof detail.value === 'undefined' || String(detail.value).trim() === '') continue
+      rows.push({ label: String(detail.label || 'Detail'), value: String(detail.value) })
+    }
+  }
+  if (rows.length) return dedupeRows(rows)
+
+  const toolName = typeof payload.toolName === 'string' ? payload.toolName : null
+  const args = payload.args && typeof payload.args === 'object' ? payload.args as Record<string, unknown> : payload
+  if (toolName) rows.push({ label: 'Action', value: humanize(toolName) })
+
+  const preferredKeys = ['customerName', 'customerId', 'documentId', 'nameFilter', 'filename', 'title', 'projectId', 'mode']
+  for (const key of preferredKeys) {
+    const value = args[key]
+    if (value !== null && typeof value !== 'undefined' && String(value).trim() !== '') {
+      rows.push({ label: humanize(key), value: String(value) })
+    }
+  }
+
+  if (!rows.length && toolName) rows.push({ label: 'Tool', value: humanize(toolName) })
+  return dedupeRows(rows).slice(0, 8)
+}
+
+function dedupeRows(rows: Array<{ label: string; value: string }>) {
+  const seen = new Set<string>()
+  return rows.filter(row => {
+    const key = `${row.label}:${row.value}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function humanize(value: string) {

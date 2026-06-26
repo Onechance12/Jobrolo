@@ -55,6 +55,8 @@ const OPERATIONAL_INTENT_PHRASES = [
   'i will link', 'i will import', 'i will extract', 'i will upload', 'i will clear', 'i will proceed',
   'i will now', 'please hold on', 'one moment', 'checking now', 'searching now', 'looking now',
   'first, let me', 'first let me',
+  'requires approval before', 'requires approval to', 'review and approve', 'approval request',
+  'please approve', 'please confirm the deletion request', 'approve the deletion request',
 ]
 
 const COMPLETION_CLAIM_PHRASES = [
@@ -207,7 +209,7 @@ Common recovery examples:
 - If you previously asked whether to link/attach a document/photo and the user replied "yes" or "yea", call link_document_to_customer or the appropriate save/link tool using the prior document/customer context.
 - To create a project/job for a customer, call create_project_for_customer.
 - To delete a customer/client, call delete_customer, not delete_documents_by_name.
-- To approve pending requests after the user says "yes approved" or "yes delete", call decide_pending_action_requests or decide_action_request.
+- To approve pending requests after the user says "yes approved", "yes delete", "yes", or "approved", call decide_pending_action_requests or decide_action_request. If the pending request is delete_customer, pass toolName="delete_customer" and do NOT create a new delete_customer approval.
 - To create a crew/customer/project chat, call create_project_chat.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 

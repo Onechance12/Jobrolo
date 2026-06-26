@@ -16,6 +16,20 @@ function safeJson(value: string | null | undefined) {
   try { return JSON.parse(value) } catch { return null }
 }
 
+function stableStringify(value: unknown): string {
+  if (typeof value === 'undefined') return 'undefined'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+}
+
+function approvalKey(payload: any) {
+  if (payload?.approvalKey) return String(payload.approvalKey)
+  if (payload?.toolName) return `${payload.toolName}:${stableStringify(payload.args ?? {})}`
+  return null
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sizeErr = checkBodySize(req)
   if (sizeErr) return sizeErr
@@ -57,6 +71,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           payloadJson: JSON.stringify({ ...payload, replayResult }),
         },
       }).catch(() => null)
+      if ((replayResult as any)?.success) {
+        const key = approvalKey(payload)
+        if (key) {
+          const pending = await db.actionRequest.findMany({
+            where: { contractorId: ctx.contractorId, type: 'tool_approval', status: { in: ['pending', 'needs_approval'] }, NOT: { id } },
+            select: { id: true, payloadJson: true },
+            take: 50,
+          }).catch(() => [])
+          const duplicateIds = pending.filter(other => approvalKey(safeJson(other.payloadJson)) === key).map(other => other.id)
+          if (duplicateIds.length) {
+            await db.actionRequest.updateMany({ where: { contractorId: ctx.contractorId, id: { in: duplicateIds } }, data: { status: 'rejected', rejectedAt: new Date() } }).catch(() => null)
+            await db.inboxItem.updateMany({ where: { contractorId: ctx.contractorId, actionRequestId: { in: duplicateIds } }, data: { status: 'actioned', actionedAt: new Date() } }).catch(() => null)
+          }
+        }
+      }
     }
 
     return NextResponse.json({ actionRequest, replayResult })

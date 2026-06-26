@@ -75,6 +75,35 @@ function stableStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
 }
 
+function shortRecordNumber(prefix: string, id: string | null | undefined) {
+  const suffix = String(id ?? '').slice(-6).toUpperCase()
+  return suffix ? `${prefix}-${suffix}` : null
+}
+
+function customerNumber(customerOrId: { id?: string | null } | string | null | undefined) {
+  const id = typeof customerOrId === 'string' ? customerOrId : customerOrId?.id
+  return shortRecordNumber('C', id)
+}
+
+function projectNumber(projectOrId: { id?: string | null; title?: string | null } | string | null | undefined) {
+  if (projectOrId && typeof projectOrId === 'object') {
+    const title = projectOrId.title ?? ''
+    const match = title.match(/\bJob\s*#?\s*(\d{4,})\b/i)
+    if (match?.[1]) return `J-${match[1]}`
+    return shortRecordNumber('P', projectOrId.id)
+  }
+  return shortRecordNumber('P', projectOrId)
+}
+
+function withCustomerNumber<T extends { id?: string | null }>(customer: T): T & { clientNumber: string | null; customerNumber: string | null } {
+  const number = customerNumber(customer)
+  return { ...customer, clientNumber: number, customerNumber: number }
+}
+
+function withProjectNumber<T extends { id?: string | null; title?: string | null }>(project: T): T & { projectNumber: string | null } {
+  return { ...project, projectNumber: projectNumber(project) }
+}
+
 async function buildTrustedToolTenantContext(contractorId: string, ctx: ToolContext): Promise<TenantContext> {
   const contractor = await db.contractor.findFirst({
     where: { id: contractorId, status: 'active', deletedAt: null },
@@ -356,7 +385,7 @@ async function resolveCustomerForTool(contractorId: string, input: { customerId?
       where: { id: input.customerId, contractorId },
       select: { id: true, name: true, email: true, phone: true, address: true },
     })
-    return customer ? { customer } : { error: 'Customer not found' as const }
+    return customer ? { customer: withCustomerNumber(customer) } : { error: 'Customer not found' as const }
   }
   const raw = input.customerName || input.name || ''
   const terms = customerSearchTerms(raw)
@@ -378,12 +407,186 @@ async function resolveCustomerForTool(contractorId: string, input: { customerId?
   if (customers.length === 0) return { notFound: true as const, query: raw }
   const normalized = normalizeText(normalizeCustomerFileQuery(raw))
   const exact = customers.find(c => normalizeText(c.name) === normalized || normalizeText(c.email) === normalized || normalizePhone(c.phone) === normalizePhone(raw))
-  if (!exact && customers.length > 1) return { needsClarification: true as const, matches: customers, query: raw }
-  return { customer: exact ?? customers[0] }
+  if (!exact && customers.length > 1) return { needsClarification: true as const, matches: customers.map(withCustomerNumber), query: raw }
+  return { customer: withCustomerNumber(exact ?? customers[0]) }
+}
+
+type ApprovalDetail = {
+  title: string
+  summary: string
+  targetLabel?: string | null
+  destructive?: boolean
+  details?: Array<{ label: string; value: string | number | null }>
+}
+
+function compactApprovalArgs(args: Record<string, unknown>) {
+  return Object.entries(args)
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+    .slice(0, 8)
+    .map(([label, value]) => ({ label, value: typeof value === 'object' ? stableStringify(value).slice(0, 120) : String(value) }))
+}
+
+async function buildApprovalDetailsForTool(name: string, args: Record<string, unknown>, contractorId: string): Promise<ApprovalDetail> {
+  const human = humanizeToolName(name)
+
+  if (name === 'delete_customer') {
+    const customerId = typeof args.customerId === 'string' ? args.customerId : undefined
+    const customerName = typeof args.customerName === 'string' ? args.customerName : undefined
+    const resolved = await resolveCustomerForTool(contractorId, { customerId, customerName })
+    if ('customer' in resolved) {
+      const customer = resolved.customer
+      if (!customer) {
+        return {
+          title: 'Approval needed: Delete client',
+          summary: `Delete client matching "${customerName || customerId || 'unknown'}".`,
+          targetLabel: customerName || customerId,
+          destructive: true,
+          details: compactApprovalArgs(args),
+        }
+      }
+      const [documentCount, projectCount] = await Promise.all([
+        db.document.count({ where: { contractorId, customerId: customer.id } }).catch(() => 0),
+        db.project.count({ where: { contractorId, customerId: customer.id } }).catch(() => 0),
+      ])
+      const number = customerNumber(customer)
+      return {
+        title: `Approval needed: Delete ${customer.name}`,
+        summary: `Delete client ${customer.name}${number ? ` (${number})` : ''}. Existing documents/photos/projects will be kept and detached from this client record.`,
+        targetLabel: `${customer.name}${number ? ` (${number})` : ''}`,
+        destructive: true,
+        details: [
+          { label: 'Action', value: 'Delete client record' },
+          { label: 'Client', value: customer.name },
+          { label: 'Client #', value: number },
+          { label: 'Phone', value: customer.phone },
+          { label: 'Email', value: customer.email },
+          { label: 'Address', value: customer.address },
+          { label: 'Files to keep/detach', value: documentCount },
+          { label: 'Projects to keep/detach', value: projectCount },
+        ],
+      }
+    }
+    if ('needsClarification' in resolved) {
+      return {
+        title: 'Approval needed: Delete client',
+        summary: `Multiple clients matched "${resolved.query}". Choose the exact client before approving deletion.`,
+        targetLabel: resolved.query,
+        destructive: true,
+        details: (resolved.matches ?? []).slice(0, 5).map(c => ({ label: customerNumber(c) ?? 'Client', value: [c.name, c.phone, c.address].filter(Boolean).join(' · ') })),
+      }
+    }
+    return {
+      title: 'Approval needed: Delete client',
+      summary: `Delete client matching "${customerName || customerId || 'unknown'}".`,
+      targetLabel: customerName || customerId,
+      destructive: true,
+      details: compactApprovalArgs(args),
+    }
+  }
+
+  if (name === 'delete_document') {
+    const documentId = typeof args.documentId === 'string' ? args.documentId : ''
+    const doc = documentId ? await db.document.findFirst({
+      where: { id: documentId, contractorId },
+      select: { id: true, originalName: true, fileType: true, status: true, size: true, customer: { select: { id: true, name: true } }, project: { select: { id: true, title: true } } },
+    }).catch(() => null) : null
+    if (doc) {
+      return {
+        title: `Approval needed: Delete ${doc.originalName}`,
+        summary: `Delete file ${doc.originalName}. This removes the saved file and its analysis data.`,
+        targetLabel: doc.originalName,
+        destructive: true,
+        details: [
+          { label: 'Action', value: 'Delete file' },
+          { label: 'File', value: doc.originalName },
+          { label: 'Type', value: doc.fileType },
+          { label: 'Status', value: doc.status },
+          { label: 'Size', value: doc.size ? `${Math.round(doc.size / 1024)} KB` : null },
+          { label: 'Client', value: doc.customer ? `${doc.customer.name}${customerNumber(doc.customer) ? ` (${customerNumber(doc.customer)})` : ''}` : 'Unassigned' },
+          { label: 'Project', value: doc.project ? `${doc.project.title}${projectNumber(doc.project) ? ` (${projectNumber(doc.project)})` : ''}` : 'Unassigned' },
+        ],
+      }
+    }
+    return {
+      title: 'Approval needed: Delete file',
+      summary: `Delete file with documentId ${documentId || 'unknown'}.`,
+      targetLabel: documentId,
+      destructive: true,
+      details: compactApprovalArgs(args),
+    }
+  }
+
+  if (name === 'delete_documents_by_name') {
+    const nameFilter = typeof args.nameFilter === 'string' ? args.nameFilter.trim() : ''
+    const [count, docs] = await Promise.all([
+      nameFilter ? db.document.count({ where: { contractorId, originalName: { contains: nameFilter } } }).catch(() => 0) : Promise.resolve(0),
+      nameFilter ? db.document.findMany({
+        where: { contractorId, originalName: { contains: nameFilter } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { originalName: true },
+      }).catch(() => []) : Promise.resolve([]),
+    ])
+    return {
+      title: `Approval needed: Delete ${count || ''} matching file${count === 1 ? '' : 's'}`.trim(),
+      summary: `Delete ${count} saved file${count === 1 ? '' : 's'} whose filename contains "${nameFilter}".`,
+      targetLabel: nameFilter,
+      destructive: true,
+      details: [
+        { label: 'Action', value: 'Delete matching files' },
+        { label: 'Filename contains', value: nameFilter },
+        { label: 'Matching files', value: count },
+        ...docs.map((doc, index) => ({ label: index === 0 ? 'Examples' : '', value: doc.originalName })),
+      ],
+    }
+  }
+
+  if (name === 'clear_material_prices') {
+    const count = await db.materialItem.count({ where: { contractorId } }).catch(() => 0)
+    return {
+      title: 'Approval needed: Clear material prices',
+      summary: `Delete all ${count} saved material price item${count === 1 ? '' : 's'} for this company.`,
+      targetLabel: 'All material prices',
+      destructive: true,
+      details: [
+        { label: 'Action', value: 'Clear material price database' },
+        { label: 'Rows affected', value: count },
+      ],
+    }
+  }
+
+  if (name === 'import_price_sheet_items') {
+    const documentId = typeof args.documentId === 'string' ? args.documentId : ''
+    const doc = documentId ? await db.document.findFirst({ where: { id: documentId, contractorId }, select: { id: true, originalName: true, fileType: true, extractedData: true } }).catch(() => null) : null
+    const rows = doc?.extractedData ? pendingMaterialItemsFromExtractedData(safeJsonParse<Record<string, any>>(doc.extractedData, {})).length : null
+    return {
+      title: 'Approval needed: Import price sheet',
+      summary: `Import ${rows ?? 'extracted'} material price rows${doc?.originalName ? ` from ${doc.originalName}` : ''}.`,
+      targetLabel: doc?.originalName ?? documentId,
+      destructive: false,
+      details: [
+        { label: 'Action', value: 'Import material price rows' },
+        { label: 'Document', value: doc?.originalName ?? documentId },
+        { label: 'Mode', value: typeof args.mode === 'string' ? args.mode : 'append' },
+        { label: 'Rows', value: rows },
+      ],
+    }
+  }
+
+  return {
+    title: `Approval needed: ${human}`,
+    summary: `Jobrolo wants to run ${human}. Review and approve before execution.`,
+    targetLabel: null,
+    destructive: false,
+    details: compactApprovalArgs(args),
+  }
 }
 
 function inferProjectTitle(input: { title?: string | null; customerName?: string | null; address?: string | null; projectType?: string | null; claimNumber?: string | null; jobNumber?: string | null }) {
-  if (input.title?.trim()) return input.title.trim()
+  if (input.title?.trim()) {
+    const title = input.title.trim()
+    return input.jobNumber && !/\bJob\s*#?\s*\d{4,}\b/i.test(title) ? `Job #${input.jobNumber} — ${title}` : title
+  }
   const type = input.projectType?.trim() || (input.claimNumber ? 'Claim' : 'Roof Project')
   const base = input.customerName?.trim() || input.address?.trim() || 'New Project'
   const title = `${base} ${type}`.trim()
@@ -1008,7 +1211,7 @@ export const TOOLS: ToolDef[] = [
         orderBy: { updatedAt: 'desc' },
         take: 10,
       })
-      return { success: true, data: { count: customers.length, customers } }
+      return { success: true, data: { count: customers.length, customers: customers.map(withCustomerNumber) } }
     },
   },
   {
@@ -1064,6 +1267,8 @@ export const TOOLS: ToolDef[] = [
           limit,
           customers: customers.map(c => ({
             id: c.id,
+            clientNumber: customerNumber(c),
+            customerNumber: customerNumber(c),
             name: c.name,
             email: c.email,
             phone: c.phone,
@@ -1115,9 +1320,11 @@ export const TOOLS: ToolDef[] = [
         data: {
           deleted: true,
           customerId: customer.id,
+          clientNumber: customerNumber(customer),
+          customerNumber: customerNumber(customer),
           customerName: customer.name,
           detached: { documents: documentCount, projects: projectCount, workspaces: workspaceCount },
-          message: `Deleted customer "${customer.name}". Existing documents/photos/projects were kept and detached from that customer record.`,
+          message: `Deleted customer "${customer.name}"${customerNumber(customer) ? ` (${customerNumber(customer)})` : ''}. Existing documents/photos/projects were kept and detached from that customer record.`,
         },
       }
     },
@@ -1187,7 +1394,7 @@ export const TOOLS: ToolDef[] = [
             needsClarification: true,
             query: rawQuery,
             normalizedQuery: normalizeCustomerFileQuery(rawQuery),
-            matches: customers.map(c => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, address: c.address })),
+            matches: customers.map(c => ({ id: c.id, clientNumber: customerNumber(c), customerNumber: customerNumber(c), name: c.name, email: c.email, phone: c.phone, address: c.address })),
             message: 'Multiple saved customers matched. Ask the user which customer file to open before making changes.',
           },
         }
@@ -1261,7 +1468,7 @@ export const TOOLS: ToolDef[] = [
           query: rawQuery,
           normalizedQuery: normalizeCustomerFileQuery(rawQuery),
           searchedTerms: terms,
-          customer,
+          customer: withCustomerNumber(customer),
           counts: {
             projects: projects.length,
             documents: documents.length,
@@ -1271,7 +1478,7 @@ export const TOOLS: ToolDef[] = [
             documentLinks: documentLinks.length,
             recentUnlinkedDocuments: recentUnlinkedDocuments.length,
           },
-          projects,
+          projects: projects.map(p => withProjectNumber(p)),
           workspace: directWorkspace,
           documents: documents.map(compactDocument),
           photos: photos.map(compactDocument),
@@ -1578,7 +1785,7 @@ export const TOOLS: ToolDef[] = [
       if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}. Create or select the customer before creating a project.` } }
       if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer should this project belong to?` } }
       const customer = resolved.customer
-      const jobNumber = args.jobNumber || (args.generateJobNumber ? await generateUniqueJobNumber(contractorId) : null)
+      const jobNumber = args.jobNumber || (args.generateJobNumber === false ? null : await generateUniqueJobNumber(contractorId))
       const created = await createProjectRecordForCustomer(contractorId, ctx, {
         customer,
         title: args.title,
@@ -1593,19 +1800,21 @@ export const TOOLS: ToolDef[] = [
         jobNumber,
         notes: args.notes,
       })
+      const displayProjectNumber = created.jobNumber ? `J-${created.jobNumber}` : projectNumber(created.project)
       return {
         success: true,
         data: {
           created: true,
           projectId: created.project.id,
+          projectNumber: displayProjectNumber,
           title: created.project.title,
-          customer: { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address },
+          customer: withCustomerNumber({ id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address }),
           address: created.project.address,
           status: created.project.status,
           value: created.project.value,
           jobNumber: created.jobNumber,
           workspaceId: created.workspace?.id ?? null,
-          message: `Created project "${created.project.title}" for ${customer.name}.`,
+          message: `Created project "${created.project.title}"${displayProjectNumber ? ` (${displayProjectNumber})` : ''} for ${customer.name}${customerNumber(customer) ? ` (${customerNumber(customer)})` : ''}.`,
         },
       }
     },
@@ -1697,11 +1906,12 @@ export const TOOLS: ToolDef[] = [
           created: true,
           workspaceId: workspace.id,
           projectId: project.id,
+          projectNumber: projectNumber(project),
           projectTitle: project.title,
-          customer,
+          customer: customer ? withCustomerNumber(customer) : null,
           chat,
           seededMessage,
-          message: `Created/opened the ${args.chatType} chat for ${project.title}${seededMessage ? ' and posted the starter note.' : '.'}`,
+          message: `Created/opened the ${args.chatType} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'}`,
         },
       }
     },
@@ -1808,6 +2018,7 @@ export const TOOLS: ToolDef[] = [
         }).catch(() => null)
       }
 
+      const jobNumber = await generateUniqueJobNumber(contractorId)
       const created = await createProjectRecordForCustomer(contractorId, ctx, {
         customer,
         title: `${customer.name} ${doc.fileType === 'scope_of_loss' || doc.aiCategory === 'estimate' ? 'Estimate/Scope' : 'Project'}`,
@@ -1817,6 +2028,7 @@ export const TOOLS: ToolDef[] = [
         deductible,
         claimNumber,
         carrier,
+        jobNumber,
         sourceDocumentId: doc.id,
         notes: `Created from ${doc.originalName}. Extraction confidence: ${doc.extractionConfidence ?? 'unknown'}.`,
       })
@@ -1846,11 +2058,12 @@ export const TOOLS: ToolDef[] = [
           created: true,
           documentId: doc.id,
           projectId: created.project.id,
+          projectNumber: created.jobNumber ? `J-${created.jobNumber}` : projectNumber(created.project),
           title: created.project.title,
-          customer: { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address },
+          customer: withCustomerNumber({ id: customer.id, name: customer.name, phone: customer.phone, email: customer.email, address: customer.address }),
           documentLinked: Boolean(link),
           conflict,
-          message: `Created project "${created.project.title}" from ${doc.originalName} and linked the document.`,
+          message: `Created project "${created.project.title}"${created.jobNumber ? ` (J-${created.jobNumber})` : ''} from ${doc.originalName} and linked the document.`,
         },
       }
     },
@@ -3007,13 +3220,25 @@ export const TOOLS: ToolDef[] = [
         select: { id: true, title: true, summary: true, payloadJson: true, createdAt: true },
       })
 
-      const filtered = rawRequests.filter(req => {
+      const filteredRaw = rawRequests.filter(req => {
         const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown> }>(req.payloadJson, {})
         if (args.toolName && payload.toolName !== args.toolName) return false
         if (args.targetName) {
           const haystack = `${req.title} ${req.summary} ${req.payloadJson ?? ''}`.toLowerCase()
           if (!haystack.includes(args.targetName.toLowerCase())) return false
         }
+        return true
+      })
+      const duplicateIds: string[] = []
+      const seenApprovalKeys = new Set<string>()
+      const filtered = filteredRaw.filter(req => {
+        const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown>; approvalKey?: string }>(req.payloadJson, {})
+        const key = payload.approvalKey || `${payload.toolName ?? req.title}:${stableStringify(payload.args ?? {})}`
+        if (seenApprovalKeys.has(key)) {
+          duplicateIds.push(req.id)
+          return false
+        }
+        seenApprovalKeys.add(key)
         return true
       }).slice(0, limit)
 
@@ -3027,8 +3252,8 @@ export const TOOLS: ToolDef[] = [
             needsClarification: true,
             count: filtered.length,
             requests: filtered.map(r => {
-              const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown> }>(r.payloadJson, {})
-              return { id: r.id, title: r.title, toolName: payload.toolName, args: payload.args, createdAt: r.createdAt }
+              const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown>; approvalDetails?: unknown }>(r.payloadJson, {})
+              return { id: r.id, title: r.title, summary: r.summary, toolName: payload.toolName, args: payload.args, approvalDetails: payload.approvalDetails, createdAt: r.createdAt }
             }),
             message: 'Multiple pending approvals matched. Ask which ones to approve, or approve them with actionRequestIds.',
           },
@@ -3039,6 +3264,10 @@ export const TOOLS: ToolDef[] = [
       for (const req of filtered) {
         results.push(await replayStoredToolApproval({ contractorId, ctx, actionRequest: req, decision: args.decision, notes: args.notes }))
       }
+      if (args.decision === 'approved' && duplicateIds.length > 0) {
+        await db.actionRequest.updateMany({ where: { contractorId, id: { in: duplicateIds }, status: { in: ['pending', 'needs_approval'] } }, data: { status: 'rejected', rejectedAt: new Date() } }).catch(() => null)
+        await db.inboxItem.updateMany({ where: { contractorId, actionRequestId: { in: duplicateIds } }, data: { status: 'actioned', actionedAt: new Date() } }).catch(() => null)
+      }
       const succeeded = results.filter(r => r.success).length
       return {
         success: results.every(r => r.success),
@@ -3046,6 +3275,7 @@ export const TOOLS: ToolDef[] = [
           count: results.length,
           succeeded,
           failed: results.length - succeeded,
+          duplicateRequestsClosed: args.decision === 'approved' ? duplicateIds.length : 0,
           results: results.map((r, i) => ({ actionRequestId: filtered[i]?.id, success: r.success, data: r.data, error: r.error })),
           message: `${args.decision === 'approved' ? 'Approved' : 'Rejected'} ${results.length} pending request${results.length === 1 ? '' : 's'}. ${succeeded} completed successfully.`,
         },
@@ -3305,20 +3535,39 @@ export async function executeTool(
   if (tool.requiresApproval && !ctx.approved && !canRunDirectWithoutApproval(name, ctx)) {
     console.warn(`[tools-v2] APPROVAL REQUIRED: Tool '${name}' contractorId=${contractorId}`)
     const requestedRole = approvalRoleForTool(name)
-    const title = `Approval needed: ${humanizeToolName(name)}`
-    const summary = `Jobrolo wants to run ${humanizeToolName(name)}. Review and approve before execution.`
-    const payload = { toolName: name, args: parsed.data, toolContext: ctx }
-    const existing = await db.actionRequest.findFirst({
+    const approvalDetails = await buildApprovalDetailsForTool(name, parsed.data, contractorId).catch(err => {
+      console.warn(`[tools-v2] approval details failed for ${name}:`, err)
+      return {
+        title: `Approval needed: ${humanizeToolName(name)}`,
+        summary: `Jobrolo wants to run ${humanizeToolName(name)}. Review and approve before execution.`,
+        details: compactApprovalArgs(parsed.data),
+      } satisfies ApprovalDetail
+    })
+    const title = approvalDetails.title
+    const summary = approvalDetails.summary
+    const approvalKey = `${name}:${stableStringify(parsed.data)}`
+    const payload = { toolName: name, args: parsed.data, toolContext: ctx, approvalDetails, approvalKey }
+    const pendingRequests = await db.actionRequest.findMany({
       where: {
         contractorId,
         type: 'tool_approval',
         status: { in: ['pending', 'needs_approval'] },
-        payloadJson: JSON.stringify(payload),
       },
-      select: { id: true, status: true, title: true },
-    }).catch(() => null)
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: { id: true, status: true, title: true, summary: true, payloadJson: true },
+    }).catch(() => [])
+    const existing = pendingRequests.find(req => {
+      const existingPayload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown>; approvalKey?: string }>(req.payloadJson, {})
+      if (existingPayload.approvalKey && existingPayload.approvalKey === approvalKey) return true
+      return existingPayload.toolName === name && stableStringify(existingPayload.args ?? {}) === stableStringify(parsed.data)
+    }) ?? null
     if (existing) {
-      return { success: true, data: { approvalRequired: true, actionRequestId: existing.id, status: existing.status, title: existing.title }, error: 'Awaiting human approval' }
+      return {
+        success: true,
+        data: { approvalRequired: true, actionRequestId: existing.id, status: existing.status, title: existing.title, summary: existing.summary, toolName: name, approvalDetails },
+        error: 'Awaiting human approval',
+      }
     }
     const actionRequest = await db.actionRequest.create({
       data: {
@@ -3345,10 +3594,10 @@ export async function executeTool(
         status: 'unread',
         priority: 'normal',
         actionRequestId: actionRequest.id,
-        payloadJson: JSON.stringify({ cardType: 'approval_request', actionRequestId: actionRequest.id, toolName: name, args: parsed.data }),
+        payloadJson: JSON.stringify({ cardType: 'approval_request', actionRequestId: actionRequest.id, toolName: name, args: parsed.data, approvalDetails, approvalKey }),
       },
     }).catch(() => null)
-    return { success: true, data: { approvalRequired: true, actionRequestId: actionRequest.id, status: actionRequest.status, title, summary, toolName: name }, error: 'Awaiting human approval' }
+    return { success: true, data: { approvalRequired: true, actionRequestId: actionRequest.id, status: actionRequest.status, title, summary, toolName: name, approvalDetails }, error: 'Awaiting human approval' }
   }
 
   try {

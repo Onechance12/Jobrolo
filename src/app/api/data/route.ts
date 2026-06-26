@@ -5,6 +5,25 @@ import { rateLimit } from '@/lib/security/rate-limit'
 import { getOrCreateContractorProfile, publicContractorProfile } from '@/lib/contractor-profile'
 export const runtime = 'nodejs'
 
+function shortRecordNumber(prefix: string, id: string | null | undefined) {
+  const suffix = String(id ?? '').slice(-6).toUpperCase()
+  return suffix ? `${prefix}-${suffix}` : null
+}
+
+function customerNumber(customerOrId: { id?: string | null } | string | null | undefined) {
+  const id = typeof customerOrId === 'string' ? customerOrId : customerOrId?.id
+  return shortRecordNumber('C', id)
+}
+
+function projectNumber(projectOrId: { id?: string | null; title?: string | null } | string | null | undefined) {
+  if (projectOrId && typeof projectOrId === 'object') {
+    const match = String(projectOrId.title ?? '').match(/\bJob\s*#?\s*(\d{4,})\b/i)
+    if (match?.[1]) return `J-${match[1]}`
+    return shortRecordNumber('P', projectOrId.id)
+  }
+  return shortRecordNumber('P', projectOrId)
+}
+
 export async function GET(req: NextRequest) {
   const ctx = await requireContext(req).catch(e => e)
   if (ctx instanceof Error) {
@@ -29,7 +48,8 @@ export async function GET(req: NextRequest) {
   const businessContext = JSON.stringify({
     contractor: { name: ctx.contractor.name, company: ctx.contractor.company, profile: publicContractorProfile(profile) },
     stats: { projects: projects.length, openTasks: tasks.filter(t => t.status === 'open').length, inboxItems: inboxItems.length, actionRequests: actionRequests.length, activeFieldVisits: fieldVisits.length },
-    projects: projects.map(p => ({ id: p.id, title: p.title, status: p.status, priority: p.priority, value: p.value, customerName: p.customer?.name })),
+    customers: customers.map(c => ({ id: c.id, clientNumber: customerNumber(c), customerNumber: customerNumber(c), name: c.name, phone: c.phone, email: c.email, address: c.address })),
+    projects: projects.map(p => ({ id: p.id, projectNumber: projectNumber(p), title: p.title, status: p.status, priority: p.priority, value: p.value, customerId: p.customer?.id, customerName: p.customer?.name, customerNumber: p.customer ? customerNumber(p.customer) : null })),
     workspaces: workspaces.map(w => ({ id: w.id, name: w.name, type: w.type, projectId: w.projectId, chats: w.chats.map(ch => ({ id: ch.id, chatType: ch.chatType })) })),
     documents: docs.slice(0, 10).map(d => ({ id: d.id, name: d.originalName, type: d.fileType, summary: d.aiSummary })),
     documentTemplates: documentTemplates.map(t => ({ id: t.id, name: t.name, type: t.type, status: t.status, reviewStatus: t.reviewStatus })),
@@ -48,8 +68,8 @@ export async function GET(req: NextRequest) {
     conversationId: convos[0]?.id ?? null,
     conversations: convos.map(cv => ({ id: cv.id, title: cv.title, preview: cv.messages[0]?.content?.slice(0, 100) ?? '', messageCount: cv._count.messages, createdAt: cv.createdAt, updatedAt: cv.updatedAt })),
     workspaces: workspaces.map(w => ({ id: w.id, name: w.name, type: w.type, chats: w.chats, project: w.project })),
-    customers,
-    projects: projects.map(p => ({ id: p.id, title: p.title, status: p.status, priority: p.priority, value: p.value })),
+    customers: customers.map(c => ({ ...c, clientNumber: customerNumber(c), customerNumber: customerNumber(c) })),
+    projects: projects.map(p => ({ id: p.id, projectNumber: projectNumber(p), title: p.title, status: p.status, priority: p.priority, value: p.value, customerId: p.customer?.id ?? null, customerName: p.customer?.name ?? null, customerNumber: p.customer ? customerNumber(p.customer) : null })),
     tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, projectName: t.project?.title })),
     documentTemplates: documentTemplates.map(t => ({ id: t.id, name: t.name, type: t.type, status: t.status, reviewStatus: t.reviewStatus, importedFromUpload: t.importedFromUpload })),
     templateUploads,
