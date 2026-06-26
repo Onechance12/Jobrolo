@@ -33,6 +33,20 @@ function externalMapUrl(loc: BrowserLocation) {
   return `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`
 }
 
+function exitMapMode() {
+  if (typeof window === 'undefined') return
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo')
+  if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+    window.location.href = returnTo
+    return
+  }
+  if (window.history.length > 1) {
+    window.history.back()
+    return
+  }
+  window.location.href = '/'
+}
+
 export function CanvassingMapMode() {
   const [location, setLocation] = useState<BrowserLocation | null>(null)
   const [locating, setLocating] = useState(false)
@@ -85,7 +99,7 @@ export function CanvassingMapMode() {
               {locating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Crosshair className="mr-1.5 h-4 w-4" />}
               Locate
             </Button>
-            <Button size="sm" onClick={() => { window.location.href = '/' }}>
+            <Button size="sm" onClick={exitMapMode}>
               <MessageCircle className="mr-1.5 h-4 w-4" />
               Back
             </Button>
@@ -135,7 +149,7 @@ export function CanvassingMapMode() {
               </a>
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => { window.location.href = '/' }}>Exit map</Button>
+          <Button size="sm" onClick={exitMapMode}>Exit map</Button>
         </div>
       </div>
     </main>

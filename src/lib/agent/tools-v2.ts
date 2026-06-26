@@ -212,6 +212,10 @@ function customerSearchTerms(query: string) {
   return [...terms].slice(0, 8)
 }
 
+function containsInsensitive(value: string) {
+  return { contains: value, mode: 'insensitive' as const }
+}
+
 function normalizeMaterialItems(value: unknown) {
   if (!Array.isArray(value)) return []
   return value
@@ -425,10 +429,10 @@ async function resolveCustomerForTool(contractorId: string, input: { customerId?
     where: {
       contractorId,
       OR: terms.flatMap(term => [
-        { name: { contains: term } },
-        { phone: { contains: term } },
-        { email: { contains: term } },
-        { address: { contains: term } },
+        { name: containsInsensitive(term) },
+        { phone: containsInsensitive(term) },
+        { email: containsInsensitive(term) },
+        { address: containsInsensitive(term) },
       ]),
     },
     orderBy: { updatedAt: 'desc' },
@@ -550,9 +554,9 @@ async function buildApprovalDetailsForTool(name: string, args: Record<string, un
   if (name === 'delete_documents_by_name') {
     const nameFilter = typeof args.nameFilter === 'string' ? args.nameFilter.trim() : ''
     const [count, docs] = await Promise.all([
-      nameFilter ? db.document.count({ where: { contractorId, originalName: { contains: nameFilter } } }).catch(() => 0) : Promise.resolve(0),
+      nameFilter ? db.document.count({ where: { contractorId, originalName: containsInsensitive(nameFilter) } }).catch(() => 0) : Promise.resolve(0),
       nameFilter ? db.document.findMany({
-        where: { contractorId, originalName: { contains: nameFilter } },
+        where: { contractorId, originalName: containsInsensitive(nameFilter) },
         orderBy: { createdAt: 'desc' },
         take: 5,
         select: { originalName: true },
@@ -1326,10 +1330,10 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId) => {
       const customers = await db.customer.findMany({
         where: { contractorId, OR: [
-          { name: { contains: args.query } },
-          { phone: { contains: args.query } },
-          { email: { contains: args.query } },
-          { address: { contains: args.query } },
+          { name: containsInsensitive(args.query) },
+          { phone: containsInsensitive(args.query) },
+          { email: containsInsensitive(args.query) },
+          { address: containsInsensitive(args.query) },
         ] },
         orderBy: { updatedAt: 'desc' },
         take: 10,
@@ -1353,11 +1357,11 @@ export const TOOLS: ToolDef[] = [
           contractorId,
           ...(query ? {
             OR: [
-              { name: { contains: query } },
-              { phone: { contains: query } },
-              { email: { contains: query } },
-              { address: { contains: query } },
-              { notes: { contains: query } },
+              { name: containsInsensitive(query) },
+              { phone: containsInsensitive(query) },
+              { email: containsInsensitive(query) },
+              { address: containsInsensitive(query) },
+              { notes: containsInsensitive(query) },
             ],
           } : {}),
         },
@@ -1472,13 +1476,13 @@ export const TOOLS: ToolDef[] = [
         where: {
           contractorId,
           OR: terms.flatMap(term => [
-            { name: { contains: term } },
-            { phone: { contains: term } },
-            { email: { contains: term } },
-            { address: { contains: term } },
-            ...(args.phone ? [{ phone: { contains: args.phone } }] : []),
-            ...(args.email ? [{ email: { contains: args.email } }] : []),
-            ...(args.address ? [{ address: { contains: args.address } }] : []),
+            { name: containsInsensitive(term) },
+            { phone: containsInsensitive(term) },
+            { email: containsInsensitive(term) },
+            { address: containsInsensitive(term) },
+            ...(args.phone ? [{ phone: containsInsensitive(args.phone) }] : []),
+            ...(args.email ? [{ email: containsInsensitive(args.email) }] : []),
+            ...(args.address ? [{ address: containsInsensitive(args.address) }] : []),
           ]),
         },
         orderBy: { updatedAt: 'desc' },
@@ -1503,9 +1507,9 @@ export const TOOLS: ToolDef[] = [
       const exact = customers.find(c =>
         c.name.toLowerCase() === normalized ||
         c.email?.toLowerCase() === normalized ||
-        c.phone === normalized ||
+        normalizePhone(c.phone) === normalizePhone(normalized) ||
         Boolean(args.email && c.email?.toLowerCase() === args.email.toLowerCase()) ||
-        Boolean(args.phone && c.phone === args.phone) ||
+        Boolean(args.phone && normalizePhone(c.phone) === normalizePhone(args.phone)) ||
         Boolean(args.address && c.address?.toLowerCase().includes(args.address.toLowerCase()))
       )
       const customer = exact ?? customers[0]
@@ -2322,8 +2326,9 @@ export const TOOLS: ToolDef[] = [
       let project: { id: string; title: string; customerId: string | null; address: string | null } | null = null
 
       if (!customerId && args.customerName) {
+        const customerQuery = normalizeCustomerFileQuery(args.customerName) || args.customerName
         const matches = await db.customer.findMany({
-          where: { contractorId, name: { contains: normalizeCustomerFileQuery(args.customerName) || args.customerName } },
+          where: { contractorId, name: containsInsensitive(customerQuery) },
           take: 3,
           select: { id: true, name: true, address: true },
         })

@@ -12,8 +12,8 @@ const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review']
 
 type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: string; doc?: any }
 
-async function pollDocumentStatus(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 60, signal?: AbortSignal): Promise<DocumentPollResult> {
-  for (let i = 0; i < maxAttempts; i++) { // default 60 * 2s = 120s max wait
+async function pollDocumentStatus(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 18, signal?: AbortSignal): Promise<DocumentPollResult> {
+  for (let i = 0; i < maxAttempts; i++) { // default 18 * 2s = 36s max wait before the UI moves on
     if (signal?.aborted) return { reviewed: false, terminal: false, status: 'stopped' }
     await new Promise(r => setTimeout(r, 2000))
     if (signal?.aborted) return { reviewed: false, terminal: false, status: 'stopped' }
@@ -215,7 +215,7 @@ export function useChat() {
               const results: DocumentPollResult[] = []
               for (const doc of docsNeedingAnalysis) {
                 if (abortRef.current || abortControllerRef.current.signal.aborted) break
-                const result = await pollDocumentStatus(doc.id, userMessageId, false, 60, abortControllerRef.current.signal)
+                const result = await pollDocumentStatus(doc.id, userMessageId, false, 18, abortControllerRef.current.signal)
                 results.push(result)
               }
               if (abortRef.current || abortControllerRef.current.signal.aborted) return { ok: false }
@@ -226,15 +226,15 @@ export function useChat() {
                   id: crypto.randomUUID(),
                   role: 'assistant',
                   content: timedOut
-                    ? `The file is saved, but analysis is still running longer than expected. I’m not going to fake an answer from a half-processed document. Try “analyze the uploaded scope” again in a minute, or use the file card once it finishes.`
-                    : `The file is saved, but analysis finished with status: ${unfinished.map(r => r.status || 'unknown').join(', ')}. I can still attach the saved file, but I don’t have reliable extracted scope text yet.`,
+                    ? `The file is saved. Analysis is still running, so I’m not going to guess from a half-processed document. I’ll keep the saved file card here; ask me to analyze the latest upload again in a minute if it has not updated.`
+                    : `The file is saved. Analysis finished with status: ${unfinished.map(r => r.status || 'unknown').join(', ')}. I can attach or route the saved file, but I don’t have reliable extracted scope text yet.`,
                   createdAt: new Date().toISOString(),
                 })
                 clearUploadProgress()
                 setTyping(false)
                 setStreaming(false)
                 clearStreamingText()
-                return { ok: false, keepAttachments: true }
+                return { ok: true }
               }
             } else {
               void (async () => {

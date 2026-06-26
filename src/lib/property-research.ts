@@ -278,6 +278,11 @@ async function callOpenAIPropertyWebSearch(ctx: TenantContext, input: PropertyRe
     maxOutputTokens: mode === 'street_game_plan' ? 2600 : 1800,
     forceSearch: true,
     blockedDomains: BLOCKED_PROPERTY_SEARCH_DOMAINS,
+    userLocation: (input.city || input.state) ? {
+      country: 'US',
+      ...(input.city ? { city: input.city } : {}),
+      ...(input.state ? { region: input.state } : {}),
+    } : undefined,
   })
 
   if (!result.ok) return { candidates: [], provider: 'openai_web_search_failed', summary: result.error || 'OpenAI web search failed.', sources: [] as WebSearchSource[] }

@@ -28,6 +28,12 @@ export type OpenAIWebSearchOptions = {
   blockedDomains?: string[]
   maxOutputTokens?: number
   forceSearch?: boolean
+  userLocation?: {
+    country?: string
+    region?: string
+    city?: string
+    timezone?: string
+  }
 }
 
 function openAIBaseUrl() {
@@ -141,7 +147,7 @@ export async function openAIWebSearch(prompt: string, opts: OpenAIWebSearchOptio
         tools: [{
           type: 'web_search',
           search_context_size: searchContextSize,
-          external_web_access: true,
+          ...(opts.userLocation ? { user_location: { type: 'approximate', ...opts.userLocation } } : {}),
           ...(filters ? { filters } : {}),
         }],
         tool_choice: opts.forceSearch === false ? 'auto' : 'required',

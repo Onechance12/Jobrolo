@@ -106,6 +106,25 @@ function insertJobroloPrompt(text: string) {
   window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
 }
 
+function openInspectionPhotoIntake(section?: string | null) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('jobrolo:open-inspection-photo-intake', { detail: { section: section || null } }))
+}
+
+function inspectionSectionId(label: string) {
+  const value = String(label || '').toLowerCase()
+  if (value.includes('front')) return 'front_elevation'
+  if (value.includes('elevation')) return 'all_elevations'
+  if (value.includes('roof') || value.includes('slope') || value.includes('facet')) return 'roof_overview'
+  if (value.includes('hail') || value.includes('wind') || value.includes('damage')) return 'damage'
+  if (value.includes('soft') || value.includes('metal') || value.includes('gutter') || value.includes('vent')) return 'soft_metals'
+  if (value.includes('interior')) return 'interior'
+  if (value.includes('attic')) return 'attic'
+  if (value.includes('detached')) return 'detached'
+  if (value.includes('document') || value.includes('scope') || value.includes('estimate')) return 'documents'
+  return null
+}
+
 type RoofReportLike = {
   id?: string
   reportId?: string
@@ -787,7 +806,6 @@ export function FieldInspectionLeadCard({ data }: { data?: any }) {
     ? data.photoSections
     : ['Front elevation', 'All elevations', 'Roof overview', 'Roof slopes/facets', 'Damage closeups', 'Soft metals', 'Interior', 'Attic', 'Detached structures', 'Documents']
 
-  const startPrompt = `Start the inspection workflow for this field lead${leadId ? ` (lead ID: ${leadId})` : ''}. Walk me through the photo sections one at a time: front elevation, all elevations, roof overview, roof slopes/facets, hail/wind damage, soft metals/gutters/vents, interior, attic, detached structures, and documents.`
   const researchPrompt = `Research the property for this field inspection lead${leadId ? ` (lead ID: ${leadId})` : ''} using the saved GPS/address. If public property research is not configured, tell me exactly what provider/API is missing.`
   const convertPrompt = `Convert this field inspection lead${leadId ? ` (lead ID: ${leadId})` : ''} into a customer and project only after confirming the owner/address details.`
 
@@ -840,7 +858,7 @@ export function FieldInspectionLeadCard({ data }: { data?: any }) {
               <button
                 key={section}
                 type="button"
-                onClick={() => insertJobroloPrompt(`Start the ${section.toLowerCase()} photo section for this inspection${leadId ? ` lead ${leadId}` : ''}. Tell me exactly what photos to capture and let me upload them in small batches.`)}
+                onClick={() => openInspectionPhotoIntake(inspectionSectionId(section))}
                 className="rounded-full border border-emerald-200 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-emerald-900 hover:bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100"
               >
                 {section}
@@ -856,7 +874,7 @@ export function FieldInspectionLeadCard({ data }: { data?: any }) {
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" onClick={() => insertJobroloPrompt(startPrompt)}>
+        <Button size="sm" onClick={() => openInspectionPhotoIntake(null)}>
           Start inspection
         </Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(researchPrompt)}>
@@ -888,7 +906,7 @@ export function CanvassingSessionCard({ data }: { data?: any }) {
       </CardContent>
       <CardFooter className="border-t bg-background/60 py-2">
         <Button size="sm" onClick={() => insertJobroloPrompt(`Keep this field run in chat${data?.sessionId ? ` (session ID: ${data.sessionId})` : ''}. Ask what I want to do next and offer: log a door, start inspection, research current property, add note, or end run.`)}>Continue in chat</Button>
-        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Use my current location and start an inspection lead if I am at a house. Ask me to confirm owner/address before creating a customer or project.')}>Start inspection</Button>
+        <Button size="sm" variant="outline" onClick={() => openInspectionPhotoIntake(null)}>Start inspection</Button>
       </CardFooter>
     </Card>
   )
@@ -914,7 +932,7 @@ export function CanvassingLeadCard({ data }: { data?: any }) {
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" onClick={() => insertJobroloPrompt(`Start an inspection workflow for this field lead${leadId ? ` (lead ID: ${leadId})` : ''}. Walk me through the photo sections and notes in chat.`)}>Start inspection</Button>
+        <Button size="sm" onClick={() => openInspectionPhotoIntake(null)}>Start inspection</Button>
         {data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Open the job chat/thread for project ${data.projectId} and brief me on what to do next.`)}>Open job chat</Button> : null}
         {leadId && !data?.projectId ? <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Convert this field lead into a customer and project after confirming the owner/address details. Lead ID: ${leadId}`)}>Create customer/job</Button> : null}
       </CardFooter>
@@ -1231,6 +1249,9 @@ function approvalRowsFromPayload(payload: Record<string, unknown>) {
 
   if (approvalDetails?.targetLabel) {
     rows.push({ label: 'Target', value: String(approvalDetails.targetLabel) })
+  }
+  if (approvalDetails?.destructive) {
+    rows.push({ label: 'Warning', value: 'This is a destructive action. Review the target before approving.' })
   }
   if (Array.isArray(approvalDetails?.details)) {
     for (const detail of approvalDetails.details.slice(0, 10)) {
