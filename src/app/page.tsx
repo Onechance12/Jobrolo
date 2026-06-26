@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import { useChat } from '@/hooks/use-chat'
@@ -13,7 +13,7 @@ import { FieldCopilotDrawer } from '@/components/jobrolo/field-copilot-drawer'
 import { FieldEntryStrip } from '@/components/jobrolo/field-entry-strip'
 import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
-import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
@@ -22,6 +22,7 @@ export default function Page() {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
   const [autoTTS, setAutoTTS] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [startMenuOpen, setStartMenuOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [fieldCopilotOpen, setFieldCopilotOpen] = useState(false)
   const proactiveRunKey = useRef<string | null>(null)
@@ -280,16 +281,17 @@ export default function Page() {
   const handleNewChat = useCallback(async () => {
     exitWorkspace()
     setLeftDrawerOpen(false)
+    setStartMenuOpen(false)
     try {
       const r = await fetch('/api/conversations', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'New Chat' }),
+        body: JSON.stringify({ title: 'New private chat' }),
       })
       if (r.ok) {
         const d = await r.json()
         selectConversation(d.conversation.id)
         setConversations([{
-          id: d.conversation.id, title: 'New Chat', preview: '', messageCount: 0,
+          id: d.conversation.id, title: 'New private chat', preview: '', messageCount: 0,
           createdAt: d.conversation.createdAt, updatedAt: d.conversation.updatedAt,
         }, ...useChatStore.getState().conversations])
         setMessages([{
@@ -299,6 +301,18 @@ export default function Page() {
       }
     } catch {}
   }, [exitWorkspace, selectConversation, setConversations, setMessages])
+
+  const handleStartPrompt = useCallback((text: string) => {
+    setStartMenuOpen(false)
+    exitWorkspace()
+    if (conversationId) selectConversation(conversationId)
+    insertPrompt(text)
+  }, [conversationId, exitWorkspace, insertPrompt, selectConversation])
+
+  const handleStartUpload = useCallback(() => {
+    setStartMenuOpen(false)
+    window.dispatchEvent(new Event('jobrolo:open-file-picker'))
+  }, [])
 
   const handleEnterWorkspace = useCallback((id: string) => {
     enterWorkspace(id); setLeftDrawerOpen(false)
@@ -396,7 +410,7 @@ export default function Page() {
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-foreground truncate text-[15px] leading-tight">{currentWorkspace.name}</div>
                     <div className="text-[11px] text-muted-foreground truncate leading-tight">
-                      Job workspace · actions route automatically
+                      Job chat · actions route automatically
                       {currentWorkspace.project?.customer?.name && <> · {currentWorkspace.project.customer.name}</>}
                     </div>
                   </div>
@@ -464,9 +478,27 @@ export default function Page() {
               </button>
 
               {!isInWorkspace && (
-                <button onClick={handleNewChat} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors" aria-label="New chat">
-                  <Plus className="w-5 h-5" />
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setStartMenuOpen(v => !v)}
+                    className="flex items-center gap-1 rounded-md px-2 py-2 text-muted-foreground transition-colors hover:bg-muted"
+                    aria-label="Start or create"
+                    aria-expanded={startMenuOpen}
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span className="hidden text-xs font-medium sm:inline">Start</span>
+                  </button>
+                  {startMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setStartMenuOpen(false)} />
+                      <StartCreateMenu
+                        onPrivateChat={handleNewChat}
+                        onPrompt={handleStartPrompt}
+                        onUpload={handleStartUpload}
+                      />
+                    </>
+                  )}
+                </div>
               )}
 
               <div className="relative">
@@ -603,6 +635,81 @@ function hasCompanyWideUiRole(role?: string | null) {
   return ['owner', 'admin', 'manager', 'project_manager'].includes(String(role ?? '').toLowerCase())
 }
 
+function StartCreateMenu({
+  onPrivateChat,
+  onPrompt,
+  onUpload,
+}: {
+  onPrivateChat: () => void
+  onPrompt: (prompt: string) => void
+  onUpload: () => void
+}) {
+  return (
+    <div className="absolute right-0 top-11 z-30 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl">
+      <div className="px-2 pb-2 pt-1">
+        <div className="text-sm font-semibold">Start or create</div>
+        <div className="text-xs text-muted-foreground">Choose what kind of chat/workflow this is before Jobrolo starts doing work.</div>
+      </div>
+      <div className="grid gap-1">
+        <StartMenuItem
+          icon={<MessageCircle className="h-4 w-4 text-blue-600 dark:text-blue-300" />}
+          title="Command Center chat"
+          detail="Private chat with Jobrolo/operator."
+          onClick={onPrivateChat}
+        />
+        <StartMenuItem
+          icon={<Briefcase className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />}
+          title="Project / Job chat"
+          detail="Attach a chat to a real job file."
+          onClick={() => onPrompt('Create a project/job chat for ')}
+        />
+        <StartMenuItem
+          icon={<Home className="h-4 w-4 text-pink-600 dark:text-pink-300" />}
+          title="Customer chat"
+          detail="Homeowner/client-facing shared chat."
+          onClick={() => onPrompt('Create a customer-facing chat for ')}
+        />
+        <StartMenuItem
+          icon={<Hammer className="h-4 w-4 text-violet-600 dark:text-violet-300" />}
+          title="Crew / Sub chat"
+          detail="Roofer, subcontractor, or field crew coordination."
+          onClick={() => onPrompt('Create a crew/subcontractor chat for ')}
+        />
+        <StartMenuItem
+          icon={<Users className="h-4 w-4 text-amber-600 dark:text-amber-300" />}
+          title="Team chat"
+          detail="Internal employee, sales, PM, or office coordination."
+          onClick={() => onPrompt('Create an internal team chat. If this should be attached to a customer or project, ask me which one.')}
+        />
+        <StartMenuItem
+          icon={<MapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
+          title="Field / Canvassing"
+          detail="Use current location for field work."
+          onClick={() => onPrompt('Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I am not at a saved job, help me canvass from here.')}
+        />
+        <StartMenuItem
+          icon={<Upload className="h-4 w-4 text-slate-600 dark:text-slate-300" />}
+          title="Upload / Add file"
+          detail="Pick a file and keep it in this message."
+          onClick={onUpload}
+        />
+      </div>
+    </div>
+  )
+}
+
+function StartMenuItem({ icon, title, detail, onClick }: { icon: ReactNode; title: string; detail: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted">{icon}</div>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="block text-xs text-muted-foreground">{detail}</span>
+      </span>
+    </button>
+  )
+}
+
 function InvitePeopleModal({
   workspace,
   chat,
@@ -718,7 +825,7 @@ function InvitePeopleModal({
           <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 text-sm">
             <div className="font-medium">Direct chat link for existing members</div>
             <p className="mt-1 text-muted-foreground">
-              Use this when someone already has access. It opens this workspace/chat after they log in.
+              Use this when someone already has access. It opens this shared chat after they log in.
             </p>
             <div className="mt-2 break-all rounded-xl bg-background px-3 py-2 text-xs text-muted-foreground">{chatLink}</div>
             <button onClick={copyChatLink} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted">

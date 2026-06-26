@@ -145,6 +145,29 @@ function deriveApprovalCardFromToolResults(iterations: Array<{ toolResults?: Arr
   return null
 }
 
+function deriveCardFromToolResults(iterations: Array<{ toolResults?: Array<{ data: unknown }> }>) {
+  for (const iter of iterations) {
+    for (const result of iter.toolResults ?? []) {
+      const data = result.data as Record<string, unknown> | null
+      const nested = data?.card
+      if (nested && typeof nested === 'object' && (nested as Record<string, unknown>).cardType) {
+        const card = nested as Record<string, unknown>
+        return {
+          contextType: String(card.cardType),
+          contextData: card,
+        }
+      }
+      if (data?.cardType) {
+        return {
+          contextType: String(data.cardType),
+          contextData: data,
+        }
+      }
+    }
+  }
+  return null
+}
+
 export async function processAgentJob(job: AgentJobRow) {
   const input = JSON.parse(job.inputJson) as {
     message: string
@@ -325,8 +348,9 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
 
     const finalText = sanitizeAIOutput(loopResult.final.text || '(no response)')
     const approvalCard = deriveApprovalCardFromToolResults(loopResult.iterations)
-    const finalContextType = loopResult.final.contextType ?? approvalCard?.contextType ?? null
-    const finalContextData = loopResult.final.contextData ?? approvalCard?.contextData ?? null
+    const toolCard = deriveCardFromToolResults(loopResult.iterations)
+    const finalContextType = loopResult.final.contextType ?? approvalCard?.contextType ?? toolCard?.contextType ?? null
+    const finalContextData = loopResult.final.contextData ?? approvalCard?.contextData ?? toolCard?.contextData ?? null
     let finalActions = (loopResult.final.actions ?? []) as AiAction[]
 
     if (await isJobCancelled(job.id)) {
@@ -391,7 +415,7 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
           attachments: finalAttachments.length ? JSON.stringify(finalAttachments) : null,
         },
       })
-      if ((!conversation.title || conversation.title === 'New Chat' || conversation.title === 'Welcome to Jobrolo') && input.message) {
+      if ((!conversation.title || conversation.title === 'New Chat' || conversation.title === 'New private chat' || conversation.title === 'Welcome to Jobrolo') && input.message) {
         await db.conversation.update({ where: { id: conversation.id }, data: { title: input.message.slice(0, 60), updatedAt: new Date() } })
       } else {
         await db.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } })

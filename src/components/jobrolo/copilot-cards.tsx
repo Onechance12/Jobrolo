@@ -11,15 +11,19 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Camera,
+  Copy,
+  ExternalLink,
   FileText,
   MapPin,
   Home,
+  MessageCircle,
   Package,
   Radio,
   RefreshCw,
   Route,
   ShieldCheck,
   Sparkles,
+  UserPlus,
   XCircle,
 } from 'lucide-react'
 
@@ -72,6 +76,19 @@ type FieldEventLike = {
   decision?: string
   title?: string
   summary?: string
+}
+
+type CreatedChatLike = {
+  workspaceId?: string
+  chatId?: string
+  chatType?: string
+  visibility?: string
+  title?: string
+  chatUrl?: string | null
+  projectTitle?: string
+  projectNumber?: string | null
+  customer?: { name?: string | null; customerNumber?: string | null; clientNumber?: string | null } | null
+  attachedTo?: { type?: string; title?: string; address?: string | null } | null
 }
 
 type RoofReportLike = {
@@ -163,6 +180,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('operator_briefing')) {
     return <OperatorBriefingCard data={contextData as any} content={content} />
   }
+  if (cardType.includes('created_chat')) {
+    return <CreatedChatCard data={contextData as CreatedChatLike} />
+  }
   if (cardType.includes('approval') || cardType.includes('action_request') || cardType.includes('material_request') || cardType.includes('issue_report') || cardType.includes('supplier_order')) {
     return <InboxActionCard item={contextData as InboxLike} />
   }
@@ -252,6 +272,61 @@ export function FieldEventCard({ event, fallbackContent }: { event?: FieldEventL
           <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{event?.summary || event?.title || fallbackContent || 'This field action was logged to the job timeline.'}</p>
         </div>
       </CardContent>
+    </Card>
+  )
+}
+
+export function CreatedChatCard({ data }: { data?: CreatedChatLike | null }) {
+  const [copied, setCopied] = useState(false)
+  const href = data?.chatUrl || (data?.workspaceId ? `/?workspaceId=${encodeURIComponent(data.workspaceId)}${data.chatId ? `&chatId=${encodeURIComponent(data.chatId)}` : ''}` : null)
+  const chatType = humanize(String(data?.chatType || 'shared chat'))
+  const customerName = data?.customer?.name
+  const customerNumber = data?.customer?.customerNumber || data?.customer?.clientNumber
+
+  async function copy() {
+    if (!href) return
+    const absolute = href.startsWith('http') ? href : `${window.location.origin}${href}`
+    await navigator.clipboard?.writeText(absolute).catch(() => null)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1800)
+  }
+
+  function invite() {
+    const target = data?.projectTitle || data?.title || 'this chat'
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', {
+      detail: {
+        text: `Invite someone to ${target}. Ask me for their name, email, phone, and role, and give me a copyable invite link.`,
+      },
+    }))
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
+            <MessageCircle className="h-4 w-4" /> {data?.title || `${chatType} created`}
+          </CardTitle>
+          <Badge variant="secondary" className="text-[10px]">{chatType}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
+          {data?.projectTitle ? <div><span className="font-medium text-foreground">Job:</span> {data.projectTitle}</div> : null}
+          {data?.projectNumber ? <div><span className="font-medium text-foreground">Project #:</span> {data.projectNumber}</div> : null}
+          {customerName ? <div><span className="font-medium text-foreground">Customer:</span> {customerName}{customerNumber ? ` (${customerNumber})` : ''}</div> : null}
+          {data?.visibility ? <div><span className="font-medium text-foreground">Visibility:</span> {humanize(data.visibility)}</div> : null}
+          {data?.attachedTo?.address ? <div className="sm:col-span-2"><span className="font-medium text-foreground">Address:</span> {data.attachedTo.address}</div> : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          This is saved in Shared chats. Use the link for existing members, or invite someone to create account access.
+        </p>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        {href ? <Button size="sm" asChild><Link href={href}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open chat</Link></Button> : null}
+        {href ? <Button size="sm" variant="outline" onClick={copy}>{copied ? <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}{copied ? 'Copied' : 'Copy link'}</Button> : null}
+        <Button size="sm" variant="outline" onClick={invite}><UserPlus className="mr-1.5 h-3.5 w-3.5" />Invite person</Button>
+      </CardFooter>
     </Card>
   )
 }

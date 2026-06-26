@@ -28,7 +28,7 @@ export const useChatStore = create<ChatState>((set) => ({
   setConversations: (c) => set({ conversations: c }),
   setConversationId: (id) => set({ conversationId: id }),
   selectConversation: (id) => set({ conversationId: id, messages: [], isTyping: false, isStreaming: false, streamingText: '' }),
-  createConversationLocally: (id, title) => set((s) => ({ conversations: [{ id, title: title ?? 'New Chat', preview: '', messageCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...s.conversations], conversationId: id, messages: [], isTyping: false, isStreaming: false, streamingText: '' })),
+  createConversationLocally: (id, title) => set((s) => ({ conversations: [{ id, title: title ?? 'New private chat', preview: '', messageCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...s.conversations], conversationId: id, messages: [], isTyping: false, isStreaming: false, streamingText: '' })),
   setMessages: (m) => set({ messages: m }),
   addMessage: (m) => set((s) => ({ messages: [...s.messages, m] })),
   updateMessage: (id, u) => set((s) => ({ messages: s.messages.map(m => m.id === id ? { ...m, ...u } : m) })),

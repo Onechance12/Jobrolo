@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   })
   return NextResponse.json({
     conversations: convos.map(c => ({
-      id: c.id, title: c.title ?? 'New Chat',
+      id: c.id, title: c.title ?? 'New private chat',
       preview: c.messages[0]?.content?.slice(0, 120) ?? '',
       messageCount: c._count.messages,
       createdAt: c.createdAt, updatedAt: c.updatedAt,
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!hasCompanyWideAccess(ctx)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { title } = await req.json().catch(() => ({}))
-  const convo = await db.conversation.create({ data: { contractorId: ctx.contractorId, title: title || 'New Chat' } })
+  const convo = await db.conversation.create({ data: { contractorId: ctx.contractorId, title: title || 'New private chat' } })
   await audit(ctx, 'create', 'conversation', convo.id, `Created conversation: ${convo.title}`, null, req)
   return NextResponse.json({ conversation: convo })
 }

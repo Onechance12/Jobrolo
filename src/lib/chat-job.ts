@@ -152,7 +152,7 @@ export async function processJob(jobId: string, opts: {
       await db.workspaceChat.update({ where: { id: chatId }, data: { lastActivity: new Date() } })
     } else {
       await db.message.create({ data: { conversationId: conversation.id, role: 'assistant', content: finalText, contextType: finalContextType, contextData: finalContextData ? JSON.stringify(finalContextData) : null, actionResults: actionResults.length ? JSON.stringify(actionResults) : null, attachments: finalAttachments.length ? JSON.stringify(finalAttachments) : null } })
-      if ((!conversation.title || conversation.title === 'New Chat' || conversation.title === 'Welcome to Jobrolo') && message) await db.conversation.update({ where: { id: conversation.id }, data: { title: message.slice(0, 60), updatedAt: new Date() } })
+      if ((!conversation.title || conversation.title === 'New Chat' || conversation.title === 'New private chat' || conversation.title === 'Welcome to Jobrolo') && message) await db.conversation.update({ where: { id: conversation.id }, data: { title: message.slice(0, 60), updatedAt: new Date() } })
       else await db.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } })
     }
 
