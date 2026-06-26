@@ -5,6 +5,7 @@ import type { ClientMessage, MessageAttachment } from '@/lib/types'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
+const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review'])
 
 async function pollDoc(docId: string, userMessageId: string): Promise<boolean> {
   for (let i = 0; i < 60; i++) { // 60 * 2s = 120s max wait
@@ -41,6 +42,7 @@ async function pollDoc(docId: string, userMessageId: string): Promise<boolean> {
 
 export function useWorkspaceChat() {
   const addMessage = useWorkspaceStore(s => s.addMessage)
+  const updateMessage = useWorkspaceStore(s => s.updateMessage)
   const updateLastMessage = useWorkspaceStore(s => s.updateLastMessage)
   const setTyping = useWorkspaceStore(s => s.setTyping)
   const setStreamingText = useWorkspaceStore(s => s.setStreamingText)
@@ -129,17 +131,27 @@ export function useWorkspaceChat() {
           }
           for (const a of previewAttachments) URL.revokeObjectURL(a.url)
 
-          // Wait for ALL documents (including photos) to reach a terminal state.
+          // Upload success means "file saved". Analysis runs in the background so
+          // workspace chat can keep moving even if OCR/AI processing is slow.
           const docs = d.documents || []
           if (docs.length > 0) {
-            updateLastMessage({
-              attachments: serverAttachments.map(a => ({ ...a, documentStatus: 'processing' as const })),
+            updateMessage(userMessageId, {
+              attachments: serverAttachments.map(a => ({
+                ...a,
+                documentStatus: DOC_BACKGROUND_STATES.has(String(a.documentStatus)) ? 'queued' as const : a.documentStatus,
+              })),
             })
-            setTyping(true)
-            setStreamingText('Analyzing document...')
-            for (const doc of docs) await pollDoc(doc.id, userMessageId)
-            setTyping(false)
-            setStreamingText('')
+            if (!d.needsLink) {
+              addMessage({
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’ll analyze ${docs.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
+                createdAt: new Date().toISOString(),
+              })
+            }
+            void (async () => {
+              for (const doc of docs) await pollDoc(doc.id, userMessageId)
+            })().catch(err => console.error('[ws-chat] background document polling:', err))
           }
       } catch (e) {
         console.error('[ws-chat] upload:', e)
@@ -225,7 +237,7 @@ export function useWorkspaceChat() {
     } finally {
       setTyping(false); clearStreamingText(); abortRef.current = false
     }
-  }, [addMessage, updateLastMessage, setTyping, setStreamingText, clearStreamingText])
+  }, [addMessage, updateMessage, updateLastMessage, setTyping, setStreamingText, clearStreamingText])
 
   return { sendWorkspaceMessage }
 }

@@ -5,6 +5,7 @@ import type { ClientMessage, MessageAttachment } from '@/lib/types'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
+const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review'])
 
 async function pollDocumentStatus(docId: string, userMessageId: string): Promise<boolean> {
   for (let i = 0; i < 60; i++) { // 60 * 2s = 120s max wait
@@ -49,8 +50,6 @@ export function useChat() {
   const clearStreamingText = useChatStore(s => s.clearStreamingText)
   const refreshBusinessContext = useChatStore(s => s.refreshBusinessContext)
   const setConversations = useChatStore(s => s.setConversations)
-  const addUploadProgress = useChatStore(s => s.addUploadProgress)
-  const updateUploadProgress = useChatStore(s => s.updateUploadProgress)
   const clearUploadProgress = useChatStore(s => s.clearUploadProgress)
   const abortRef = useRef(false)
 
@@ -155,40 +154,30 @@ export function useChat() {
           for (const a of previewAttachments) URL.revokeObjectURL(a.url)
           await refreshBusinessContext()
 
-          // Wait for ALL documents (including photos) to reach a terminal state.
+          // Upload success means "file saved". Analysis is intentionally background work.
+          // Do not block the user's chat turn while OCR/AI processing catches up.
           const docsNeedingAnalysis = data.documents || []
           if (docsNeedingAnalysis.length > 0) {
             updateMessage(userMessageId, {
-              attachments: serverAttachments.map(a => ({ ...a, documentStatus: 'processing' as const })),
+              attachments: serverAttachments.map(a => ({
+                ...a,
+                documentStatus: DOC_BACKGROUND_STATES.has(String(a.documentStatus)) ? 'queued' as const : a.documentStatus,
+              })),
             })
-
-            const fileTypeLabels: Record<string, string> = {
-              scope_of_loss: 'Scope of Loss',
-              estimate: 'Estimate',
-              price_sheet: 'Price Sheet',
-              contract: 'Contract',
-              invoice: 'Invoice',
-              insurance_claim: 'Insurance Claim',
-              permit: 'Permit',
-              pdf: 'PDF',
-              photo: 'Photo',
-              other: 'Document',
-            }
-
-            for (const doc of docsNeedingAnalysis) {
-              addUploadProgress({
-                fileName: doc.originalName,
-                fileType: fileTypeLabels[doc.fileType] || 'Document',
-                status: 'analyzing',
-                message: 'AI analyzing...',
+            if (!data.needsLink) {
+              addMessage({
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `Saved ${docsNeedingAnalysis.length === 1 ? 'the upload' : `${docsNeedingAnalysis.length} uploads`}. I’ll analyze ${docsNeedingAnalysis.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
+                createdAt: new Date().toISOString(),
               })
             }
 
-            for (let i = 0; i < docsNeedingAnalysis.length; i++) {
-              await pollDocumentStatus(docsNeedingAnalysis[i].id, userMessageId)
-              updateUploadProgress(i, { status: 'done' })
-            }
-            setTimeout(() => clearUploadProgress(), 3000)
+            void (async () => {
+              for (const doc of docsNeedingAnalysis) {
+                await pollDocumentStatus(doc.id, userMessageId)
+              }
+            })().catch(err => console.error('[use-chat] background document polling:', err))
           }
       } catch (err) {
         console.error('[use-chat] upload:', err)
@@ -295,7 +284,7 @@ export function useChat() {
     } finally {
       setTyping(false); setStreaming(false); clearStreamingText(); clearUploadProgress(); abortRef.current = false
     }
-  }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, refreshBusinessContext, addUploadProgress, updateUploadProgress, clearUploadProgress])
+  }, [addMessage, updateMessage, setTyping, setStreaming, setStreamingText, clearStreamingText, setConversations, refreshBusinessContext, clearUploadProgress])
 
   return { sendMessage }
 }

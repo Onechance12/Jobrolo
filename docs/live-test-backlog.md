@@ -6,6 +6,8 @@ Patch note: production hardening now routes configured AI/OCR analysis through t
 
 Follow-up patch note: live testing showed extracted document data exists, but the chat needed tools to retrieve/review/link/save it. This pass adds backend-first workflows for price sheet row review, project/job creation, project creation from extracted documents, customer/document conflict detection, document-type-specific review profiles, and safer photo URL/attachment handling.
 
+Prototype stabilization patch note: live testing showed a remaining disconnect between "file saved", "AI analysis finished", and "record linked/saved." This pass decouples upload save success from background document analysis in the chat UI and adds tools for upload status/recent uploads plus customer-file note saving.
+
 ## Product north star
 
 Jobrolo should not feel like another CRM. The main chat is the product:
@@ -88,6 +90,16 @@ Upload saving is working, but the product needs to clearly separate:
 
 The upload request must not depend on AI analysis completing.
 
+Patch status:
+
+- Main chat and workspace chat now continue after the original file is saved instead of waiting for every analysis job to finish.
+- Attachment cards still update when background analysis reaches a terminal state.
+- New tools `get_recent_uploads` and `get_upload_status` let the assistant answer whether an upload is saved, pending analysis, failed, reviewed, linked, or unlinked.
+
+Remaining:
+
+- Large photo batches still need guided sections, chunking, and production object storage.
+
 ### P1 — Photo/document analysis quality
 
 Image analysis is still using the Z-AI SDK path, while main chat uses OpenAI-compatible.
@@ -138,6 +150,11 @@ Uploads currently save, but may remain globally/floating unless the user provide
 Needed workflows:
 
 - create_project_for_customer
+- save_customer_note
+
+Patch status:
+
+- `save_customer_note` now lets main chat save customer/profile/job-context notes to a real customer Note row instead of narrating or searching for a missing workflow.
 - get_customer_file
 - get_job_packet
 - link_document_to_project

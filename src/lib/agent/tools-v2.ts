@@ -622,6 +622,169 @@ export const TOOLS: ToolDef[] = [
       }
     },
   },
+  {
+    name: 'get_recent_uploads',
+    description: 'List recent uploaded files/photos with save status, analysis status, links, and whether they are still unassigned. Use when the user asks what uploaded, whether uploads saved, what is pending analysis, or what still needs to be attached to a customer/project.',
+    schema: z.object({
+      limit: z.number().min(1).max(50).optional(),
+      status: z.string().max(80).optional(),
+      fileType: z.string().max(80).optional(),
+      unlinkedOnly: z.boolean().optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      const where: any = {
+        contractorId,
+        ...(args.status ? { status: args.status } : {}),
+        ...(args.fileType ? { fileType: args.fileType } : {}),
+      }
+      if (args.unlinkedOnly) {
+        where.customerId = null
+        where.projectId = null
+        where.workspaceId = null
+      }
+      const documents = await db.document.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: args.limit ?? 20,
+        select: {
+          id: true,
+          originalName: true,
+          fileType: true,
+          status: true,
+          mimeType: true,
+          size: true,
+          filePath: true,
+          thumbnailPath: true,
+          aiSummary: true,
+          aiCategory: true,
+          extractionConfidence: true,
+          missingDataFlags: true,
+          conflictFlags: true,
+          customerId: true,
+          projectId: true,
+          workspaceId: true,
+          createdAt: true,
+        },
+      })
+      const counts = documents.reduce((acc: Record<string, number>, doc) => {
+        acc[doc.status] = (acc[doc.status] ?? 0) + 1
+        return acc
+      }, {})
+      return {
+        success: true,
+        data: {
+          count: documents.length,
+          countsByStatus: counts,
+          documents: documents.map(doc => ({
+            ...compactDocument(doc),
+            aiCategory: doc.aiCategory,
+            extractionConfidence: doc.extractionConfidence,
+            missingData: safeJsonParse(doc.missingDataFlags, null),
+            conflicts: safeJsonParse(doc.conflictFlags, null),
+            needsLink: !doc.customerId && !doc.projectId && !doc.workspaceId,
+            fileSaved: true,
+            analysisPending: ['queued', 'processing', 'pending_review'].includes(doc.status),
+          })),
+          guidance: 'A saved upload may still have analysis status queued/processing/pending_review. Treat fileSaved=true as saved, then separately report whether analysis/linking is complete.',
+        },
+      }
+    },
+  },
+  {
+    name: 'get_upload_status',
+    description: 'Check one uploaded document/photo by documentId or filename. Returns whether the file row is saved, current analysis state, link state, recent processing jobs, and safe storage URLs.',
+    schema: z.object({
+      documentId: z.string().max(200).optional(),
+      filename: z.string().max(300).optional(),
+    }).refine(v => Boolean(v.documentId || v.filename), 'documentId or filename is required'),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      let doc
+      if (args.documentId) {
+        doc = await db.document.findFirst({
+          where: { id: args.documentId, contractorId },
+          select: {
+            id: true,
+            originalName: true,
+            fileType: true,
+            status: true,
+            mimeType: true,
+            size: true,
+            filePath: true,
+            thumbnailPath: true,
+            aiSummary: true,
+            aiCategory: true,
+            extractionConfidence: true,
+            missingDataFlags: true,
+            conflictFlags: true,
+            customerId: true,
+            projectId: true,
+            workspaceId: true,
+            createdAt: true,
+          },
+        })
+      } else {
+        const needle = String(args.filename ?? '').toLowerCase()
+        const recent = await db.document.findMany({
+          where: { contractorId },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: {
+            id: true,
+            originalName: true,
+            fileType: true,
+            status: true,
+            mimeType: true,
+            size: true,
+            filePath: true,
+            thumbnailPath: true,
+            aiSummary: true,
+            aiCategory: true,
+            extractionConfidence: true,
+            missingDataFlags: true,
+            conflictFlags: true,
+            customerId: true,
+            projectId: true,
+            workspaceId: true,
+            createdAt: true,
+          },
+        })
+        doc = recent.find(d => d.originalName.toLowerCase().includes(needle))
+      }
+      if (!doc) return { success: true, data: { found: false, fileSaved: false, message: 'No saved upload matched that documentId or filename.' } }
+
+      const jobs = await db.agentJob.findMany({
+        where: { contractorId, type: 'doc_analysis', inputJson: { contains: doc.id } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { id: true, status: true, heartbeat: true, error: true, createdAt: true, startedAt: true, completedAt: true },
+      })
+
+      return {
+        success: true,
+        data: {
+          found: true,
+          fileSaved: true,
+          document: {
+            ...compactDocument(doc),
+            aiCategory: doc.aiCategory,
+            extractionConfidence: doc.extractionConfidence,
+            missingData: safeJsonParse(doc.missingDataFlags, null),
+            conflicts: safeJsonParse(doc.conflictFlags, null),
+            needsLink: !doc.customerId && !doc.projectId && !doc.workspaceId,
+          },
+          analysisStatus: doc.status,
+          analysisPending: ['queued', 'processing', 'pending_review'].includes(doc.status),
+          linked: Boolean(doc.customerId || doc.projectId || doc.workspaceId),
+          recentJobs: jobs,
+          guidance: doc.status === 'failed'
+            ? 'The file row is saved, but analysis failed. Tell the user it saved but did not analyze successfully.'
+            : 'Report saved/link/analysis as separate facts. Do not say analysis is complete unless status is reviewed or needs_review with extracted data available.',
+        },
+      }
+    },
+  },
 
   {
     name: 'get_project_context',
@@ -901,6 +1064,102 @@ export const TOOLS: ToolDef[] = [
           guidance: recentUnlinkedDocuments.length
             ? 'Some recent uploads are not linked to any customer/project/workspace yet. Do not say they are in this customer file unless a link tool succeeds.'
             : undefined,
+        },
+      }
+    },
+  },
+  {
+    name: 'save_customer_note',
+    description: 'Save an operational note to a customer profile/file from main chat. Use when the user asks to save notes, profile info, customer preferences, job context, call notes, or "remember this for this customer". This creates a real Note row and should be used instead of narrating that notes were saved.',
+    schema: z.object({
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      projectId: z.string().max(200).optional(),
+      content: z.string().min(1).max(10000),
+      noteType: z.string().max(80).optional(),
+      documentIds: z.array(z.string().max(200)).optional(),
+    }).refine(v => Boolean(v.customerId || v.customerName), 'customerId or customerName is required'),
+    allowedChannels: ['main', 'management', 'sales', 'insurance'],
+    execute: async (args, contractorId, ctx) => {
+      const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+      if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+      if ('notFound' in resolved) {
+        return {
+          success: true,
+          data: {
+            saved: false,
+            needsCustomer: true,
+            query: resolved.query,
+            message: `No saved customer matched "${resolved.query}". Create or choose a customer before saving the note.`,
+          },
+        }
+      }
+      if ('needsClarification' in resolved) {
+        return {
+          success: true,
+          data: {
+            saved: false,
+            needsClarification: true,
+            matches: resolved.matches,
+            message: 'Multiple customers matched. Ask which customer file should receive this note.',
+          },
+        }
+      }
+      const customer = resolved.customer
+
+      let projectId: string | null = null
+      if (args.projectId) {
+        const project = await db.project.findFirst({
+          where: { id: args.projectId, contractorId },
+          select: { id: true, customerId: true, title: true },
+        })
+        if (!project) return { success: false, data: null, error: 'Project not found' }
+        if (project.customerId && project.customerId !== customer.id) {
+          return { success: false, data: null, error: `Project "${project.title}" belongs to a different customer. Note was not saved.` }
+        }
+        projectId = project.id
+      }
+
+      const note = await db.note.create({
+        data: {
+          customerId: customer.id,
+          projectId,
+          type: args.noteType?.trim() || 'general',
+          content: args.content.trim(),
+          isAiGenerated: false,
+          createdById: ctx.userId ?? undefined,
+        },
+      })
+
+      const validDocumentIds = (args.documentIds || []).filter(Boolean)
+      if (validDocumentIds.length > 0 && projectId) {
+        for (const documentId of validDocumentIds.slice(0, 10)) {
+          await linkDocumentToJobPacket({
+            contractorId,
+            documentId,
+            projectId,
+            customerId: customer.id,
+            entityType: 'note',
+            entityId: note.id,
+            role: 'note_attachment',
+            label: `Attached to note ${note.id}`,
+            source: 'ai',
+            metadata: { linkedVia: 'save_customer_note' },
+          }).catch(() => null)
+        }
+      }
+
+      console.log(`[tools-v2] save_customer_note: saved note ${note.id} for ${customer.name}`)
+      return {
+        success: true,
+        data: {
+          saved: true,
+          note: { id: note.id, type: note.type, content: note.content, customerId: note.customerId, projectId: note.projectId, createdAt: note.createdAt },
+          customer,
+          linkedDocumentIds: projectId ? validDocumentIds.slice(0, 10) : [],
+          message: projectId
+            ? `Saved note to ${customer.name}'s project/customer file.`
+            : `Saved note to ${customer.name}'s customer file.`,
         },
       }
     },
