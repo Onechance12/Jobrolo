@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import type { TenantContext } from '@/lib/security/context'
 import { normalizePropertyAddress, upsertPropertyMemory, getPropertyMemoryContext, createCanvassingGamePlan } from '@/lib/property-memory'
+import { isOpenAIWebSearchConfigured, openAIWebSearch, type WebSearchSource } from '@/lib/openai-web-search'
 
 type LocationInput = {
   lat?: number | null
@@ -79,6 +80,34 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return out
 }
 
+function extractJsonObject(text: string): any | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const body = (fenced?.[1] || text || '').trim()
+  const start = body.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < body.length; i++) {
+    const ch = body[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        try { return JSON.parse(body.slice(start, i + 1)) } catch { return null }
+      }
+    }
+  }
+  return null
+}
+
 function scoreCandidate(input: {
   source?: string | null
   propertyMemory?: any
@@ -150,6 +179,152 @@ async function callExternalPropertyProvider(ctx: TenantContext, input: PropertyR
     return { candidates: [], provider: 'provider_failed', summary: error instanceof Error ? error.message : 'Property provider lookup failed.' }
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+const BLOCKED_PROPERTY_SEARCH_DOMAINS = [
+  'whitepages.com',
+  'spokeo.com',
+  'beenverified.com',
+  'truthfinder.com',
+  'fastpeoplesearch.com',
+  'radaris.com',
+  'mylife.com',
+  'peoplefinders.com',
+]
+
+function sourceLine(sources: WebSearchSource[]) {
+  return sources
+    .map(source => source.url)
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(' | ')
+}
+
+function buildPropertyWebSearchPrompt(input: PropertyResearchInput) {
+  const loc = normalizeLocation(input.location)
+  const parts = [
+    input.address ? `Address: ${input.address}` : null,
+    input.city ? `City: ${input.city}` : null,
+    input.state ? `State: ${input.state}` : null,
+    input.postalCode ? `ZIP: ${input.postalCode}` : null,
+    loc ? `GPS: ${loc.lat}, ${loc.lng} accuracy ${loc.accuracyMeters ?? 'unknown'}m` : null,
+    input.query ? `User query/context: ${input.query}` : null,
+    input.notes ? `Field notes: ${input.notes}` : null,
+  ].filter(Boolean).join('\n')
+
+  return `You are helping a roofing contractor verify public property information while standing in the field.
+
+Use web search to find likely public property/appraisal/tax records for this property.
+Prioritize official county appraisal district, county property tax, county assessor, city parcel, or official GIS/property records.
+Examples of relevant North Texas appraisal sources include tad.org, dentoncad.org, prad.org, collincad.org, dallascad.org, but choose the correct public source for the location.
+Avoid people-search/private-broker sites. Do not guess owner identity from unofficial people profiles.
+
+Input:
+${parts || 'No address supplied. Search from the GPS/current-location context if possible.'}
+
+Return ONLY valid JSON:
+{
+  "summary": "short human summary",
+  "warnings": ["anything uncertain, missing, or not found"],
+  "candidates": [
+    {
+      "address": "situs/property address",
+      "city": "city if found",
+      "state": "state if found",
+      "postalCode": "zip if found",
+      "ownerName": "owner name from official public record if found",
+      "ownerMailingAddress": "mailing address if found",
+      "parcelId": "parcel id if found",
+      "countyAccountId": "account/property id if found",
+      "county": "county/appraisal district if found",
+      "source": "official source name",
+      "sourceUrl": "best source URL",
+      "confidence": 0.0,
+      "matchReason": "why this candidate matches the field location or address",
+      "propertyType": "property type if found",
+      "marketValue": "number if found",
+      "assessedValue": "number if found",
+      "improvementValue": "number if found",
+      "landValue": "number if found",
+      "livingAreaSqft": "number if found",
+      "yearBuilt": "number if found",
+      "ownerOccupiedSignal": "owner_occupied|rental|unknown if supportable"
+    }
+  ]
+}
+
+Rules:
+- If you only have GPS and cannot verify the exact address from an official source, return a candidate with confidence <= 0.55 and explain that confirmation is required.
+- If address/owner data comes from an official appraisal/tax source, confidence may be higher.
+- Do not include claim, insurance, or sales assumptions.
+- Do not invent missing values.`
+}
+
+async function callOpenAIPropertyWebSearch(ctx: TenantContext, input: PropertyResearchInput) {
+  if (input.allowProviderLookup === false) return { candidates: [], provider: 'openai_web_search_skipped', summary: 'OpenAI web search skipped.' }
+  if (!isOpenAIWebSearchConfigured()) return { candidates: [], provider: 'openai_web_search_disabled', summary: 'OpenAI web search is not configured.' }
+
+  const mode = input.mode || (input.streets?.length ? 'street_game_plan' : input.address ? 'address_lookup' : 'approaching_house')
+  if (mode === 'street_game_plan' && input.allowProviderLookup !== true) {
+    return { candidates: [], provider: 'openai_web_search_skipped', summary: 'OpenAI web search skipped for broad street research to control cost. Ask to research the street online to run it.' }
+  }
+
+  const result = await openAIWebSearch(buildPropertyWebSearchPrompt(input), {
+    contractorId: ctx.contractorId,
+    userId: ctx.user?.id,
+    searchContextSize: mode === 'street_game_plan' ? 'high' : 'medium',
+    timeoutMs: mode === 'street_game_plan' ? 45_000 : 30_000,
+    maxOutputTokens: mode === 'street_game_plan' ? 2600 : 1800,
+    forceSearch: true,
+    blockedDomains: BLOCKED_PROPERTY_SEARCH_DOMAINS,
+  })
+
+  if (!result.ok) return { candidates: [], provider: 'openai_web_search_failed', summary: result.error || 'OpenAI web search failed.', sources: [] as WebSearchSource[] }
+
+  const parsed = extractJsonObject(result.text) || {}
+  const parsedCandidates = Array.isArray(parsed?.candidates) ? parsed.candidates : []
+  const fallbackSources = sourceLine(result.sources)
+  const candidates = parsedCandidates.map((raw: any) => {
+    const bestUrl = raw.sourceUrl || raw.url || result.sources[0]?.url
+    const data = providerCandidateToData({
+      ...raw,
+      source: 'openai_web_search',
+      matchReason: [raw.matchReason || raw.reason, bestUrl ? `Source: ${bestUrl}` : fallbackSources ? `Sources: ${fallbackSources}` : null].filter(Boolean).join(' '),
+      rawJson: JSON.stringify({ ...raw, webSearchSources: result.sources, model: result.model, warnings: parsed?.warnings || [] }),
+    }, input)
+    return {
+      ...data,
+      source: 'openai_web_search',
+      confidence: Math.max(0, Math.min(0.95, Number(raw.confidence ?? data.confidence ?? 0.62))),
+      rawJson: JSON.stringify({ ...raw, webSearchSources: result.sources, model: result.model, warnings: parsed?.warnings || [] }),
+    }
+  })
+
+  return {
+    candidates,
+    provider: 'openai_web_search',
+    summary: parsed?.summary || (candidates.length ? `OpenAI web search found ${candidates.length} public property candidate(s).` : `OpenAI web search ran but did not return structured property candidates. ${result.text.slice(0, 300)}`),
+    sources: result.sources,
+    model: result.model,
+    warnings: Array.isArray(parsed?.warnings) ? parsed.warnings : [],
+  }
+}
+
+async function callPropertyProviders(ctx: TenantContext, input: PropertyResearchInput) {
+  if (input.allowProviderLookup === false) return { candidates: [], provider: 'skipped', summary: 'Provider lookup skipped.' }
+  const [webhook, openaiWeb] = await Promise.all([
+    callExternalPropertyProvider(ctx, input),
+    callOpenAIPropertyWebSearch(ctx, input),
+  ])
+  const candidates = [...(webhook.candidates || []), ...(openaiWeb.candidates || [])]
+  const summaries = [webhook.summary, openaiWeb.summary].filter(Boolean)
+  return {
+    candidates,
+    provider: [webhook.provider, openaiWeb.provider].filter(Boolean).join('+') || 'none',
+    summary: summaries.join(' '),
+    webhook,
+    openaiWebSearch: openaiWeb,
   }
 }
 
@@ -307,7 +482,7 @@ export async function researchPropertyNow(ctx: TenantContext, input: PropertyRes
 
   try {
     const memories = await findCachedPropertyCandidates(ctx, input)
-    const provider = input.allowProviderLookup === false ? { candidates: [], provider: 'skipped', summary: 'Provider lookup skipped.' } : await callExternalPropertyProvider(ctx, input)
+    const provider = input.allowProviderLookup === false ? { candidates: [], provider: 'skipped', summary: 'Provider lookup skipped.' } : await callPropertyProviders(ctx, input)
     const rawCandidates = [
       ...memories.map(m => memoryToCandidate(m, input.focusMode)),
       ...(provider.candidates || []).map(raw => {
@@ -573,7 +748,20 @@ async function createStreetResearchRunFromCandidates(ctx: TenantContext, run: an
 }
 
 function cardCandidate(c: any) {
-  return { id: c.id, propertyMemoryId: c.propertyMemoryId, address: c.address, ownerName: c.ownerName, score: c.overallScore, confidence: c.confidence, reason: c.matchReason, source: c.source }
+  const raw = safeJson<Record<string, any>>(c.rawJson, {})
+  const sources = Array.isArray(raw.webSearchSources) ? raw.webSearchSources : []
+  return {
+    id: c.id,
+    propertyMemoryId: c.propertyMemoryId,
+    address: c.address,
+    ownerName: c.ownerName,
+    score: c.overallScore,
+    confidence: c.confidence,
+    reason: c.matchReason,
+    source: c.source,
+    sourceUrl: raw.sourceUrl || raw.url || sources[0]?.url || null,
+    sources: sources.slice(0, 5),
+  }
 }
 
 function buildPartnerGamePlanSummary(input: { focus: string; energyLevel?: string | null; mindset?: string | null; hotCount: number; followCount: number; streetNames: string[] }) {

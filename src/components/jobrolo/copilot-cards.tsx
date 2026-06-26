@@ -821,6 +821,7 @@ export function FieldInspectionLeadCard({ data }: { data?: any }) {
               {best.ownerName ? <div>Owner: {best.ownerName}</div> : null}
               {typeof best.confidence === 'number' ? <div>Confidence: {Math.round(best.confidence * 100)}%</div> : null}
               {best.reason ? <div>{best.reason}</div> : null}
+              {best.sourceUrl ? <a className="mt-1 inline-flex text-emerald-700 underline underline-offset-2 dark:text-emerald-300" href={best.sourceUrl} target="_blank" rel="noreferrer">Open source</a> : null}
               {unverifiedGpsOnly ? <div className="mt-1 text-amber-700 dark:text-amber-300">GPS/address is saved, but public owner lookup still needs a property-data provider before Jobrolo can verify homeowner records automatically.</div> : null}
             </div>
           </div>
@@ -1021,6 +1022,7 @@ export function PropertyResearchCard({ data }: { data?: any }) {
               {typeof best.score === 'number' ? <div>Opportunity score: {best.score}</div> : null}
               {typeof best.confidence === 'number' ? <div>Confidence: {Math.round(best.confidence * 100)}%</div> : null}
               {best.reason ? <div>Reason: {best.reason}</div> : null}
+              {best.sourceUrl ? <a className="mt-1 inline-flex text-cyan-700 underline underline-offset-2 dark:text-cyan-300" href={best.sourceUrl} target="_blank" rel="noreferrer">Open source</a> : null}
             </div>
           </div>
         ) : null}
