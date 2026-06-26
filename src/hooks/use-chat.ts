@@ -100,8 +100,9 @@ export function useChat() {
     })
   }, [addMessage, clearStreamingText, clearUploadProgress, setStreaming, setTyping])
 
-  const sendMessage = useCallback(async ({ text, attachments = [] }: { text: string; attachments?: File[] }) => {
+  const sendMessage = useCallback(async ({ text, displayText, attachments = [] }: { text: string; displayText?: string; attachments?: File[] }) => {
     if (!text.trim() && attachments.length === 0) return
+    const visibleText = displayText ?? text
     abortRef.current = false
     abortControllerRef.current?.abort()
     abortControllerRef.current = new AbortController()
@@ -112,13 +113,13 @@ export function useChat() {
         const r = await fetch('/api/conversations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: text.slice(0, 60) || 'New Chat' }),
+          body: JSON.stringify({ title: visibleText.slice(0, 60) || 'New Chat' }),
         })
         if (r.ok) {
           const d = await r.json()
           activeConversationId = d.conversation.id as string
           store.setConversationId(activeConversationId)
-          store.createConversationLocally(activeConversationId, text.slice(0, 60))
+          store.createConversationLocally(activeConversationId, visibleText.slice(0, 60))
         }
       } catch {}
     }
@@ -131,7 +132,7 @@ export function useChat() {
       size: f.size,
     }))
     const userMessageId = crypto.randomUUID()
-    addMessage({ id: userMessageId, role: 'user', content: text, attachments: previewAttachments, createdAt: new Date().toISOString() })
+    addMessage({ id: userMessageId, role: 'user', content: visibleText, attachments: previewAttachments, createdAt: new Date().toISOString() })
 
     let uploadedDocIds: string[] = []
     let serverAttachments: MessageAttachment[] = []
@@ -141,7 +142,7 @@ export function useChat() {
         if (data.documents.length === 0) {
           const errMsg = data.failures.map(f => `${f.fileName}: ${f.error}`).join('\n') || 'Upload failed before the server responded'
           console.error('[use-chat] upload failed:', errMsg)
-          updateMessage(userMessageId, { content: `${text}\n\n⚠️ Upload failed: ${errMsg}` })
+          updateMessage(userMessageId, { content: `${visibleText}\n\n⚠️ Upload failed: ${errMsg}` })
           addMessage({
             id: crypto.randomUUID(),
             role: 'assistant',
@@ -286,6 +287,7 @@ export function useChat() {
         signal: abortControllerRef.current.signal,
         body: JSON.stringify({
           message: fullMessage,
+          displayMessage: visibleText,
           conversationId: activeConversationId,
           businessContext: useChatStore.getState().businessContext,
           documentIds: uploadedDocIds,

@@ -71,7 +71,7 @@ export function createJob(): string {
 export function getJob(jobId: string): ChatJob | null { return jobs.get(jobId) || null }
 
 export async function processJob(jobId: string, opts: {
-  message: string; conversationId?: string; businessContext?: string; documentIds?: string[]
+  message: string; displayMessage?: string; conversationId?: string; businessContext?: string; documentIds?: string[]
   history?: Array<{ role: 'user' | 'assistant'; content: string }>; workspaceId?: string; chatId?: string
 }): Promise<void> {
   const job = jobs.get(jobId); if (!job) return
@@ -82,7 +82,8 @@ export async function processJob(jobId: string, opts: {
     console.error('[chat-job] legacy in-memory processor disabled; use enqueueAgentJob/processAgentJob')
     return
   }
-  const { message, conversationId, businessContext, documentIds = [], history = [], workspaceId, chatId } = opts
+  const { message, displayMessage, conversationId, businessContext, documentIds = [], history = [], workspaceId, chatId } = opts
+  const visibleMessage = displayMessage?.trim() || message
   let heartbeatCount = 0
   const heartbeatTexts = ['Thinking...', 'Processing...', 'Gathering data...', 'Almost there...', 'Working on it...']
   const hb = setInterval(() => { const j = jobs.get(jobId); if (!j || j.status !== 'processing') { clearInterval(hb); return } j.heartbeat = heartbeatTexts[heartbeatCount++ % heartbeatTexts.length] }, 2000)
@@ -90,13 +91,13 @@ export async function processJob(jobId: string, opts: {
   try {
     const contractor = await db.contractor.findFirst(); if (!contractor) throw new Error('No contractor')
     let conversation = conversationId ? await db.conversation.findUnique({ where: { id: conversationId } }) : null
-    if (!conversation) conversation = await db.conversation.create({ data: { contractorId: contractor.id, title: message.slice(0, 50) } })
+    if (!conversation) conversation = await db.conversation.create({ data: { contractorId: contractor.id, title: visibleMessage.slice(0, 50) } })
 
     if (workspaceId && chatId) {
-      await db.workspaceMessage.create({ data: { chatId, role: 'user', content: message, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
+      await db.workspaceMessage.create({ data: { chatId, role: 'user', content: visibleMessage, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
       await db.workspaceChat.update({ where: { id: chatId }, data: { lastActivity: new Date() } })
     } else {
-      await db.message.create({ data: { conversationId: conversation.id, role: 'user', content: message, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
+      await db.message.create({ data: { conversationId: conversation.id, role: 'user', content: visibleMessage, attachments: documentIds.length ? JSON.stringify(documentIds) : null } })
     }
 
     let systemPrompt: string

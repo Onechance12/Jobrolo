@@ -148,6 +148,7 @@ function deriveApprovalCardFromToolResults(iterations: Array<{ toolResults?: Arr
 export async function processAgentJob(job: AgentJobRow) {
   const input = JSON.parse(job.inputJson) as {
     message: string
+    displayMessage?: string
     conversationId?: string
     businessContext?: string
     documentIds?: string[]
@@ -156,6 +157,7 @@ export async function processAgentJob(job: AgentJobRow) {
     chatId?: string
   }
   input.documentIds = normalizeIdList(input.documentIds)
+  const displayMessage = input.displayMessage?.trim() || input.message
 
   // Heartbeat loop — show the user what we're doing
   let hbCount = 0
@@ -189,7 +191,7 @@ export async function processAgentJob(job: AgentJobRow) {
     // 1. Persist user message + find/create conversation
     let conversationId = input.conversationId ?? job.conversationId
     if (!conversationId) {
-      const convo = await db.conversation.create({ data: { contractorId: contractor.id, title: input.message.slice(0, 50) } })
+      const convo = await db.conversation.create({ data: { contractorId: contractor.id, title: displayMessage.slice(0, 50) } })
       conversationId = convo.id
     }
     const conversation = await db.conversation.findFirst({ where: { id: conversationId, contractorId: job.contractorId } })
@@ -203,10 +205,10 @@ export async function processAgentJob(job: AgentJobRow) {
         select: { id: true },
       })
       if (!chat) throw new Error('Workspace/chat not found')
-      await db.workspaceMessage.create({ data: { chatId: job.chatId, role: 'user', content: input.message, attachments: input.documentIds?.length ? JSON.stringify(input.documentIds) : null } })
+      await db.workspaceMessage.create({ data: { chatId: job.chatId, role: 'user', content: displayMessage, attachments: input.documentIds?.length ? JSON.stringify(input.documentIds) : null } })
       await db.workspaceChat.update({ where: { id: job.chatId }, data: { lastActivity: new Date() } })
     } else {
-      await db.message.create({ data: { conversationId: conversation.id, role: 'user', content: input.message, attachments: input.documentIds?.length ? JSON.stringify(input.documentIds) : null } })
+      await db.message.create({ data: { conversationId: conversation.id, role: 'user', content: displayMessage, attachments: input.documentIds?.length ? JSON.stringify(input.documentIds) : null } })
     }
 
     // 2. Build system prompt

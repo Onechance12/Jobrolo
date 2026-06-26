@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const { message, conversationId, businessContext, history = [] } = body as any
+  const { message, displayMessage, conversationId, businessContext, history = [] } = body as any
   const documentIds = normalizeIdList((body as any).documentIds)
 
   // Allow empty message IF documents were uploaded — the user might just
@@ -52,9 +52,13 @@ export async function POST(req: NextRequest) {
 
   // If message is empty but docs exist, use a default prompt
   const finalMessage = message.trim() || '(No text message — please review the uploaded document(s) and tell me what you found.)'
+  const finalDisplayMessage = typeof displayMessage === 'string' && displayMessage.trim()
+    ? displayMessage.trim()
+    : finalMessage
 
   // Sanitize user input
   const sanitized = sanitizeUserInput(finalMessage)
+  const sanitizedDisplay = sanitizeUserInput(finalDisplayMessage)
   if (sanitized.warnings.length > 0) {
     console.warn(`[chat] input warnings for ${ctx.actor}:`, sanitized.warnings)
   }
@@ -63,10 +67,10 @@ export async function POST(req: NextRequest) {
     contractorId: ctx.contractorId,
     userId: ctx.user.id,
     type: 'chat',
-    input: { message: sanitized.text, conversationId, businessContext, documentIds, history },
+    input: { message: sanitized.text, displayMessage: sanitizedDisplay.text, conversationId, businessContext, documentIds, history },
     priority: 5,
   })
 
-  await audit(ctx, 'ai_message', 'conversation', conversationId ?? null, `Sent message: ${sanitized.text.slice(0, 100)}`, { jobId: job.id, documentIds }, req)
+  await audit(ctx, 'ai_message', 'conversation', conversationId ?? null, `Sent message: ${sanitizedDisplay.text.slice(0, 100)}`, { jobId: job.id, documentIds }, req)
   return NextResponse.json({ jobId: job.id })
 }

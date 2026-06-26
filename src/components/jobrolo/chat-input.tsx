@@ -1,12 +1,12 @@
 'use client'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square, Building2, Globe2, Users, Save } from 'lucide-react'
+import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square, Building2, Globe2, Users, Save, MapPin } from 'lucide-react'
 import { cn, formatFileSize, isImageFile } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 
 type SendResult = { ok?: boolean; keepAttachments?: boolean } | void
-interface Props { onSend: (args: { text: string; attachments?: File[] }) => SendResult | Promise<SendResult>; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
+interface Props { onSend: (args: { text: string; displayText?: string; attachments?: File[] }) => SendResult | Promise<SendResult>; onStop?: () => void; disabled?: boolean; isWorking?: boolean; placeholder?: string }
 type Shortcut = { label: string; prompt: string }
 const CUSTOM_SHORTCUTS_KEY = 'jobrolo:custom-command-shortcuts:v1'
 const SUGGESTIONS: Shortcut[] = [
@@ -18,7 +18,7 @@ const SUGGESTIONS: Shortcut[] = [
 const QUICK_COMMANDS: Shortcut[] = [
   { label: 'Update company info', prompt: 'Update my company profile: company name, phone, email, website, and address are ' },
   { label: 'Research website', prompt: 'Research my company website and suggest updates to my company profile: ' },
-  { label: 'Canvass here', prompt: 'Help me canvass where I am right now.' },
+  { label: 'Field', prompt: 'Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I am not at a saved job, help me canvass from here.' },
   { label: 'Create client', prompt: 'Create a client named ' },
   { label: 'Create job', prompt: 'Create a project/job for ' },
   { label: 'Create crew chat', prompt: 'Create a crew chat for ' },
@@ -29,8 +29,9 @@ const QUICK_COMMANDS: Shortcut[] = [
 function shouldRequestBrowserLocation(prompt: string) {
   const t = prompt.toLowerCase().replace(/[’']/g, "'")
   const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now)\b/i.test(t)
-  const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route)\b/i.test(t)
-  return asksHere || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location)\b/i.test(t))
+  const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route|inspection|appointment|jobsite|job site|arrived|onsite|on site)\b/i.test(t)
+  const liveFieldMoment = /\b(walking up|walk up|i'?m here|i arrived|arrived|just landed|landed (an? )?inspection|got (an? )?inspection|set (an? )?inspection|at the house|at the property|outside mowing)\b/i.test(t)
+  return asksHere || liveFieldMoment || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
 }
 
 function browserLocationErrorMessage(err: unknown) {
@@ -126,7 +127,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
           return
         }
       }
-      const result = await onSend({ text: finalText, attachments: filesToSend })
+      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend })
       if (result && typeof result === 'object' && result.keepAttachments) {
         setLocalError('Upload did not finish. I kept the file attached so you can try again.')
         return
@@ -193,7 +194,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
             {QUICK_COMMANDS.map((cmd) => (
               <MenuButton
                 key={cmd.prompt}
-                icon={cmd.label.includes('company') ? <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-300" /> : cmd.label.includes('website') ? <Globe2 className="w-5 h-5 text-emerald-600 dark:text-emerald-300" /> : cmd.label.includes('chat') || cmd.label.includes('Invite') ? <Users className="w-5 h-5 text-violet-600 dark:text-violet-300" /> : <FileText className="w-5 h-5 text-blue-600 dark:text-blue-300" />}
+                icon={cmd.label.includes('Field') ? <MapPin className="w-5 h-5 text-emerald-600 dark:text-emerald-300" /> : cmd.label.includes('company') ? <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-300" /> : cmd.label.includes('website') ? <Globe2 className="w-5 h-5 text-emerald-600 dark:text-emerald-300" /> : cmd.label.includes('chat') || cmd.label.includes('Invite') ? <Users className="w-5 h-5 text-violet-600 dark:text-violet-300" /> : <FileText className="w-5 h-5 text-blue-600 dark:text-blue-300" />}
                 label={cmd.label}
                 hint="Insert editable prompt"
                 onClick={() => insertPrompt(cmd.prompt)}

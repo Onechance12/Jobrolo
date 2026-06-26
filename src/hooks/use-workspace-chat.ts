@@ -94,8 +94,9 @@ export function useWorkspaceChat() {
     })
   }, [addMessage, clearStreamingText, setTyping])
 
-  const sendWorkspaceMessage = useCallback(async ({ text, attachments = [] }: { text: string; attachments?: File[] }) => {
+  const sendWorkspaceMessage = useCallback(async ({ text, displayText, attachments = [] }: { text: string; displayText?: string; attachments?: File[] }) => {
     if (!text.trim() && attachments.length === 0) return
+    const visibleText = displayText ?? text
     abortRef.current = false
     abortControllerRef.current?.abort()
     abortControllerRef.current = new AbortController()
@@ -112,7 +113,7 @@ export function useWorkspaceChat() {
       size: f.size,
     }))
     const userMessageId = crypto.randomUUID()
-    addMessage({ id: userMessageId, role: 'user', content: text, attachments: previewAttachments, createdAt: new Date().toISOString() })
+    addMessage({ id: userMessageId, role: 'user', content: visibleText, attachments: previewAttachments, createdAt: new Date().toISOString() })
 
     let uploadedDocIds: string[] = []
     let serverAttachments: MessageAttachment[] = []
@@ -259,7 +260,7 @@ export function useWorkspaceChat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortControllerRef.current.signal,
-        body: JSON.stringify({ chatId, message: fullMsg, documentIds: uploadedDocIds, history: serializedHistory }),
+        body: JSON.stringify({ chatId, message: fullMsg, displayMessage: visibleText, documentIds: uploadedDocIds, history: serializedHistory }),
       })
       if (!res.ok) throw new Error(res.status === 502 ? 'Server took too long.' : `HTTP ${res.status}`)
       const { jobId } = await res.json()

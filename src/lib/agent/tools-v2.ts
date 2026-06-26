@@ -3663,6 +3663,104 @@ export const TOOLS: ToolDef[] = [
   },
 
   {
+    name: 'start_field_inspection_lead',
+    description: 'Save a newly landed field inspection from the current GPS location when the user is canvassing or at an unknown house and there is not yet a customer/project/appointment. Use for phrases like "walking up for an inspection", "I just landed this inspection", "they were outside mowing", "add this inspection at my location", or "search customer info and add my location". Creates or reuses an active canvassing session, creates an inspection-set lead/pin, logs the door outcome, and optionally runs property lookup. Does not create a real customer/project until the user confirms conversion.',
+    schema: z.object({
+      sessionId: z.string().optional(),
+      address: z.string().optional(),
+      homeownerName: z.string().optional(),
+      phone: z.string().optional(),
+      notes: z.string().optional(),
+      searchPropertyInfo: z.boolean().optional(),
+      location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'management', 'crew'],
+    execute: async (args, contractorId, ctx) => {
+      const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      let sessionId = args.sessionId
+      if (!sessionId) {
+        const existingSession = await db.canvassingSession.findFirst({
+          where: {
+            contractorId,
+            status: { in: ['active', 'paused'] },
+            ...(ctx.userId ? { userId: ctx.userId } : {}),
+          },
+          orderBy: { startedAt: 'desc' },
+          select: { id: true },
+        })
+        if (existingSession) {
+          sessionId = existingSession.id
+        } else {
+          const session = await startCanvassingSession(tenant, {
+            title: 'Field inspection run',
+            territoryName: 'Current field area',
+            notes: 'Started from a newly landed field inspection.',
+            location: args.location,
+          })
+          sessionId = session.id
+        }
+      }
+      const notes = [
+        args.notes?.trim(),
+        'New inspection landed in the field. Save as inspection lead until customer/project is confirmed.',
+      ].filter(Boolean).join('\n')
+      const lead = await createCanvassingLead(tenant, {
+        sessionId,
+        address: args.address,
+        homeownerName: args.homeownerName,
+        phone: args.phone,
+        notes,
+        status: 'inspection_set',
+        source: 'field_inspection',
+        location: args.location,
+        metadata: { fieldInspection: true },
+      })
+      const activity = await logCanvassingActivity(tenant, {
+        leadId: lead.id,
+        sessionId,
+        type: 'inspection_set',
+        status: 'inspection_set',
+        summary: args.notes || 'Inspection landed from field canvassing.',
+        notes: args.notes,
+        location: args.location,
+        metadata: { fieldInspection: true },
+      })
+      const propertyResearch = args.searchPropertyInfo
+        ? await researchPropertyNow(tenant, {
+            mode: 'approaching_house',
+            query: args.address || 'current GPS location',
+            address: args.address,
+            location: args.location,
+            notes: args.notes,
+            allowProviderLookup: true,
+          }).catch(error => ({ error: error instanceof Error ? error.message : 'Property lookup failed' }))
+        : null
+      return {
+        success: true,
+        data: {
+          sessionId,
+          lead,
+          activity,
+          propertyResearch,
+          message: 'Saved the current-location inspection as an inspection lead. Convert it to a customer/project after the owner confirms details.',
+          card: {
+            cardType: 'canvassing_lead',
+            leadId: lead.id,
+            sessionId,
+            address: lead.address,
+            homeownerName: lead.homeownerName,
+            phone: lead.phone,
+            status: lead.status,
+            latitude: lead.latitude,
+            longitude: lead.longitude,
+            summary: args.notes || 'Inspection landed from field canvassing.',
+          },
+        },
+      }
+    },
+  },
+
+  {
     name: 'create_canvassing_lead_at_location',
     description: 'Create a canvassing lead/pin from the current field GPS location when the user is standing at a house that does not yet have a customer or project.',
     schema: z.object({

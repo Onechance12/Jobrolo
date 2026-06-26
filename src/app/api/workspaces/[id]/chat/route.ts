@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const body = await req.json().catch(() => ({}))
-  const { chatId, message, history = [] } = body
+  const { chatId, message, displayMessage, history = [] } = body
   const documentIds = normalizeIdList(body.documentIds)
   if (!chatId) return NextResponse.json({ error: 'chatId required' }, { status: 400 })
 
@@ -42,6 +42,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // If message is empty but docs exist, use a default prompt
   const finalMessage = message.trim() || '(No text message — please review the uploaded document(s) and tell me what you found.)'
+  const finalDisplayMessage = typeof displayMessage === 'string' && displayMessage.trim()
+    ? displayMessage.trim()
+    : finalMessage
 
   // Verify chat belongs to workspace
   const chat = await requireWorkspaceChat(ctx, workspaceId, String(chatId))
@@ -53,16 +56,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const sanitized = sanitizeUserInput(finalMessage)
+  const sanitizedDisplay = sanitizeUserInput(finalDisplayMessage)
   const job = await enqueueAgentJob({
     contractorId: ctx.contractorId,
     userId: ctx.user.id,
     type: 'workspace_chat',
-    input: { message: sanitized.text, documentIds, history, workspaceId, chatId },
+    input: { message: sanitized.text, displayMessage: sanitizedDisplay.text, documentIds, history, workspaceId, chatId },
     workspaceId,
     chatId,
     priority: 5,
   })
 
-  await audit(ctx, 'ai_message', 'workspace_chat', chatId, `[${chat.chatType}] ${sanitized.text.slice(0, 100)}`, { jobId: job.id, workspaceId }, req)
+  await audit(ctx, 'ai_message', 'workspace_chat', chatId, `[${chat.chatType}] ${sanitizedDisplay.text.slice(0, 100)}`, { jobId: job.id, workspaceId }, req)
   return NextResponse.json({ jobId: job.id })
 }

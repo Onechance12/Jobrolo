@@ -202,7 +202,7 @@ export default function Page() {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, workspaceMessages, isStreaming, isWorkspaceTyping, streamingText, workspaceStreamingText])
 
-  const handleSend = useCallback((args: { text: string; attachments?: File[] }) => {
+  const handleSend = useCallback((args: { text: string; displayText?: string; attachments?: File[] }) => {
     return isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
   }, [isInWorkspace, sendWorkspaceMessage, sendMessage])
 
@@ -439,16 +439,6 @@ export default function Page() {
                   aria-label="Open field briefing"
                 >
                   <MapPin className="h-3.5 w-3.5" /> Field brief
-                </button>
-              )}
-
-              {!isInWorkspace && (
-                <button
-                  onClick={() => insertPrompt('Help me canvass where I am right now.')}
-                  className="flex items-center gap-1.5 rounded-full border border-border bg-background p-2 text-xs font-medium text-foreground shadow-sm hover:bg-muted sm:px-3 sm:py-1.5"
-                  aria-label="Canvass from my current location"
-                >
-                  <MapPin className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Canvass</span>
                 </button>
               )}
 
