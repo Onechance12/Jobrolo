@@ -258,7 +258,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           {(mode === 'field' ? FIELD_QUICK_PROMPTS : shortcuts.slice(0, 6)).map(s => (
             <button
               key={s.id}
-              onClick={() => mode === 'field' ? openInspectionIntake(fieldShortcutSectionId(s.label)) : setText(s.prompt)}
+              onClick={() => mode === 'field' ? runFieldQuickPrompt(s, openInspectionIntake) : setText(s.prompt)}
               className={cn(
                 'inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors',
                 mode === 'field'
@@ -318,6 +318,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
 }
 
 const FIELD_QUICK_PROMPTS: CommandShortcut[] = [
+  { id: 'field-open-map', label: 'Open map', prompt: 'Open map.', icon: 'field' },
   makeCommandShortcut('Start inspection', 'I landed an inspection here. Use my location, research the property if configured, and start an inspection photo workflow.', 'field'),
   makeCommandShortcut('Photo checklist', 'Give me the first inspection photo checklist for this property: front elevation, all elevations, roof slopes, damage, soft metals, interior, attic, detached structures, and documents.', 'field'),
   makeCommandShortcut('Roof photos', 'Start roof photo capture. Ask me for roof overview, slopes/facets, penetrations, ridges, valleys, gutters, vents, and damage photos by section.', 'field'),
@@ -347,6 +348,15 @@ function fieldShortcutSectionId(label: string) {
   if (lower.includes('attic')) return 'attic'
   if (lower.includes('detached')) return 'detached'
   return null
+}
+
+function runFieldQuickPrompt(shortcut: CommandShortcut, openInspectionIntake: (sectionId?: string | null) => void) {
+  const label = shortcut.label.toLowerCase()
+  if (shortcut.id === 'field-open-map' || label.includes('map')) {
+    window.dispatchEvent(new Event('jobrolo:open-field-map'))
+    return
+  }
+  openInspectionIntake(fieldShortcutSectionId(shortcut.label))
 }
 
 function inspectionPromptForSection(section: InspectionPhotoSection) {

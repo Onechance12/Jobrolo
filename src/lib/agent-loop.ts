@@ -202,6 +202,11 @@ function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, e
   return hasOperationalIntent(parsed.text) || hasCompletionClaim(parsed.text)
 }
 
+function looksLikeApprovalReplayFailure(text: string) {
+  return /approval (?:request|command|options).*(?:could not|failed|error|did not accept|not accepted|cannot be processed|could not be processed)/i.test(text)
+    || /system did not accept the approval/i.test(text)
+}
+
 function plainMessageText(text: string) {
   return text
     .replace(/<UNTRUSTED_CONTENT[^>]*>/gi, '')
@@ -457,6 +462,17 @@ Only say linked/attached after the tool result confirms success. Respond as JSON
 }
 
 function buildMissingToolInstruction(text: string) {
+  if (looksLikeApprovalReplayFailure(text)) {
+    return `You described an approval failure without calling the approval replay tool.
+
+Do not narrate. Do not ask for the same approval again unless the replay tool says multiple approvals match.
+
+Call decide_pending_action_requests with:
+{"decision":"approved","approveRecent":true}
+
+If the tool result says multiple approvals matched, ask the user which exact approval to run and include the actionRequestIds/options. Only say completed after the approval replay tool result confirms success. Respond as JSON only.`
+  }
+
   return `You said "${text.slice(0, 160)}" but did not include any tool_calls or actions.
 
 If you are checking, saving, creating, updating, linking, attaching, importing, extracting, clearing, uploading, or retrieving system data, you MUST call the correct tool or include the correct action in strict JSON.
