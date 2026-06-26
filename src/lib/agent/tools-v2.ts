@@ -869,6 +869,9 @@ export const TOOLS: ToolDef[] = [
       try { extractedData = doc.extractedData ? JSON.parse(doc.extractedData) : null } catch {}
       const parsedExtracted = (extractedData && typeof extractedData === 'object') ? extractedData as Record<string, any> : {}
       const isPhotoDocument = doc.fileType === 'photo' || doc.mimeType.startsWith('image/') || doc.aiCategory === 'photo'
+      const documentReview = parsedExtracted.documentReview && typeof parsedExtracted.documentReview === 'object'
+        ? parsedExtracted.documentReview as Record<string, any>
+        : null
 
       // Smart truncation of OCR text: include head + tail with a marker
       const fullOcr = doc.ocrText ?? ''
@@ -896,7 +899,8 @@ export const TOOLS: ToolDef[] = [
           // Collaborative extraction fields
           extractionConfidence: doc.extractionConfidence,
           conflicts: doc.conflictFlags ? JSON.parse(doc.conflictFlags) : null,
-          missingData: isPhotoDocument ? null : doc.missingDataFlags ? JSON.parse(doc.missingDataFlags) : null,
+          missingData: isPhotoDocument ? null : documentReview?.missingDataFlags ?? (doc.missingDataFlags ? JSON.parse(doc.missingDataFlags) : null),
+          documentReview,
           reviewNotes: parsedExtracted.reviewNotes ?? [],
           warnings: isPhotoDocument
             ? (Array.isArray(parsedExtracted.warnings) ? parsedExtracted.warnings : []).filter((w: unknown) => !/claim|policy|carrier|deductible|rcv|acv|depreciation|line item|totals/i.test(String(w)))

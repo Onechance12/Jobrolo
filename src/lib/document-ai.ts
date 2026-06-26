@@ -17,6 +17,10 @@ import { parseScope } from './scope-parser'
 import { extractEntities, mergeEntities, type ExtractedEntities } from './document/entity-extractor'
 import { analyzeScopeIntelligence, serializeForStorage, type ScopeIntelligenceResult } from './scope-intelligence'
 
+const ESTIMATE_AI_CONTEXT_CHARS = Number(process.env.DOCUMENT_AI_ESTIMATE_CONTEXT_CHARS || 30_000)
+const PRICE_SHEET_AI_CONTEXT_CHARS = Number(process.env.DOCUMENT_AI_PRICE_SHEET_CONTEXT_CHARS || 20_000)
+const GENERIC_AI_CONTEXT_CHARS = Number(process.env.DOCUMENT_AI_GENERIC_CONTEXT_CHARS || 16_000)
+
 export interface DocumentAnalysis {
   summary: string
   category: string
@@ -277,7 +281,7 @@ async function analyzePriceSheet(text: string, originalName: string, aiContext: 
   try {
     const r = await chatComplete([
       { role: 'system', content: `Extract material items from this price list. Respond as JSON (no markdown fences):\n{"summary":"1-2 sentences","category":"price_sheet","extractedData":{"supplier":"name or null","validDate":"date or null"},"materialItems":[{"name":"...","sku":"...","category":"Shingles|Underlayment|Decking|Flashing|Fasteners|Ventilation|Sealants|Other","unit":"SQ|ROLL|PCS|BOX|LF|BUNDLE|EA","unitCost":0.00}]}` },
-      { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 8000)}` },
+      { role: 'user', content: `File: ${originalName}\nSource text length: ${text.length} characters. This may be a large supplier price sheet, so preserve supplier, effective-date, region, item, unit, and price details from the provided head/middle/tail context.\n\n${truncateForAI(text, PRICE_SHEET_AI_CONTEXT_CHARS)}` },
     ], { temperature: 0.1, maxTokens: 4000, purpose: 'price_sheet_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const p = JSON.parse(c)
@@ -312,8 +316,8 @@ IMPORTANT — entity ownership rules:
 
 JSON shape:
 {"customer":"homeowner name or null","customerEmail":"homeowner email or null","customerPhone":"homeowner phone or null","projectAddress":"address or null","totalAmount":"total as number or null","scope":"1-2 sentence summary","claimNumber":"claim # or null","policyNumber":"policy # or null","carrier":"insurance company or null","dateOfLoss":"date or null","adjuster":"adjuster name or null","adjusterPhone":"adjuster phone or null","adjusterEmail":"adjuster email or null","deductible":"number or null","rcv":"number or null","acv":"number or null","depreciation":"number or null","mortgageCompany":"string or null"}` },
-      { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 8000)}` },
-    ], { temperature: 0.1, maxTokens: 1000, purpose: 'document_extraction', ...aiContext })
+      { role: 'user', content: `File: ${originalName}\nSource text length: ${text.length} characters. This may be a large estimate/scope. Use the provided head/middle/tail context for metadata and totals; line items are parsed separately from the full text.\n\n${truncateForAI(text, ESTIMATE_AI_CONTEXT_CHARS)}` },
+    ], { temperature: 0.1, maxTokens: 1800, purpose: 'document_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const ext = JSON.parse(c)
 
@@ -354,6 +358,13 @@ JSON shape:
         totalAmount: total,
         scope: ext.scope,
         lineItems,
+        extractionCoverage: {
+          sourceTextLength: text.length,
+          aiContextChars: Math.min(text.length, ESTIMATE_AI_CONTEXT_CHARS),
+          aiContextStrategy: text.length > ESTIMATE_AI_CONTEXT_CHARS ? 'head_middle_tail' : 'full_text',
+          lineItemsParsedFromFullText: true,
+          lineItemCount: lineItems.length,
+        },
         // P2: claimInfo contains adjuster + carrier + claim metadata.
         // These fields are NEVER copied into `customer.*` by downstream code.
         claimInfo: {
@@ -422,7 +433,7 @@ async function analyzeGeneric(text: string, originalName: string, hint?: string,
         role: 'system',
         content: `Analyze this document. Respond as JSON (no markdown fences):${hintStr}\n{"summary":"1-2 sentences","category":"${hint || 'document_analysis'}","extractedData":{"documentType":"type","keyInfo":["facts"],"dates":["dates"],"amounts":["amounts"],"parties":["people/companies"],"letterDate":"date if letter","sender":"who wrote it","recipient":"who it's addressed to"}}`,
       },
-      { role: 'user', content: `File: ${originalName}\n\n${truncateForAI(text, 6000)}` },
+      { role: 'user', content: `File: ${originalName}\nSource text length: ${text.length} characters.\n\n${truncateForAI(text, GENERIC_AI_CONTEXT_CHARS)}` },
     ], { temperature: 0.2, maxTokens: 1500, purpose: 'document_extraction', ...aiContext })
     let c = r.trim(); if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const p = JSON.parse(c)

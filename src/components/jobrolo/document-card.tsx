@@ -38,10 +38,14 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
   const confidence = extracted?.extractionConfidence as number | undefined
   const conflicts = (extracted?.conflicts as Record<string, boolean> | undefined) ?? {}
   const conflictCount = Object.values(conflicts).filter(Boolean).length
-  const missingData = (extracted?.missingData as Record<string, boolean> | undefined) ?? {}
+  const documentReview = (extracted?.documentReview as Record<string, unknown> | undefined) ?? {}
+  const missingData = (documentReview?.missingDataFlags as Record<string, boolean> | undefined)
+    ?? (extracted?.missingData as Record<string, boolean> | undefined)
+    ?? {}
   const missingCount = Object.values(missingData).filter(Boolean).length
   const reviewNotes = (extracted?.reviewNotes as string[] | undefined) ?? []
   const warnings = (extracted?.warnings as string[] | undefined) ?? []
+  const extractionCoverage = (extracted?.extractionCoverage as Record<string, unknown> | undefined) ?? {}
   const hasReviewNotes = reviewNotes.length > 0 || warnings.length > 0
   const isPriceSheet = attachment.documentType === 'price_sheet' || String(attachment.documentCategory ?? '').includes('price')
   const isScopeLike = ['scope_of_loss', 'estimate', 'insurance_claim'].includes(attachment.documentType ?? '')
@@ -112,7 +116,7 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
             )}
             {missingCount > 0 && isReady && (
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded text-amber-700 bg-amber-50" title={Object.keys(missingData).filter(k => missingData[k]).join(', ')}>
-                {missingCount} missing field{missingCount > 1 ? 's' : ''}
+                {missingCount} review item{missingCount > 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -180,6 +184,14 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
               </div>
             </div>
           )}
+          {Object.keys(extractionCoverage).length > 0 ? (
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+              <div className="font-semibold text-slate-700 dark:text-slate-100">Extraction coverage</div>
+              {typeof extractionCoverage.sourceTextLength === 'number' ? <div>Captured {Number(extractionCoverage.sourceTextLength).toLocaleString()} characters of source text.</div> : null}
+              {typeof extractionCoverage.lineItemCount === 'number' ? <div>Parsed {Number(extractionCoverage.lineItemCount).toLocaleString()} line item{Number(extractionCoverage.lineItemCount) === 1 ? '' : 's'} from the full text.</div> : null}
+              {extractionCoverage.aiContextStrategy === 'head_middle_tail' ? <div>Large-file metadata pass used head/middle/tail sampling.</div> : null}
+            </div>
+          ) : null}
           {materialItems.length > 0 && (
             <div>
               <div className="text-xs font-semibold text-slate-700 mb-1.5 dark:text-slate-200">Material Items ({materialItems.length})</div>

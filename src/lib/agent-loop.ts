@@ -231,12 +231,31 @@ function extractPendingProjectCustomerName(text: string) {
   const patterns = [
     /creating (?:a |the )?(?:new )?(?:project|job) for ([A-Za-z][^?.\n]+)/i,
     /create (?:a |the )?(?:new )?(?:project|job) for ([A-Za-z][^?.\n]+)/i,
+    /create (?:a |the )?(?:new )?(?:project|job) first (?:for|under) ([A-Za-z][^?.\n]+)/i,
+    /(?:project|job) first (?:for|under) ([A-Za-z][^?.\n]+)/i,
     /no (?:active )?(?:project|job) (?:created |found )?for ([A-Za-z][^?.\n]+)/i,
   ]
   for (const pattern of patterns) {
     const match = text.match(pattern)
     const name = match?.[1] ? cleanCustomerName(match[1]) : ''
     if (name && name.length <= 120) return name
+  }
+  return null
+}
+
+function extractCustomerNameFromOperationalText(text: string) {
+  const clean = plainMessageText(text)
+  const patterns = [
+    /\b(?:for|to|under)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 '.-]{1,100}?)(?:\s+(?:file|profile|customer file|client file|project|job|chat|crew|homeowner|customer|client)\b|[?.!,;:]|$)/i,
+    /\b([A-Za-z][A-Za-z0-9 '.-]{1,100}?)'?s\s+(?:file|profile|project|job|chat)\b/i,
+    /\b(?:customer|client)\s+([A-Za-z][A-Za-z0-9 '.-]{1,100}?)(?:[?.!,;:]|$)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = clean.match(pattern)
+    const name = match?.[1] ? cleanCustomerName(match[1]) : ''
+    if (name && name.length >= 2 && name.length <= 120 && !/^(project|job|chat|crew|customer|client|file|profile)$/i.test(name)) {
+      return name
+    }
   }
   return null
 }
@@ -254,12 +273,34 @@ function extractPendingLinkCustomerName(text: string) {
   return null
 }
 
+function findRecentOperationalCustomerName(messages: ChatMessage[], beforeIndex: number) {
+  for (let i = beforeIndex - 1; i >= Math.max(0, beforeIndex - 8); i--) {
+    const content = plainMessageText(messages[i]?.content ?? '')
+    if (!content) continue
+    const fromProjectOffer = extractPendingProjectCustomerName(content)
+    if (fromProjectOffer) return fromProjectOffer
+    const fromLinkOffer = extractPendingLinkCustomerName(content)
+    if (fromLinkOffer) return fromLinkOffer
+    const fromOperationalText = extractCustomerNameFromOperationalText(content)
+    if (fromOperationalText) return fromOperationalText
+  }
+  return null
+}
+
 function findRecentDocumentReference(messages: ChatMessage[], beforeIndex: number) {
   for (let i = beforeIndex - 1; i >= 0; i--) {
     const content = messages[i]?.content ?? ''
     const documentId = content.match(/documentId="([^"]+)"/)?.[1]
     const filename = content.match(/name="([^"]+)"/)?.[1]
     if (documentId || filename) return { documentId, filename }
+  }
+  return null
+}
+
+function findRecentRequestedChatType(messages: ChatMessage[], beforeIndex: number) {
+  for (let i = beforeIndex - 1; i >= Math.max(0, beforeIndex - 8); i--) {
+    const type = inferChatType(messages[i]?.content ?? '')
+    if (type) return type
   }
   return null
 }
@@ -298,7 +339,12 @@ Call decide_pending_action_requests with decision "approved"${toolName ? ` and t
 Only say the action completed after the approval replay tool result confirms success. If multiple approvals match, ask which exact approval to run. Respond as JSON only.`
   }
 
-  const customerName = extractPendingProjectCustomerName(previousAssistantText)
+  const directCustomerName = extractPendingProjectCustomerName(previousAssistantText)
+  const latestText = plainMessageText(latestUser.message.content)
+  const looksLikeProjectConfirmation = /\b(project|job|chat|crew|subcontractor|customer|homeowner|sales|insurance|supplier|finance)\b/i.test(latestText)
+    || /\b(project|job)\b/i.test(previousAssistantText)
+  const customerName = directCustomerName
+    ?? (looksLikeProjectConfirmation ? findRecentOperationalCustomerName(messages, latestUser.index) : null)
   if (!customerName) {
     const linkCustomerName = extractPendingLinkCustomerName(previousAssistantText)
     const documentRef = linkCustomerName ? findRecentDocumentReference(messages, latestUser.index) : null
@@ -317,7 +363,7 @@ Only say linked/attached after the tool result confirms success. Respond as JSON
   const previousUser = lastMessageByRole(messages, 'user', previousAssistant.index)
   const requestedChatType = previousUser?.message.content && /creat|chat|crew|subcontractor|homeowner|customer|sales|insurance|supplier|finance/i.test(previousUser.message.content)
     ? inferChatType(previousUser.message.content)
-    : null
+    : findRecentRequestedChatType(messages, latestUser.index)
 
   return `The latest user reply "${plainMessageText(latestUser.message.content)}" is an explicit confirmation of the previous assistant offer to create a project/job for customer "${customerName}".
 

@@ -89,8 +89,9 @@ function buildDocumentReviewProfile(input: {
   lineItemCount?: number
   comparisonMissingData: Record<string, unknown>
 }) {
-  const rawType = String(input.category || input.fileType || 'unknown')
-  const lower = rawType.toLowerCase()
+  const category = String(input.category || '').toLowerCase()
+  const fileType = String(input.fileType || '').toLowerCase()
+  const lower = `${fileType} ${category}`.trim() || 'unknown'
   const documentType =
     lower.includes('price') ? 'price_sheet' :
     lower.includes('scope') ? 'scope_of_loss' :
@@ -125,8 +126,20 @@ function buildDocumentReviewProfile(input: {
       expirationDate: !hasValue(data.validUntil) && !hasValue(data.expirationDate),
       notesOrTerms: !hasValue(data.notes) && !hasValue(data.terms),
     }
-  } else if (documentType === 'scope_of_loss' || documentType === 'carrier_estimate' || documentType === 'insurance_claim_doc') {
-    expectedFields = ['insured/customer', 'property address', 'carrier', 'claim number', 'date of loss', 'deductible', 'RCV', 'ACV', 'depreciation', 'trade/category', 'line items', 'quantities', 'unit prices', 'totals']
+  } else if (documentType === 'scope_of_loss') {
+    expectedFields = ['customer if visible', 'property address if visible', 'scope summary', 'line items', 'quantities', 'unit prices', 'totals/RCV']
+    const claimInfo = data.claimInfo ?? {}
+    const rows = Array.isArray(data.lineItems) ? data.lineItems : []
+    const rowHas = (field: string) => rows.some((row: any) => hasValue(row?.[field]))
+    missingDataFlags = {
+      scopeSummary: !hasValue(data.scope) && !hasValue(data.summary) && !hasValue(data.aiSummary),
+      lineItems: rows.length === 0 && !input.lineItemCount,
+      quantities: rows.length > 0 && !rowHas('quantity'),
+      unitPrices: rows.length > 0 && !rowHas('unitPrice'),
+      totals: rows.length > 0 && !rowHas('total') && !rowHas('rcv') && !hasValue(data.totalAmount) && !hasValue(claimInfo.rcv),
+    }
+  } else if (documentType === 'carrier_estimate' || documentType === 'insurance_claim_doc') {
+    expectedFields = ['insured/customer', 'property address', 'carrier', 'claim number', 'date of loss', 'deductible', 'RCV/total', 'ACV if present', 'depreciation if present', 'trade/category', 'line items', 'quantities', 'unit prices', 'totals']
     const claimInfo = data.claimInfo ?? {}
     const rows = Array.isArray(data.lineItems) ? data.lineItems : []
     const rowHas = (field: string) => rows.some((row: any) => hasValue(row?.[field]))
@@ -138,8 +151,8 @@ function buildDocumentReviewProfile(input: {
       dateOfLoss: !hasValue(claimInfo.dateOfLoss) && !hasValue(data.dateOfLoss),
       deductible: !hasValue(claimInfo.deductible) && !hasValue(data.deductible),
       rcv: !hasValue(claimInfo.rcv) && !hasValue(data.totalAmount) && !rowHas('rcv'),
-      acv: !hasValue(claimInfo.acv) && !rowHas('acv'),
-      depreciation: !hasValue(claimInfo.depreciation) && !rowHas('depreciation'),
+      acv: false,
+      depreciation: false,
       tradeOrCategory: rows.length > 0 && !rowHas('trade') && !rowHas('category'),
       lineItems: rows.length === 0 && !input.lineItemCount,
       quantities: rows.length > 0 && !rowHas('quantity'),

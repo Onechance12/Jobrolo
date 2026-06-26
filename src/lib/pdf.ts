@@ -14,7 +14,10 @@ export async function extractPdfText(filePath: string): Promise<PdfExtractResult
 
 export function truncateForAI(text: string, maxChars = 12000): string {
   if (text.length <= maxChars) return text
-  const t = text.slice(0, maxChars)
-  const last = Math.max(t.lastIndexOf('. '), t.lastIndexOf('\n'))
-  return (last > maxChars * 0.8 ? t.slice(0, last + 1) : t) + '\n\n[... truncated ...]'
+  const headLen = Math.floor(maxChars * 0.55)
+  const tailLen = Math.floor(maxChars * 0.25)
+  const middleLen = Math.max(0, maxChars - headLen - tailLen - 80)
+  const middleStart = Math.max(0, Math.floor(text.length / 2) - Math.floor(middleLen / 2))
+  const middle = middleLen > 500 ? `\n\n[... middle sample ...]\n\n${text.slice(middleStart, middleStart + middleLen)}` : ''
+  return `${text.slice(0, headLen)}${middle}\n\n[... truncated ${text.length - maxChars} chars from large document ...]\n\n${text.slice(-tailLen)}`
 }
