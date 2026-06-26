@@ -18,12 +18,55 @@ const SUGGESTIONS: Shortcut[] = [
 const QUICK_COMMANDS: Shortcut[] = [
   { label: 'Update company info', prompt: 'Update my company profile: company name, phone, email, website, and address are ' },
   { label: 'Research website', prompt: 'Research my company website and suggest updates to my company profile: ' },
+  { label: 'Canvass here', prompt: 'Help me canvass where I am right now.' },
   { label: 'Create client', prompt: 'Create a client named ' },
   { label: 'Create job', prompt: 'Create a project/job for ' },
   { label: 'Create crew chat', prompt: 'Create a crew chat for ' },
   { label: 'Create customer chat', prompt: 'Create a customer-facing chat for ' },
   { label: 'Invite to chat', prompt: 'Invite this person to the chat and give me a copyable link: name, email, phone, role are ' },
 ]
+
+function shouldRequestBrowserLocation(prompt: string) {
+  const t = prompt.toLowerCase().replace(/[’']/g, "'")
+  const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now)\b/i.test(t)
+  const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route)\b/i.test(t)
+  return asksHere || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location)\b/i.test(t))
+}
+
+function browserLocationErrorMessage(err: unknown) {
+  const code = typeof err === 'object' && err && 'code' in err ? Number((err as GeolocationPositionError).code) : null
+  if (code === 1) return 'Location permission was denied. Tap send again and allow location, or send a nearby street/landmark.'
+  if (code === 2) return 'Your browser could not determine location. Try again outside/with location services on, or send a nearby street/landmark.'
+  if (code === 3) return 'Location request timed out. Try again, or send a nearby street/landmark.'
+  return 'GPS is not available in this browser. Send a nearby street/landmark instead.'
+}
+
+function getBrowserLocation(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('GPS unavailable'))
+      return
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10_000,
+      maximumAge: 30_000,
+    })
+  })
+}
+
+function appendBrowserLocation(prompt: string, pos: GeolocationPosition) {
+  const { latitude, longitude, accuracy } = pos.coords
+  return `${prompt}
+
+[BROWSER_LOCATION]
+latitude: ${latitude}
+longitude: ${longitude}
+accuracyMeters: ${Math.round(accuracy)}
+source: browser_gps
+capturedAt: ${new Date().toISOString()}
+Use this location for the user's "where I am / here / near me" request. Do not ask the user to type GPS coordinates again unless you need a street name or landmark for a specific tool.`
+}
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: Props) {
   const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
@@ -71,7 +114,19 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
     setSubmitting(true)
     const filesToSend = [...pendingFiles]
     try {
-      const result = await onSend({ text: t, attachments: filesToSend })
+      let finalText = t
+      if (t && shouldRequestBrowserLocation(t)) {
+        setLocalError('Requesting your location… allow it in the browser popup so Jobrolo can use where you are right now.')
+        try {
+          const position = await getBrowserLocation()
+          finalText = appendBrowserLocation(t, position)
+          setLocalError(null)
+        } catch (err) {
+          setLocalError(browserLocationErrorMessage(err))
+          return
+        }
+      }
+      const result = await onSend({ text: finalText, attachments: filesToSend })
       if (result && typeof result === 'object' && result.keepAttachments) {
         setLocalError('Upload did not finish. I kept the file attached so you can try again.')
         return
