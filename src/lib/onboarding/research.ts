@@ -13,7 +13,8 @@
 //   2. Extract title, meta description, Open Graph tags, visible text
 //   3. Pass to AI for structured extraction
 //
-// No external API dependencies — uses fetch + z-ai SDK only.
+// No external website-search API dependency — uses fetch plus the configured
+// Jobrolo AI provider for structured extraction.
 // =============================================================================
 
 import { chatComplete } from '@/lib/ai'

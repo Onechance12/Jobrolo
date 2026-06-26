@@ -438,6 +438,7 @@ Common recovery examples:
 - To approve pending requests after the user says "yes approved", "yes delete", "yes", or "approved", call decide_pending_action_requests or decide_action_request. If the pending request is delete_customer, pass toolName="delete_customer" and do NOT create a new delete_customer approval.
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
+- To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.

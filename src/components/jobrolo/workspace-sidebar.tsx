@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import { cn, getInitials, timeAgo, truncate } from '@/lib/utils'
-import { Plus, Search, X, ChevronDown, ChevronRight, LayoutGrid, FileText, MapPin } from 'lucide-react'
+import { Plus, Search, X, ChevronDown, ChevronRight, LayoutGrid, FileText, MapPin, Building2, Globe2, Users } from 'lucide-react'
 import type { ConversationInfo, WorkspaceInfo } from '@/lib/types'
 
 interface Props { onNewChat: () => void; onNavigate?: () => void }
@@ -120,6 +120,27 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
         <div className="mt-3 rounded-2xl border border-border bg-card/70 p-2">
           <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Command shortcuts</div>
+          <button
+            onClick={() => insertCommandPrompt('Show my saved company profile.')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            Company profile
+          </button>
+          <button
+            onClick={() => insertCommandPrompt('Research my company website and suggest updates to my company profile: ')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <Globe2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            Research website
+          </button>
+          <button
+            onClick={() => insertCommandPrompt('Create a crew chat for ')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <Users className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+            Create crew/customer chat
+          </button>
           <button
             onClick={() => insertCommandPrompt('Turn an uploaded document into a reusable template.')}
             className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"

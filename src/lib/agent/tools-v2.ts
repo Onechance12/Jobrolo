@@ -27,6 +27,7 @@ import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, 
 import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, convertCanvassingLead } from '@/lib/canvassing'
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
+import { researchCompany } from '@/lib/onboarding/research'
 import { sanitizeHtml } from '@/lib/security/html'
 import type { TenantContext } from '@/lib/security/context'
 import { normalizeRole } from '@/lib/security/permissions'
@@ -61,11 +62,16 @@ export interface ToolDef {
 
 const TRUSTED_DIRECT_TOOLS = new Set(['create_customer'])
 const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
+const COMPANY_PROFILE_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator'])
 
 function canRunDirectWithoutApproval(name: string, ctx: ToolContext) {
   if (!ctx.trustedDirectExecution) return false
   if (!TRUSTED_DIRECT_TOOLS.has(name)) return false
   return TRUSTED_DIRECT_ROLES.has(normalizeRole(ctx.userRole))
+}
+
+function canManageCompanyProfile(ctx: ToolContext) {
+  return COMPANY_PROFILE_ROLES.has(normalizeRole(ctx.userRole))
 }
 
 function stableStringify(value: unknown): string {
@@ -753,8 +759,65 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'research_contractor_website',
+    description: 'Research the contractor company website or company name from the command center using the configured AI provider. Use when the owner gives their website, asks Jobrolo to search/research the business, or wants suggested company profile fields. This is read-only; call update_contractor_profile only if the user asks to save/update the profile.',
+    schema: z.object({
+      website: z.string().max(500).optional(),
+      companyName: z.string().max(200).optional(),
+    }).refine(v => Boolean(v.website?.trim() || v.companyName?.trim()), 'website or companyName is required'),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      if (!canManageCompanyProfile(ctx)) {
+        return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can research/update the company profile from chat.' }
+      }
+      console.log(`[tools-v2] research_contractor_website requested contractorId=${contractorId} website=${args.website ? 'provided' : 'none'} companyName=${args.companyName ? 'provided' : 'none'}`)
+      const research = await researchCompany({ website: args.website, companyName: args.companyName })
+      if (!research) {
+        return {
+          success: true,
+          data: {
+            found: false,
+            website: args.website ?? null,
+            companyName: args.companyName ?? null,
+            message: 'I could not fetch enough website/company information to research this profile. Save the website manually or try the full https:// URL.',
+          },
+        }
+      }
+      const suggestedProfileUpdate = {
+        companyName: research.companyName || args.companyName || undefined,
+        displayName: research.companyName || args.companyName || undefined,
+        phone: research.phone || undefined,
+        email: research.email || undefined,
+        website: research.website || args.website || undefined,
+        metadata: {
+          websiteResearch: {
+            description: research.description ?? null,
+            services: research.services,
+            serviceAreas: research.serviceAreas,
+            location: research.location ?? null,
+            businessType: research.businessType ?? null,
+            teamSizeEstimate: research.teamSizeEstimate ?? null,
+            socialProfiles: research.socialProfiles,
+            confidence: research.confidence,
+            source: research.source,
+            researchedAt: new Date().toISOString(),
+          },
+        },
+      }
+      return {
+        success: true,
+        data: {
+          found: true,
+          research,
+          suggestedProfileUpdate,
+          message: 'Website research completed. If the user wants this saved, call update_contractor_profile with suggestedProfileUpdate fields.',
+        },
+      }
+    },
+  },
+  {
     name: 'update_contractor_profile',
-    description: 'Update the contractor company profile: company name, logo URL/document, contact info, address, license, brand colors, legal footer, default terms, warranty text, report/contract/estimate disclaimers. Requires human approval.',
+    description: 'Update the contractor company profile from chat: company name, logo URL/document, contact info, website, address, license, brand colors, legal footer, default terms, warranty text, report/contract/estimate disclaimers. Use when the owner/admin asks to update company info. Role-limited; not for customer records.',
     schema: z.object({
       companyName: z.string().optional(),
       legalName: z.string().optional(),
@@ -785,11 +848,15 @@ export const TOOLS: ToolDef[] = [
       reportDisclaimer: z.string().optional(),
       contractDisclaimer: z.string().optional(),
       estimateDisclaimer: z.string().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
     }),
     allowedChannels: ['main', 'management'],
-    requiresApproval: true,
-    execute: async (args, contractorId) => {
+    execute: async (args, contractorId, ctx) => {
+      if (!canManageCompanyProfile(ctx)) {
+        return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can update the company profile from chat.' }
+      }
       const profile = await upsertContractorProfile(contractorId, args)
+      console.log(`[tools-v2] contractor profile updated contractorId=${contractorId} fields=${Object.keys(args).filter(k => typeof args[k] !== 'undefined').join(',')}`)
       return { success: true, data: { profile: publicContractorProfile(profile) } }
     },
   },
