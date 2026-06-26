@@ -17,6 +17,7 @@ export type UploadBatchResult = {
   documents: UploadedDocument[]
   failures: Array<{ fileName: string; error: string }>
   needsLink: boolean
+  deferLinkPrompt?: boolean
   suggestedPrompt?: string
   uploadContext?: Record<string, unknown>
 }
@@ -104,6 +105,7 @@ export async function uploadFilesSequentially(files: File[], opts: { fields?: Re
   const documents: UploadedDocument[] = []
   const failures: Array<{ fileName: string; error: string }> = []
   let needsLink = false
+  let deferLinkPrompt = false
   let suggestedPrompt: string | undefined
   let uploadContext: Record<string, unknown> | undefined
 
@@ -114,6 +116,7 @@ export async function uploadFilesSequentially(files: File[], opts: { fields?: Re
       documents.push(...docs)
       if (data.needsLink) {
         needsLink = true
+        deferLinkPrompt = deferLinkPrompt || data.deferLinkPrompt === true
         suggestedPrompt = data.suggestedPrompt
         uploadContext = {
           documentIds: documents.map(d => d.id),
@@ -127,7 +130,7 @@ export async function uploadFilesSequentially(files: File[], opts: { fields?: Re
     }
   }
 
-  return { documents, failures, needsLink, suggestedPrompt, uploadContext }
+  return { documents, failures, needsLink, deferLinkPrompt, suggestedPrompt, uploadContext }
 }
 
 export function attachmentFromDocument(doc: UploadedDocument): MessageAttachment {
@@ -142,4 +145,100 @@ export function attachmentFromDocument(doc: UploadedDocument): MessageAttachment
     documentStatus: doc.status as MessageAttachment['documentStatus'],
     documentType: doc.fileType,
   }
+}
+
+function textValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function uploadAnalysisFollowupFromDocument(doc: any): { content: string; contextType?: string; contextData?: Record<string, unknown> } | null {
+  if (!doc) return null
+  const filename = textValue(doc.originalName) || textValue(doc.filename) || 'the upload'
+  const documentId = textValue(doc.id)
+  const linked = Boolean(doc.customer || doc.project || doc.customerId || doc.projectId || doc.workspaceId)
+  const extracted = doc.extractedData && typeof doc.extractedData === 'object' ? doc.extractedData as Record<string, any> : {}
+  const category = String(doc.aiCategory || doc.fileType || extracted.documentType || '').toLowerCase()
+  const status = String(doc.status || '').toLowerCase()
+  const confidence = numberValue(doc.extractionConfidence)
+
+  if (linked) {
+    const target = doc.project?.title ? `project "${doc.project.title}"` : doc.customer?.name ? `${doc.customer.name}'s file` : 'the selected job file'
+    return {
+      content: `Saved and analyzed ${filename}. It is already attached to ${target}.`,
+    }
+  }
+
+  if (status === 'failed' || status === 'needs_ocr') {
+    return {
+      content: `Saved ${filename}, but I could not extract enough reliable text from it yet. You can still attach the saved file to a customer/project, or upload a cleaner PDF/photo if you want me to analyze it again.`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], status },
+    }
+  }
+
+  if (category.includes('price')) {
+    const rows = Array.isArray(extracted.materialItems) ? extracted.materialItems.length : Number(extracted.priceSheetReview?.extractedRowCount ?? 0)
+    const supplier = textValue(extracted.supplier) || textValue(extracted.vendor) || textValue(extracted.extractedData?.supplier)
+    return {
+      content: `Saved and analyzed ${filename}. This looks like a supplier price sheet${supplier ? ` from ${supplier}` : ''}${rows ? ` with ${rows.toLocaleString()} extracted material row${rows === 1 ? '' : 's'}` : ''}. I’m leaving it company-level for review; it is not automatically attached to a client and it has not changed your pricing yet. Ask me to “review the first 10 rows” or “import this price sheet” when you’re ready.`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], fileTypes: ['price_sheet'], suggestedActions: ['review_price_sheet_items', 'import_price_sheet_items'] },
+    }
+  }
+
+  const detectedCustomer =
+    extracted.customer && typeof extracted.customer === 'object'
+      ? extracted.customer as Record<string, unknown>
+      : null
+  const customerName =
+    textValue(detectedCustomer?.name) ||
+    textValue(extracted.customerName) ||
+    textValue(extracted.insuredName) ||
+    textValue(extracted.name)
+  const address =
+    textValue(detectedCustomer?.address) ||
+    textValue(extracted.projectAddress) ||
+    textValue(extracted.propertyAddress) ||
+    textValue(extracted.address)
+  const lineItems = Array.isArray(extracted.lineItems) ? extracted.lineItems.length : 0
+  const total = extracted.totalAmount ?? extracted.claimInfo?.rcv ?? extracted.claimInfo?.total
+
+  if (category.includes('estimate') || category.includes('scope') || lineItems > 0 || total) {
+    return {
+      content: `Saved and analyzed ${filename}. It looks like an estimate/scope${customerName ? ` for ${customerName}` : ''}${address ? ` at ${address}` : ''}${lineItems ? ` with ${lineItems} extracted line item${lineItems === 1 ? '' : 's'}` : ''}${confidence !== null ? ` (${confidence}% confidence)` : ''}. I won’t attach or create records silently. Say “attach this to ${customerName || 'the customer'}”, “create a project from this document”, or “show the scope breakdown.”`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], detectedCustomer: customerName ? { name: customerName, address } : null, suggestedActions: ['link_document_to_customer', 'create_project_from_document', 'get_scope_breakdown'] },
+    }
+  }
+
+  if (category.includes('photo') || String(doc.mimeType || '').startsWith('image/')) {
+    const photoType = textValue(extracted.photoType)
+    const detectedDocumentType = textValue(extracted.likelyDocumentType)
+    if (detectedDocumentType && detectedDocumentType !== 'other' && detectedDocumentType !== 'null') {
+      return {
+        content: `Saved and analyzed ${filename}. This photo looks like a document photo (${detectedDocumentType}). I need your approval before attaching it to a customer/project or treating it as a scope/estimate.`,
+        contextType: 'upload_link_prompt',
+        contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], detectedDocumentType },
+      }
+    }
+    return {
+      content: `Saved and analyzed ${filename}${photoType ? ` as ${photoType.replace(/_/g, ' ')}` : ''}. I did not find enough customer/job info in the image to attach it automatically. Tell me the customer/project or photo section, and I’ll link it.`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], fileTypes: ['photo'], photoType },
+    }
+  }
+
+  if (!linked) {
+    return {
+      content: `Saved and analyzed ${filename}. I could not confidently determine the customer/project from the file alone, so I left it unassigned. Tell me which customer or project it belongs to and I’ll attach it.`,
+      contextType: 'upload_link_prompt',
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename] },
+    }
+  }
+
+  return null
 }

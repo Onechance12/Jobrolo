@@ -180,7 +180,10 @@ export async function POST(req: NextRequest) {
       documents,
       ...(needsLink ? {
         needsLink: true,
-        suggestedPrompt: 'Saved. Which customer or project should I attach this upload to?',
+        deferLinkPrompt: true,
+        suggestedPrompt: documents.length === 1
+          ? 'Saved the upload. I’m analyzing it now so I can recommend whether it belongs to a customer, project, company pricing, or review queue.'
+          : `Saved ${documents.length} uploads. I’m analyzing them now so I can recommend where each one belongs.`,
         uploadContext: {
           documentIds: documents.map(d => d.id),
           filenames: documents.map(d => d.originalName),

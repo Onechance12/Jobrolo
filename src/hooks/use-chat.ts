@@ -2,14 +2,14 @@
 import { useCallback, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
-import { attachmentFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
+import { attachmentFromDocument, uploadAnalysisFollowupFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
 import { serializeMessagesForAgentHistory } from '@/hooks/chat-history'
 
 // Terminal states — once a document reaches one of these, we stop polling.
 const DOC_TERMINAL_STATES = new Set(['reviewed', 'failed', 'needs_ocr', 'needs_review'])
 const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review'])
 
-async function pollDocumentStatus(docId: string, userMessageId: string): Promise<boolean> {
+async function pollDocumentStatus(docId: string, userMessageId: string, postAnalysisFollowup = false): Promise<boolean> {
   for (let i = 0; i < 60; i++) { // 60 * 2s = 120s max wait
     await new Promise(r => setTimeout(r, 2000))
     try {
@@ -35,6 +35,19 @@ async function pollDocumentStatus(docId: string, userMessageId: string): Promise
           store.updateMessage(userMessageId, { attachments: updated })
         }
         await store.refreshBusinessContext()
+        if (postAnalysisFollowup) {
+          const followup = uploadAnalysisFollowupFromDocument(doc)
+          if (followup) {
+            store.addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: followup.content,
+              contextType: followup.contextType,
+              contextData: followup.contextData,
+              createdAt: new Date().toISOString(),
+            })
+          }
+        }
         // 'reviewed' is success; 'failed' and 'needs_ocr' are terminal but not success
         return doc.status === 'reviewed'
       }
@@ -151,7 +164,7 @@ export function useChat() {
               })
             }
           }
-          if (data.needsLink && data.suggestedPrompt) {
+          if (data.needsLink && data.suggestedPrompt && !data.deferLinkPrompt) {
             addMessage({
               id: crypto.randomUUID(),
               role: 'assistant',
@@ -174,18 +187,20 @@ export function useChat() {
                 documentStatus: DOC_BACKGROUND_STATES.has(String(a.documentStatus)) ? 'queued' as const : a.documentStatus,
               })),
             })
-            if (!data.needsLink) {
+            if (!data.needsLink || data.deferLinkPrompt) {
               addMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: `Saved ${docsNeedingAnalysis.length === 1 ? 'the upload' : `${docsNeedingAnalysis.length} uploads`}. I’ll analyze ${docsNeedingAnalysis.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
+                content: data.deferLinkPrompt && data.suggestedPrompt
+                  ? data.suggestedPrompt
+                  : `Saved ${docsNeedingAnalysis.length === 1 ? 'the upload' : `${docsNeedingAnalysis.length} uploads`}. I’ll analyze ${docsNeedingAnalysis.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,
                 createdAt: new Date().toISOString(),
               })
             }
 
             void (async () => {
               for (const doc of docsNeedingAnalysis) {
-                await pollDocumentStatus(doc.id, userMessageId)
+                await pollDocumentStatus(doc.id, userMessageId, !text.trim())
               }
             })().catch(err => console.error('[use-chat] background document polling:', err))
           }
