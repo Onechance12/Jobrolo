@@ -131,7 +131,7 @@ async function resolveJobTarget(contractorId: string, input: { projectId?: strin
 function normalizeCustomerFileQuery(query: string) {
   return query
     .replace(/[’']/g, "'")
-    .replace(/\b(show|pull|get|open|find|lookup|look up|retrieve|only use|saved|database|records|actual|actually|everything|all|what|do|we|have|on|for|client|customer|job|project|packet|profile|file|folder|info|information)\b/gi, ' ')
+    .replace(/\b(show|pull|get|open|find|lookup|look up|retrieve|only use|saved|database|records|actual|actually|everything|all|what|do|we|have|on|for|client|customer|job|project|packet|profile|file|folder|info|information|crew|chat|channel)\b/gi, ' ')
     .replace(/\b's\b/gi, ' ')
     .replace(/[^\p{L}\p{N}@.+\- ]/gu, ' ')
     .replace(/\s+/g, ' ')
@@ -168,6 +168,60 @@ function normalizeMaterialItems(value: unknown) {
 function safeJsonParse<T = Record<string, unknown>>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback
   try { return JSON.parse(value) as T } catch { return fallback }
+}
+
+async function replayStoredToolApproval(input: {
+  contractorId: string
+  ctx: ToolContext
+  actionRequest: { id: string; payloadJson: string | null }
+  decision: 'approved' | 'rejected'
+  notes?: string | null
+}): Promise<ToolResult> {
+  const decisionRecord = await decideActionRequest(
+    await buildTrustedToolTenantContext(input.contractorId, input.ctx),
+    input.actionRequest.id,
+    input.decision,
+    input.notes,
+  )
+  if (!decisionRecord) return { success: false, data: null, error: 'Action request not found' }
+  if (input.decision === 'rejected') {
+    return { success: true, data: { actionRequestId: input.actionRequest.id, decision: input.decision, status: decisionRecord.status, replayResult: null } }
+  }
+
+  const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown>; toolContext?: Record<string, unknown> }>(input.actionRequest.payloadJson, {})
+  if (!payload.toolName) {
+    return { success: false, data: { actionRequestId: input.actionRequest.id, status: decisionRecord.status }, error: 'Approved action request has no stored tool payload to replay' }
+  }
+
+  const replayContext = { ...(payload.toolContext ?? {}) }
+  delete replayContext.approved
+  delete replayContext.approvalActionRequestId
+  delete replayContext.trustedDirectExecution
+  delete replayContext.userId
+  delete replayContext.userRole
+
+  const replayResult = await executeTool(payload.toolName, payload.args ?? {}, input.contractorId, {
+    ...(replayContext as ToolContext),
+    userId: input.ctx.userId,
+    userRole: input.ctx.userRole,
+    approved: true,
+    approvalActionRequestId: input.actionRequest.id,
+  })
+
+  await db.actionRequest.update({
+    where: { id: input.actionRequest.id },
+    data: {
+      status: replayResult.success ? 'completed' : 'approved',
+      completedAt: replayResult.success ? new Date() : undefined,
+      payloadJson: JSON.stringify({ ...payload, replayResult }),
+    },
+  }).catch(() => null)
+
+  return {
+    success: replayResult.success,
+    data: { actionRequestId: input.actionRequest.id, decision: input.decision, replayedTool: payload.toolName, replayResult },
+    error: replayResult.success ? undefined : replayResult.error,
+  }
 }
 
 function pendingMaterialItemsFromExtractedData(data: Record<string, any>) {
@@ -598,6 +652,8 @@ export const TOOLS: ToolDef[] = [
       if (!doc) return { success: false, data: null, error: 'Document not found. Call list_documents.' }
       let extractedData: unknown = null
       try { extractedData = doc.extractedData ? JSON.parse(doc.extractedData) : null } catch {}
+      const parsedExtracted = (extractedData && typeof extractedData === 'object') ? extractedData as Record<string, any> : {}
+      const isPhotoDocument = doc.fileType === 'photo' || doc.mimeType.startsWith('image/') || doc.aiCategory === 'photo'
 
       // Smart truncation of OCR text: include head + tail with a marker
       const fullOcr = doc.ocrText ?? ''
@@ -625,9 +681,11 @@ export const TOOLS: ToolDef[] = [
           // Collaborative extraction fields
           extractionConfidence: doc.extractionConfidence,
           conflicts: doc.conflictFlags ? JSON.parse(doc.conflictFlags) : null,
-          missingData: doc.missingDataFlags ? JSON.parse(doc.missingDataFlags) : null,
-          reviewNotes: doc.extractedData ? (JSON.parse(doc.extractedData).reviewNotes ?? []) : [],
-          warnings: doc.extractedData ? (JSON.parse(doc.extractedData).warnings ?? []) : [],
+          missingData: isPhotoDocument ? null : doc.missingDataFlags ? JSON.parse(doc.missingDataFlags) : null,
+          reviewNotes: parsedExtracted.reviewNotes ?? [],
+          warnings: isPhotoDocument
+            ? (Array.isArray(parsedExtracted.warnings) ? parsedExtracted.warnings : []).filter((w: unknown) => !/claim|policy|carrier|deductible|rcv|acv|depreciation|line item|totals/i.test(String(w)))
+            : parsedExtracted.warnings ?? [],
           extractedData,
           // OCR text — only returned if document has been processed
           ocrText: ocrTextForContext || null,
@@ -720,16 +778,19 @@ export const TOOLS: ToolDef[] = [
         data: {
           count: documents.length,
           countsByStatus: counts,
-          documents: documents.map(doc => ({
-            ...compactDocument(doc),
-            aiCategory: doc.aiCategory,
-            extractionConfidence: doc.extractionConfidence,
-            missingData: safeJsonParse(doc.missingDataFlags, null),
-            conflicts: safeJsonParse(doc.conflictFlags, null),
-            needsLink: !doc.customerId && !doc.projectId && !doc.workspaceId,
-            fileSaved: true,
-            analysisPending: ['queued', 'processing', 'pending_review'].includes(doc.status),
-          })),
+          documents: documents.map(doc => {
+            const isPhotoDocument = doc.fileType === 'photo' || doc.mimeType.startsWith('image/') || doc.aiCategory === 'photo'
+            return {
+              ...compactDocument(doc),
+              aiCategory: doc.aiCategory,
+              extractionConfidence: doc.extractionConfidence,
+              missingData: isPhotoDocument ? null : safeJsonParse(doc.missingDataFlags, null),
+              conflicts: safeJsonParse(doc.conflictFlags, null),
+              needsLink: !doc.customerId && !doc.projectId && !doc.workspaceId,
+              fileSaved: true,
+              analysisPending: ['queued', 'processing', 'pending_review'].includes(doc.status),
+            }
+          }),
           guidance: 'A saved upload may still have analysis status queued/processing/pending_review. Treat fileSaved=true as saved, then separately report whether analysis/linking is complete.',
         },
       }
@@ -814,7 +875,7 @@ export const TOOLS: ToolDef[] = [
             ...compactDocument(doc),
             aiCategory: doc.aiCategory,
             extractionConfidence: doc.extractionConfidence,
-            missingData: safeJsonParse(doc.missingDataFlags, null),
+            missingData: (doc.fileType === 'photo' || doc.mimeType.startsWith('image/') || doc.aiCategory === 'photo') ? null : safeJsonParse(doc.missingDataFlags, null),
             conflicts: safeJsonParse(doc.conflictFlags, null),
             needsLink: !doc.customerId && !doc.projectId && !doc.workspaceId,
           },
@@ -1020,6 +1081,43 @@ export const TOOLS: ToolDef[] = [
           message: customers.length
             ? `Found ${customers.length} saved customer${customers.length === 1 ? '' : 's'}.`
             : 'No saved customer records found for this contractor.',
+        },
+      }
+    },
+  },
+  {
+    name: 'delete_customer',
+    description: 'Delete a saved customer/client profile. Use only when the user asks to delete/remove a customer/client record. This does NOT delete their uploaded documents/photos or projects; it detaches those records from the customer so files are not accidentally lost.',
+    schema: z.object({
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+    }).refine(v => Boolean(v.customerId || v.customerName), 'customerId or customerName is required'),
+    allowedChannels: ['main', 'management'],
+    requiresApproval: true,
+    execute: async (args, contractorId) => {
+      const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+      if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+      if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}.` } }
+      if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer should be deleted?` } }
+      const customer = resolved.customer
+      const [documentCount, projectCount, workspaceCount] = await Promise.all([
+        db.document.count({ where: { contractorId, customerId: customer.id } }),
+        db.project.count({ where: { contractorId, customerId: customer.id } }),
+        db.workspace.count({ where: { contractorId, customerId: customer.id } }),
+      ])
+      await db.document.updateMany({ where: { contractorId, customerId: customer.id }, data: { customerId: null } })
+      await db.project.updateMany({ where: { contractorId, customerId: customer.id }, data: { customerId: null } })
+      await db.workspace.updateMany({ where: { contractorId, customerId: customer.id }, data: { customerId: null } })
+      await db.customer.delete({ where: { id: customer.id } })
+      console.log(`[tools-v2] delete_customer: deleted customerId=${customer.id} contractorId=${contractorId} detachedDocuments=${documentCount} detachedProjects=${projectCount}`)
+      return {
+        success: true,
+        data: {
+          deleted: true,
+          customerId: customer.id,
+          customerName: customer.name,
+          detached: { documents: documentCount, projects: projectCount, workspaces: workspaceCount },
+          message: `Deleted customer "${customer.name}". Existing documents/photos/projects were kept and detached from that customer record.`,
         },
       }
     },
@@ -1508,6 +1606,102 @@ export const TOOLS: ToolDef[] = [
           jobNumber: created.jobNumber,
           workspaceId: created.workspace?.id ?? null,
           message: `Created project "${created.project.title}" for ${customer.name}.`,
+        },
+      }
+    },
+  },
+  {
+    name: 'create_project_chat',
+    description: 'Create or open a chat channel for a customer/project workspace, such as a crew chat, customer-facing chat, sales chat, supplement chat, production chat, or insurance chat. Use when the user says "create a crew chat for Timothy" or wants to route a message to a job-specific chat.',
+    schema: z.object({
+      projectId: z.string().max(200).optional(),
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      chatType: z.enum(['main', 'customer', 'crew', 'supplier', 'finance', 'management', 'sales', 'insurance']).default('crew'),
+      title: z.string().max(200).optional(),
+      initialMessage: z.string().max(2000).optional(),
+    }).refine(v => Boolean(v.projectId || v.customerId || v.customerName), 'projectId, customerId, or customerName is required'),
+    allowedChannels: ['main', 'management', 'sales'],
+    execute: async (args, contractorId, ctx) => {
+      let project: { id: string; title: string; customerId: string | null; address: string | null; workspace: { id: string } | null; customer: { id: string; name: string; address: string | null } | null } | null = null
+      let customer: { id: string; name: string; address: string | null } | null = null
+
+      if (args.projectId) {
+        project = await db.project.findFirst({
+          where: { id: args.projectId, contractorId },
+          select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } }, customer: { select: { id: true, name: true, address: true } } },
+        })
+        if (!project) return { success: false, data: null, error: 'Project not found' }
+        customer = project.customer
+      } else {
+        const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
+        if ('error' in resolved) return { success: false, data: null, error: resolved.error }
+        if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}. Create or select the customer before creating a chat.` } }
+        if ('needsClarification' in resolved) return { success: true, data: { needsClarification: true, matches: resolved.matches, message: `Multiple customers matched ${resolved.query}. Which customer's project should get this chat?` } }
+        customer = resolved.customer
+        const projects = await db.project.findMany({
+          where: { contractorId, customerId: customer.id, status: { not: 'closed' } },
+          orderBy: { updatedAt: 'desc' },
+          take: 2,
+          select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } }, customer: { select: { id: true, name: true, address: true } } },
+        })
+        if (projects.length === 0) {
+          return { success: true, data: { needsProject: true, customer, message: `No active project found for ${customer.name}. Create a project/job first, then I can create the ${args.chatType} chat.` } }
+        }
+        if (projects.length > 1) {
+          return { success: true, data: { needsClarification: true, customer, projects: projects.map(p => ({ id: p.id, title: p.title, address: p.address })), message: `Multiple active projects found for ${customer.name}. Which project should get the ${args.chatType} chat?` } }
+        }
+        project = projects[0]
+      }
+
+      let workspace = project.workspace
+      if (!workspace) {
+        workspace = await db.workspace.create({
+          data: {
+            contractorId,
+            projectId: project.id,
+            name: project.title,
+            type: 'project',
+            description: customer?.name ? `Workspace for ${customer.name}` : 'Project workspace',
+            color: '#2563eb',
+          },
+          select: { id: true },
+        })
+      }
+
+      const defaultTitle = args.title || `${args.chatType.charAt(0).toUpperCase()}${args.chatType.slice(1)}`
+      const chat = await db.workspaceChat.upsert({
+        where: { workspaceId_chatType: { workspaceId: workspace.id, chatType: args.chatType } },
+        update: { title: defaultTitle, lastActivity: new Date() },
+        create: {
+          workspaceId: workspace.id,
+          chatType: args.chatType,
+          title: defaultTitle,
+          visibility: args.chatType === 'customer' ? 'customer' : 'internal',
+        },
+        select: { id: true, chatType: true, title: true, visibility: true, lastActivity: true },
+      })
+
+      let seededMessage: { id: string; content: string } | null = null
+      if (args.initialMessage?.trim()) {
+        seededMessage = await db.workspaceMessage.create({
+          data: { chatId: chat.id, role: 'assistant', content: args.initialMessage.trim(), createdById: ctx.userId },
+          select: { id: true, content: true },
+        })
+      }
+      await db.workspaceChat.update({ where: { id: chat.id }, data: { lastActivity: new Date() } }).catch(() => null)
+
+      return {
+        success: true,
+        data: {
+          created: true,
+          workspaceId: workspace.id,
+          projectId: project.id,
+          projectTitle: project.title,
+          customer,
+          chat,
+          seededMessage,
+          message: `Created/opened the ${args.chatType} chat for ${project.title}${seededMessage ? ' and posted the starter note.' : '.'}`,
         },
       }
     },
@@ -2767,14 +2961,96 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'decide_action_request',
-    description: 'Approve or reject a routed action request, such as a crew material request or field issue. Approval can route supplier/purchasing tasks, update inbox cards, and log the decision to the job timeline. Requires human approval.',
+    description: 'Approve or reject a specific routed action request by ID. Use when the user gives an approval request ID or approves a card/request already shown in chat. This replays stored tool-approval payloads after approval.',
     schema: z.object({ actionRequestId: z.string().min(1), decision: z.enum(['approved', 'rejected']), notes: z.string().optional() }),
     allowedChannels: ['main', 'management', 'crew', 'supplier', 'finance'],
-    requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
-      const request = await decideActionRequest(await buildTrustedToolTenantContext(contractorId, ctx), args.actionRequestId, args.decision, args.notes)
+      const request = await db.actionRequest.findFirst({
+        where: { id: args.actionRequestId, contractorId },
+        select: { id: true, type: true, payloadJson: true },
+      })
       if (!request) return { success: false, data: null, error: 'Action request not found' }
-      return { success: true, data: { actionRequest: request } }
+      if (request.type === 'tool_approval') {
+        return replayStoredToolApproval({ contractorId, ctx, actionRequest: request, decision: args.decision, notes: args.notes })
+      }
+      const decided = await decideActionRequest(await buildTrustedToolTenantContext(contractorId, ctx), args.actionRequestId, args.decision, args.notes)
+      if (!decided) return { success: false, data: null, error: 'Action request not found' }
+      return { success: true, data: { actionRequest: decided } }
+    },
+  },
+  {
+    name: 'decide_pending_action_requests',
+    description: 'Approve or reject pending tool-approval requests from chat when the user says "yes approved", "yes delete", "approve those", or "reject that" after approval cards were created. If multiple requests are pending, pass actionRequestIds or a toolName filter like delete_document. Replays the exact stored tool payloads; does not invent new actions.',
+    schema: z.object({
+      actionRequestIds: z.array(z.string().min(1)).optional(),
+      decision: z.enum(['approved', 'rejected']),
+      toolName: z.string().max(120).optional(),
+      targetName: z.string().max(200).optional(),
+      approveRecent: z.boolean().optional(),
+      limit: z.coerce.number().int().min(1).max(10).optional(),
+      notes: z.string().max(1000).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const limit = Math.min(Math.max(Number(args.limit ?? 5), 1), 10)
+      const since = new Date(Date.now() - 45 * 60 * 1000)
+      const rawRequests = await db.actionRequest.findMany({
+        where: {
+          contractorId,
+          type: 'tool_approval',
+          status: { in: ['pending', 'needs_approval'] },
+          ...(args.actionRequestIds?.length ? { id: { in: args.actionRequestIds } } : { createdAt: { gte: since } }),
+          ...(ctx.userId && !args.actionRequestIds?.length ? { createdByUserId: ctx.userId } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+        select: { id: true, title: true, summary: true, payloadJson: true, createdAt: true },
+      })
+
+      const filtered = rawRequests.filter(req => {
+        const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown> }>(req.payloadJson, {})
+        if (args.toolName && payload.toolName !== args.toolName) return false
+        if (args.targetName) {
+          const haystack = `${req.title} ${req.summary} ${req.payloadJson ?? ''}`.toLowerCase()
+          if (!haystack.includes(args.targetName.toLowerCase())) return false
+        }
+        return true
+      }).slice(0, limit)
+
+      if (filtered.length === 0) {
+        return { success: true, data: { count: 0, message: 'No pending approval requests matched.' } }
+      }
+      if (!args.actionRequestIds?.length && !args.approveRecent && filtered.length > 1) {
+        return {
+          success: true,
+          data: {
+            needsClarification: true,
+            count: filtered.length,
+            requests: filtered.map(r => {
+              const payload = safeJsonParse<{ toolName?: string; args?: Record<string, unknown> }>(r.payloadJson, {})
+              return { id: r.id, title: r.title, toolName: payload.toolName, args: payload.args, createdAt: r.createdAt }
+            }),
+            message: 'Multiple pending approvals matched. Ask which ones to approve, or approve them with actionRequestIds.',
+          },
+        }
+      }
+
+      const results: ToolResult[] = []
+      for (const req of filtered) {
+        results.push(await replayStoredToolApproval({ contractorId, ctx, actionRequest: req, decision: args.decision, notes: args.notes }))
+      }
+      const succeeded = results.filter(r => r.success).length
+      return {
+        success: results.every(r => r.success),
+        data: {
+          count: results.length,
+          succeeded,
+          failed: results.length - succeeded,
+          results: results.map((r, i) => ({ actionRequestId: filtered[i]?.id, success: r.success, data: r.data, error: r.error })),
+          message: `${args.decision === 'approved' ? 'Approved' : 'Rejected'} ${results.length} pending request${results.length === 1 ? '' : 's'}. ${succeeded} completed successfully.`,
+        },
+        error: results.every(r => r.success) ? undefined : 'One or more approval replays failed',
+      }
     },
   },
 

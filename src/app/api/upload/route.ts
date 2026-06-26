@@ -59,7 +59,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Upload too large. Maximum ${MAX_FILES_PER_UPLOAD} files, 25MB each.` }, { status: 413 })
     }
 
-    const form = await req.formData()
+    let form: FormData
+    try {
+      form = await req.formData()
+    } catch (err) {
+      console.error(`[upload] formData parse failed requestId=${requestId} contentType=${req.headers.get('content-type') || 'missing'} contentLength=${req.headers.get('content-length') || 'unknown'}:`, err)
+      return NextResponse.json({
+        error: 'Upload request was not received as valid multipart form data. Please try one smaller file/photo again.',
+        code: 'UPLOAD_FORMDATA_PARSE_FAILED',
+      }, { status: 400 })
+    }
     const files = form.getAll('files').filter((value): value is File => value instanceof File)
     if (files.length === 0) return NextResponse.json({ error: 'No files uploaded' }, { status: 400 })
     if (files.length > MAX_FILES_PER_UPLOAD) return NextResponse.json({ error: `Maximum ${MAX_FILES_PER_UPLOAD} files per upload` }, { status: 400 })

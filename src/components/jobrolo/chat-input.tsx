@@ -18,11 +18,29 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
     setSpeechSupported(!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition)
   }, [])
 
+  useEffect(() => {
+    const onInsertPrompt = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string }>).detail
+      if (detail?.text) {
+        setText(detail.text)
+        requestAnimationFrame(() => textareaRef.current?.focus())
+      }
+    }
+    window.addEventListener('jobrolo:insert-prompt', onInsertPrompt)
+    return () => window.removeEventListener('jobrolo:insert-prompt', onInsertPrompt)
+  }, [])
+
   useEffect(() => { const ta = textareaRef.current; if (!ta) return; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }, [text])
 
   const handleSend = useCallback(() => { const t = text.trim(); if (!t && !pendingFiles.length) return; if (disabled) return; onSend({ text: t, attachments: pendingFiles }); setText(''); setPendingFiles([]) }, [text, pendingFiles, disabled, onSend])
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
-  const handleFiles = (files: FileList | null) => { if (!files) return; setPendingFiles(p => [...p, ...Array.from(files)]); setShowAttachMenu(false) }
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return
+    setPendingFiles(p => [...p, ...Array.from(files)])
+    setShowAttachMenu(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+  }
 
   const startListening = () => { if (listening) { recognitionRef.current?.stop(); setListening(false); return } const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition; if (!SR) return; const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let ft = textRef.current; rec.onresult = (e: any) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const tr = e.results[i][0].transcript; if (e.results[i].isFinal) ft += tr; else interim += tr } setText(ft); setInterimText(interim) }; rec.onend = () => setListening(false); rec.onerror = () => setListening(false); rec.start(); recognitionRef.current = rec; setListening(true) }
   const [interimText, setInterimText] = useState('')
@@ -38,9 +56,9 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder }: 
         </div>
         <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder ?? 'Message Jobrolo…'} rows={1} disabled={disabled} suppressHydrationWarning className="flex-1 resize-none bg-muted/50 border border-border rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50 max-h-40 min-h-[44px]" />
         {isWorking && onStop ? (
-          <button onClick={onStop} className="flex-shrink-0 rounded-lg bg-rose-600 text-white hover:bg-rose-700 min-w-[52px] min-h-[52px] flex items-center justify-center gap-1.5 px-3" aria-label="Stop Jobrolo">
+          <button onClick={onStop} className="flex-shrink-0 rounded-lg bg-slate-800 text-white hover:bg-slate-900 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white min-w-[72px] min-h-[52px] flex items-center justify-center gap-1.5 px-3 shadow-sm" aria-label="Stop Jobrolo">
             <Square className="w-4 h-4 fill-current" />
-            <span className="hidden sm:inline text-sm font-medium">Stop</span>
+            <span className="text-sm font-medium">Stop</span>
           </button>
         ) : (
           <>

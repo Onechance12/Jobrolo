@@ -287,7 +287,7 @@ export default function Page() {
   }, [displayMessages, autoTTS, isStreaming, isWorkspaceTyping, tts])
 
   return (
-    <div className="h-dvh flex bg-background text-foreground overflow-hidden">
+    <div className="h-dvh w-full max-w-full flex bg-background text-foreground overflow-hidden">
       {/* LEFT PANEL — Navigation (desktop) */}
       <div className="hidden lg:flex h-full w-64 flex-shrink-0">
         <div className="w-full flex flex-col h-full">
@@ -320,7 +320,7 @@ export default function Page() {
       )}
 
       {/* CENTER — Always the conversation */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background relative">
+      <div className="flex-1 flex flex-col min-w-0 max-w-full bg-background relative overflow-hidden">
         {/* Header — Apple-style glass, refined */}
         <header
           className="sticky top-0 z-10 glass border-b border-border"
@@ -419,7 +419,7 @@ export default function Page() {
         </header>
 
         {/* Conversation — the heart of the app */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain pb-2">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-2">
           {initialLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />

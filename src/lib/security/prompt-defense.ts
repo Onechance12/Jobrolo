@@ -125,6 +125,12 @@ export function validateAction(action: unknown): string | null {
 export function sanitizeAIOutput(text: string): string {
   // Strip null bytes and control chars (keep \n, \t)
   let out = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+  // Never surface model-invented placeholder storage URLs. Real files should be
+  // returned as structured attachments/cards with /api/storage/... URLs.
+  out = out
+    .replace(/!\[[^\]]*]\(https?:\/\/(?:yourdomain\.com|api\.storage\.url)[^)]+\)/gi, '[image attachment should appear as a saved file card]')
+    .replace(/\[[^\]]+]\(https?:\/\/(?:yourdomain\.com|api\.storage\.url)[^)]+\)/gi, '[saved file link unavailable — use the file card]')
+    .replace(/https?:\/\/(?:yourdomain\.com|api\.storage\.url)\S*/gi, '[saved file link unavailable]')
   // Cap length
   if (out.length > 10_000) out = out.slice(0, 10_000) + '\n[...truncated...]'
   return out

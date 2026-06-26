@@ -204,7 +204,11 @@ If you are checking, saving, creating, updating, linking, attaching, importing, 
 Common recovery examples:
 - To list saved clients/customers, call list_customers.
 - To attach an uploaded photo/file to a customer, call link_document_to_customer. A projectId is not required.
+- If you previously asked whether to link/attach a document/photo and the user replied "yes" or "yea", call link_document_to_customer or the appropriate save/link tool using the prior document/customer context.
 - To create a project/job for a customer, call create_project_for_customer.
+- To delete a customer/client, call delete_customer, not delete_documents_by_name.
+- To approve pending requests after the user says "yes approved" or "yes delete", call decide_pending_action_requests or decide_action_request.
+- To create a crew/customer/project chat, call create_project_chat.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.

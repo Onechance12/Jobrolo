@@ -146,6 +146,17 @@ function buildDocumentReviewProfile(input: {
       unitPrices: rows.length > 0 && !rowHas('unitPrice'),
       totals: rows.length > 0 && !rowHas('total') && !rowHas('rcv'),
     }
+  } else if (documentType === 'photo') {
+    expectedFields = ['photo type', 'summary', 'visible damage/condition', 'materials visible', 'safety concerns', 'linked customer/project']
+    const photoType = data.photoType ?? data.category
+    const damageObserved = data.damageObserved ?? data.damage ?? data.observations
+    missingDataFlags = {
+      photoType: !hasValue(photoType),
+      summary: !hasValue(data.summary) && !hasValue(data.description),
+      damageObserved: !hasValue(damageObserved),
+      materialsVisible: !hasValue(data.materialsVisible),
+      safetyConcerns: false,
+    }
   } else {
     expectedFields = ['document type', 'visible text', 'summary', 'linked customer/project']
     missingDataFlags = input.comparisonMissingData as Record<string, boolean>
@@ -162,7 +173,9 @@ function buildDocumentReviewProfile(input: {
     missingDataFlags,
     warnings: documentType === 'price_sheet'
       ? ['Price sheet review does not require insurance claim fields. Import requires explicit approval.']
-      : [],
+      : documentType === 'photo'
+        ? ['Photo review does not require insurance claim fields. Attach the photo to a customer/project before using it in a job packet or roof report.']
+        : [],
   }
 }
 

@@ -52,6 +52,12 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const typeLabel: Record<string, string> = { project: 'Jobs & Projects', customer: 'Customers', subcontractor: 'Subs', supplier: 'Suppliers' }
 
   const toggleWsType = (type: string) => setWsCollapsedByType(prev => ({ ...prev, [type]: !prev[type] }))
+  const insertCommandPrompt = (text: string) => {
+    exitWorkspace()
+    if (conversationId) selectConversation(conversationId)
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+    onNavigate?.()
+  }
 
   return (
     <aside className="w-full md:w-64 border-r border-border bg-sidebar flex flex-col h-full">
@@ -112,35 +118,30 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
           Command Center
         </button>
 
-        <button
-          onClick={() => { window.location.href = '/templates'; onNavigate?.() }}
-          className="mt-2 w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-sm font-medium min-h-[44px] transition-all duration-200 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground border border-transparent hover:border-border"
-        >
-          <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-950/50">
+        <div className="mt-3 rounded-2xl border border-border bg-card/70 p-2">
+          <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Command shortcuts</div>
+          <button
+            onClick={() => insertCommandPrompt('Turn an uploaded document into a reusable template.')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
             <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-          </div>
-          Templates
-        </button>
-
-        <button
-          onClick={() => { window.location.href = '/reports'; onNavigate?.() }}
-          className="mt-2 w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-sm font-medium min-h-[44px] transition-all duration-200 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground border border-transparent hover:border-border"
-        >
-          <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-cyan-100 dark:bg-cyan-950/50">
+            Start template from chat
+          </button>
+          <button
+            onClick={() => insertCommandPrompt('Start a roof report from chat. Ask me which customer/project and photos to use.')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
             <FileText className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-          </div>
-          Roof Reports
-        </button>
-
-        <button
-          onClick={() => { window.location.href = '/canvassing'; onNavigate?.() }}
-          className="mt-2 w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-sm font-medium min-h-[44px] transition-all duration-200 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground border border-transparent hover:border-border"
-        >
-          <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-100 dark:bg-emerald-950/50">
+            Start roof report
+          </button>
+          <button
+            onClick={() => insertCommandPrompt('Help me create a canvassing game plan from chat. Ask what street or area I want to work.')}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-sm min-h-[40px] transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
             <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          Canvassing
-        </button>
+            Canvassing game plan
+          </button>
+        </div>
       </div>
 
       {/* Scrollable content */}

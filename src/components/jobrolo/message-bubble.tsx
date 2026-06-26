@@ -14,13 +14,13 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: Props) {
   const isUser = message.role === 'user'
   const content = isUser ? message.content : stripJsonWrapper(message.content)
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>
       <div className={cn('flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center', isUser ? 'bg-muted text-muted-foreground' : 'bg-gradient-to-br from-blue-600 to-blue-800 text-white')}>
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
-      <div className={cn('flex-1 min-w-0 max-w-[85%] sm:max-w-[80%]', isUser && 'flex flex-col items-end')}>
+      <div className={cn('flex-1 min-w-0 max-w-[85%] sm:max-w-[80%] overflow-hidden', isUser && 'flex flex-col items-end')}>
         {!isUser && message.thinking && message.thinking.length > 0 && <ThinkingSteps steps={message.thinking} />}
-        <div className={cn('rounded-2xl px-3.5 sm:px-4 py-2.5 text-[15px] leading-relaxed', isUser ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-card border border-border text-card-foreground rounded-tl-md')}>
+        <div className={cn('rounded-2xl px-3.5 sm:px-4 py-2.5 text-[15px] leading-relaxed max-w-full overflow-hidden break-words [overflow-wrap:anywhere]', isUser ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-card border border-border text-card-foreground rounded-tl-md')}>
           <FormattedContent content={content} />
         </div>
         {message.contextType && <CopilotCardFromMessage contextType={message.contextType} contextData={message.contextData ?? null} content={content} />}
@@ -57,10 +57,10 @@ export function StreamingBubble({ text }: { text: string }) {
   )
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden">
       <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-600 to-blue-800 text-white"><Bot className="w-4 h-4" /></div>
-      <div className="flex-1 max-w-[85%] sm:max-w-[80%]">
-        <div className="rounded-2xl rounded-tl-md px-3.5 sm:px-4 py-2.5 bg-card border border-border text-card-foreground min-h-[40px]">
+      <div className="flex-1 min-w-0 max-w-[85%] sm:max-w-[80%] overflow-hidden">
+        <div className="rounded-2xl rounded-tl-md px-3.5 sm:px-4 py-2.5 bg-card border border-border text-card-foreground min-h-[40px] max-w-full overflow-hidden break-words [overflow-wrap:anywhere]">
           {text ? (
             <div className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-blue-500 dark:text-blue-400 flex-shrink-0" />
@@ -104,7 +104,7 @@ function FormattedContent({ content }: { content: string }) {
     }
   }
   flush()
-  return <div className="space-y-0.5">{elements}</div>
+  return <div className="space-y-0.5 max-w-full break-words [overflow-wrap:anywhere]">{elements}</div>
 }
 
 function renderInline(text: string): React.ReactNode {
@@ -128,7 +128,7 @@ function AttachmentGrid({ attachments }: { attachments: MessageAttachment[] }) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const [failed, setFailed] = useState<Set<string>>(new Set())
   return (
-    <div className="mt-2 space-y-2 w-full sm:max-w-md">
+    <div className="mt-2 space-y-2 w-full max-w-full sm:max-w-md overflow-hidden">
       {images.length > 0 && (
         <div className={cn('grid gap-1.5', images.length === 1 ? 'grid-cols-1 max-w-[240px]' : 'grid-cols-2 sm:grid-cols-3')}>
           {images.map((img, i) => {

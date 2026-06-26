@@ -10,7 +10,7 @@ import { runAgentLoop } from '@/lib/agent-loop'
 import { executeActions } from '@/lib/actions'
 import { heartbeat, appendThinking, completeJob, failJob } from '@/lib/jobs/queue'
 import { wrapUntrusted, sanitizeAIOutput, validateAction } from '@/lib/security/prompt-defense'
-import type { AiAction, ChannelType, WorkspaceInfo } from '@/lib/types'
+import type { AiAction, ChannelType, WorkspaceInfo, MessageAttachment } from '@/lib/types'
 import { assertDocumentsBelongToTenant, normalizeIdList, resolveJobExecutionContext } from '@/lib/security/agent-execution'
 import { normalizeRole } from '@/lib/security/permissions'
 
@@ -23,6 +23,97 @@ interface AgentJobRow {
   chatId: string | null
   conversationId: string | null
   userId: string | null
+}
+
+function isPlaceholderUrl(value: string) {
+  return /(?:yourdomain\.com|api\.storage\.url)/i.test(value)
+}
+
+function isUsableFileUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  if (!value.trim() || isPlaceholderUrl(value)) return false
+  return value.startsWith('/api/') || value.startsWith('http://') || value.startsWith('https://')
+}
+
+function attachmentFromToolObject(obj: Record<string, any>): MessageAttachment | null {
+  const url = obj.url ?? obj.fileUrl
+  if (!isUsableFileUrl(url)) return null
+  const documentId = String(obj.documentId ?? obj.id ?? '').trim() || undefined
+  const name = String(obj.name ?? obj.originalName ?? obj.filename ?? 'Saved file')
+  const mimeType = String(obj.mimeType ?? '')
+  const fileType = String(obj.fileType ?? obj.documentType ?? '')
+  const thumbnailUrl = isUsableFileUrl(obj.thumbnailUrl) ? obj.thumbnailUrl : undefined
+  const isImage = fileType === 'photo' || mimeType.startsWith('image/') || Boolean(thumbnailUrl)
+  const status = String(obj.status ?? obj.documentStatus ?? '')
+  return {
+    type: isImage ? 'image' : 'file',
+    name,
+    url,
+    thumbnailUrl,
+    mimeType: mimeType || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+    size: typeof obj.size === 'number' ? obj.size : undefined,
+    documentId,
+    documentStatus: ['queued', 'processing', 'reviewed', 'failed', 'needs_ocr', 'pending_review'].includes(status) ? status as MessageAttachment['documentStatus'] : undefined,
+    documentType: fileType || undefined,
+    documentSummary: typeof obj.aiSummary === 'string' ? obj.aiSummary : typeof obj.summary === 'string' ? obj.summary : undefined,
+  }
+}
+
+function collectAttachmentsFromValue(value: unknown, out: Map<string, MessageAttachment>, depth = 0) {
+  if (!value || depth > 6) return
+  if (Array.isArray(value)) {
+    for (const item of value) collectAttachmentsFromValue(item, out, depth + 1)
+    return
+  }
+  if (typeof value !== 'object') return
+  const obj = value as Record<string, any>
+  const attachment = attachmentFromToolObject(obj)
+  if (attachment) out.set(attachment.documentId || attachment.url, attachment)
+  for (const child of Object.values(obj)) collectAttachmentsFromValue(child, out, depth + 1)
+}
+
+function deriveAttachmentsFromToolResults(iterations: Array<{ toolResults?: Array<{ data: unknown }> }>): MessageAttachment[] {
+  const out = new Map<string, MessageAttachment>()
+  for (const iter of iterations) {
+    for (const result of iter.toolResults ?? []) collectAttachmentsFromValue(result.data, out)
+  }
+  return [...out.values()].slice(0, 12)
+}
+
+function normalizeModelAttachment(value: unknown): MessageAttachment | null {
+  if (!value || typeof value !== 'object') return null
+  const obj = value as Record<string, any>
+  if (!isUsableFileUrl(obj.url)) return null
+  const type = obj.type === 'image' || obj.type === 'file'
+    ? obj.type
+    : (String(obj.mimeType ?? '').startsWith('image/') || obj.thumbnailUrl ? 'image' : 'file')
+  const status = String(obj.documentStatus ?? '')
+  return {
+    type,
+    name: String(obj.name ?? obj.originalName ?? obj.filename ?? 'Saved file'),
+    url: obj.url,
+    thumbnailUrl: isUsableFileUrl(obj.thumbnailUrl) ? obj.thumbnailUrl : undefined,
+    mimeType: String(obj.mimeType ?? (type === 'image' ? 'image/jpeg' : 'application/octet-stream')),
+    size: typeof obj.size === 'number' ? obj.size : undefined,
+    documentId: obj.documentId ? String(obj.documentId) : undefined,
+    documentStatus: ['queued', 'processing', 'reviewed', 'failed', 'needs_ocr', 'pending_review'].includes(status) ? status as MessageAttachment['documentStatus'] : undefined,
+    documentType: obj.documentType,
+    documentSummary: obj.documentSummary,
+    documentCategory: obj.documentCategory,
+    documentExtractedData: obj.documentExtractedData,
+  }
+}
+
+function mergeAttachments(primary: unknown[], derived: MessageAttachment[]): MessageAttachment[] {
+  const out = new Map<string, MessageAttachment>()
+  for (const value of primary) {
+    const attachment = normalizeModelAttachment(value)
+    if (attachment) out.set(attachment.documentId || attachment.url, attachment)
+  }
+  for (const attachment of derived) {
+    if (isUsableFileUrl(attachment.url)) out.set(attachment.documentId || attachment.url, attachment)
+  }
+  return [...out.values()]
 }
 
 export async function processAgentJob(job: AgentJobRow) {
@@ -212,7 +303,7 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
       return true
     })
 
-    const finalAttachments = loopResult.final.attachments ?? []
+    const finalAttachments = mergeAttachments(loopResult.final.attachments ?? [], deriveAttachmentsFromToolResults(loopResult.iterations))
     let actionResults: Array<{ action: string; status: string; detail: string; targetChatType?: string }> = []
 
     // Execute actions when we're in a workspace chat context.
