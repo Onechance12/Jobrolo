@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,16 +8,21 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
+  Building2,
   CheckCircle2,
   ClipboardCheck,
   Camera,
   Copy,
   ExternalLink,
   FileText,
+  Globe2,
   MapPin,
   Home,
+  Mail,
   MessageCircle,
   Package,
+  Pencil,
+  Phone,
   Radio,
   RefreshCw,
   Route,
@@ -90,6 +95,11 @@ type CreatedChatLike = {
   customer?: { name?: string | null; customerNumber?: string | null; clientNumber?: string | null } | null
   attachedTo?: { type?: string; title?: string; address?: string | null } | null
 }
+
+type CompanyProfileLike = {
+  status?: string
+  profile?: Record<string, unknown> | null
+} & Record<string, unknown>
 
 type RoofReportLike = {
   id?: string
@@ -179,6 +189,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('operator_briefing')) {
     return <OperatorBriefingCard data={contextData as any} content={content} />
+  }
+  if (cardType.includes('company_profile')) {
+    return <CompanyProfileCard data={contextData as CompanyProfileLike} />
   }
   if (cardType.includes('created_chat')) {
     return <CreatedChatCard data={contextData as CreatedChatLike} />
@@ -328,6 +341,78 @@ export function CreatedChatCard({ data }: { data?: CreatedChatLike | null }) {
         <Button size="sm" variant="outline" onClick={invite}><UserPlus className="mr-1.5 h-3.5 w-3.5" />Invite person</Button>
       </CardFooter>
     </Card>
+  )
+}
+
+export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null }) {
+  const profile = ((data?.profile && typeof data.profile === 'object') ? data.profile : data) as Record<string, unknown> | null | undefined
+  if (!profile) return null
+
+  const name = textValue(profile.displayName) || textValue(profile.companyName) || textValue(profile.legalName) || 'Company profile'
+  const legalName = textValue(profile.legalName)
+  const website = textValue(profile.website)
+  const phone = textValue(profile.phone)
+  const email = textValue(profile.email)
+  const address = textValue(profile.address)
+  const licenseNumber = textValue(profile.licenseNumber)
+  const ownerName = textValue(profile.ownerName)
+  const contact = [textValue(profile.publicContactName), textValue(profile.publicContactTitle)].filter(Boolean).join(' · ')
+  const missing = [
+    !website ? 'website' : null,
+    !phone ? 'phone' : null,
+    !email ? 'email' : null,
+    !address ? 'address' : null,
+  ].filter(Boolean)
+
+  function insertPrompt(text: string) {
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
+            <Building2 className="h-4 w-4" /> {name}
+          </CardTitle>
+          <Badge variant="secondary" className="text-[10px]">{data?.status === 'updated' ? 'updated' : 'saved profile'}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid gap-2 text-xs sm:grid-cols-2">
+          {legalName && legalName !== name ? <ProfileRow label="Legal name" value={legalName} /> : null}
+          {phone ? <ProfileRow icon={<Phone className="h-3.5 w-3.5" />} label="Phone" value={phone} /> : null}
+          {email ? <ProfileRow icon={<Mail className="h-3.5 w-3.5" />} label="Email" value={email} /> : null}
+          {website ? <ProfileRow icon={<Globe2 className="h-3.5 w-3.5" />} label="Website" value={website} /> : null}
+          {address ? <ProfileRow className="sm:col-span-2" icon={<MapPin className="h-3.5 w-3.5" />} label="Address" value={address} /> : null}
+          {licenseNumber ? <ProfileRow label="License" value={licenseNumber} /> : null}
+          {ownerName ? <ProfileRow label="Owner" value={ownerName} /> : null}
+          {contact ? <ProfileRow label="Public contact" value={contact} /> : null}
+        </div>
+        {missing.length ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            Missing basics: {missing.join(', ')}. You can update these from chat.
+          </div>
+        ) : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" variant="outline" onClick={() => insertPrompt('Update my company profile: company name, phone, email, website, and address are ')}>
+          <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit from chat
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company website and suggest updates to my company profile: ${website || ''}`.trim())}>
+          <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research website
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+function ProfileRow({ label, value, icon, className }: { label: string; value: string; icon?: ReactNode; className?: string }) {
+  return (
+    <div className={cn('rounded-lg border bg-background/70 p-2', className)}>
+      <div className="mb-0.5 flex items-center gap-1.5 font-medium text-foreground">{icon}{label}</div>
+      <div className="whitespace-pre-line break-words text-muted-foreground">{value}</div>
+    </div>
   )
 }
 
@@ -1058,6 +1143,11 @@ function dedupeRows(rows: Array<{ label: string; value: string }>) {
     seen.add(key)
     return true
   })
+}
+
+function textValue(value: unknown) {
+  if (typeof value !== 'string') return ''
+  return value.trim()
 }
 
 function humanize(value: string) {

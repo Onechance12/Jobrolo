@@ -754,8 +754,21 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (_args, contractorId) => {
       const profile = await getOrCreateContractorProfile(contractorId)
+      const publicProfile = publicContractorProfile(profile)
       const mergeContext = await buildProjectMergeData({ contractorId })
-      return { success: true, data: { profile: publicContractorProfile(profile), availableMergeFields: Object.keys(mergeContext.data).sort(), mergePreview: mergeContext.data } }
+      return {
+        success: true,
+        data: {
+          profile: publicProfile,
+          availableMergeFields: Object.keys(mergeContext.data).sort(),
+          mergePreview: mergeContext.data,
+          card: {
+            cardType: 'company_profile',
+            profile: publicProfile,
+            status: 'saved',
+          },
+        },
+      }
     },
   },
   {
@@ -856,8 +869,20 @@ export const TOOLS: ToolDef[] = [
         return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can update the company profile from chat.' }
       }
       const profile = await upsertContractorProfile(contractorId, args)
+      const publicProfile = publicContractorProfile(profile)
       console.log(`[tools-v2] contractor profile updated contractorId=${contractorId} fields=${Object.keys(args).filter(k => typeof args[k] !== 'undefined').join(',')}`)
-      return { success: true, data: { profile: publicContractorProfile(profile) } }
+      return {
+        success: true,
+        data: {
+          profile: publicProfile,
+          updatedFields: Object.keys(args).filter(k => typeof args[k] !== 'undefined'),
+          card: {
+            cardType: 'company_profile',
+            profile: publicProfile,
+            status: 'updated',
+          },
+        },
+      }
     },
   },
   {

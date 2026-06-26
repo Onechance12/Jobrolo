@@ -55,6 +55,8 @@ const OPERATIONAL_INTENT_PHRASES = [
   'i will process', 'i will save', 'i will create', 'i will update', 'i will add', 'i will attach',
   'i will link', 'i will import', 'i will extract', 'i will upload', 'i will clear', 'i will proceed',
   'i will now', 'please hold on', 'one moment', 'checking now', 'searching now', 'looking now',
+  'fetching your', 'retrieving your', 'pulling up your', 'getting your', 'looking up your',
+  'fetching the', 'retrieving the', 'pulling up the', 'getting the', 'looking up the',
   'first, let me', 'first let me',
   'requires approval before', 'requires approval to', 'review and approve', 'approval request',
   'please approve', 'please confirm the deletion request', 'approve the deletion request',
@@ -204,6 +206,37 @@ function plainMessageText(text: string) {
     .replace(/<UNTRUSTED_CONTENT[^>]*>/gi, '')
     .replace(/<\/UNTRUSTED_CONTENT>/gi, '')
     .trim()
+}
+
+function latestUserText(messages: ChatMessage[]) {
+  const latest = lastMessageByRole(messages, 'user')
+  return latest ? plainMessageText(latest.message.content) : ''
+}
+
+function isCompanyProfileReadRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  if (/\b(update|change|set|save|edit|research|search|look up)\b/.test(lower)) return false
+  return (
+    /\b(what|show|pull|fetch|view|display|list|see)\b[\s\S]{0,80}\b(my|our|the)?\s*(company|business)\s+(info|information|profile|details)\b/.test(lower) ||
+    /\b(my|our)\s+(company|business)\s+(info|information|profile|details)\b/.test(lower) ||
+    /\bcompany\s+profile\b/.test(lower)
+  )
+}
+
+function needsCompanyProfileToolRetry(parsed: ParsedAIResponse, messages: ChatMessage[], toolCallCount: number, executableActionCount: number) {
+  if (toolCallCount > 0 || executableActionCount > 0) return false
+  const userText = latestUserText(messages)
+  if (!isCompanyProfileReadRequest(userText)) return false
+  const answer = parsed.text.toLowerCase()
+  return (
+    answer.includes('fetching') ||
+    answer.includes('retrieving') ||
+    answer.includes('pulling up') ||
+    answer.includes('getting') ||
+    answer.includes('checking') ||
+    answer.length < 160
+  )
 }
 
 function isAffirmativeReply(text: string) {
@@ -448,6 +481,16 @@ If a tool previously failed, say: "I tried, but it did not save. Here's the erro
 Respond as JSON only.`
 }
 
+function buildCompanyProfileToolInstruction(userText: string) {
+  return `The user asked: "${userText.slice(0, 180)}"
+
+This is a saved company/business profile lookup. Do not answer "fetching" or "checking" as a final response.
+
+Call get_contractor_profile now with no args, final=false. After the tool result returns, answer from the saved profile only and include any missing key company fields honestly.
+
+Respond as JSON only.`
+}
+
 async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number; contractorId?: string; userId?: string }): Promise<string> {
   let lastErr: unknown
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -518,6 +561,14 @@ Respond as JSON only.`,
 
     // Detect when the AI narrates operational work without actually calling a tool/action.
     // This is the trust boundary between "chat demo" and "operating system".
+    if (needsCompanyProfileToolRetry(parsed, messages, parsedToolCallCount, parsedActionCount)) {
+      lastBlockedReason = 'The assistant tried to fetch company profile data without calling get_contractor_profile.'
+      console.warn(`[agent-loop] forced company profile tool retry iteration=${i} contractorId=${opts.contractorId}`)
+      messages.push({ role: 'assistant', content: raw })
+      messages.push({ role: 'user', content: buildCompanyProfileToolInstruction(latestUserText(messages)) })
+      continue
+    }
+
     if (shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
       lastBlockedReason = 'The assistant narrated operational work without a valid executable tool call.'
       console.warn(`[agent-loop] blocked narrated action without tool iteration=${i} contractorId=${opts.contractorId}`)
