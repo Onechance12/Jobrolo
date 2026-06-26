@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { chatComplete, type ChatMessage } from '@/lib/ai'
-import { executeTool, isToolAllowedInChannel } from '@/lib/agent/tools-v2'
+import { executeTool, getToolDefinitions, isToolAllowedInChannel } from '@/lib/agent/tools-v2'
 import { parseAIResponse, type ParsedAIResponse, type ToolCall } from '@/lib/prompts'
 import type { ChannelType } from '@/lib/types'
 
@@ -34,6 +34,8 @@ export interface AgentLoopResult {
 }
 
 const MAX_RETRIES = 4
+const TOOL_NAMES = new Set(getToolDefinitions().map(t => t.name))
+const EXECUTABLE_ACTION_TYPES = new Set(['cross_post', 'memory', 'task', 'task_update', 'note'])
 
 const OPERATIONAL_INTENT_PHRASES = [
   'let me search', 'let me check', 'let me look', 'let me find', 'let me retrieve', 'let me get',
@@ -87,8 +89,108 @@ function findNullishIdArg(value: unknown, path = 'args'): string | null {
   return null
 }
 
-function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, actionCount: number) {
-  if (toolCallCount > 0 || actionCount > 0) return false
+function isIdLikeKey(key: string) {
+  return /(^id$|id$|Id$)/.test(key)
+}
+
+function looksLikePlaceholder(value: string, key: string) {
+  const trimmed = value.trim()
+  const lower = trimmed.toLowerCase()
+  if (!trimmed) return false
+  if (/^<[^>]+>$/.test(trimmed)) return true
+  if (/\bplaceholder\b/.test(lower)) return true
+  if (isIdLikeKey(key)) {
+    return (
+      lower === 'id' ||
+      lower === 'project id' ||
+      lower === 'customer id' ||
+      lower === 'document id' ||
+      lower === "timothy's id" ||
+      lower.endsWith('_id') ||
+      /\b(customer|project|document|scope|timothy)\b.*\bid\b/.test(lower)
+    )
+  }
+  if (key === 'rawText') {
+    return (
+      lower === 'scope information' ||
+      lower === 'provided scope information' ||
+      lower === 'provided text' ||
+      (lower.includes('scope information') && trimmed.length < 120)
+    )
+  }
+  return false
+}
+
+function sanitizeToolArgs(value: unknown, path = 'args'): { value: unknown; removed: string[]; invalid?: string } {
+  if (typeof value === 'string') {
+    const key = path.split('.').pop() ?? ''
+    if (looksLikePlaceholder(value, key)) {
+      if (isIdLikeKey(key)) return { value: undefined, removed: [path] }
+      return { value, removed: [], invalid: `${path} is a placeholder, not real saved data` }
+    }
+    return { value, removed: [] }
+  }
+  if (Array.isArray(value)) {
+    const next: unknown[] = []
+    const removed: string[] = []
+    for (let i = 0; i < value.length; i++) {
+      const result = sanitizeToolArgs(value[i], `${path}[${i}]`)
+      if (result.invalid) return { value, removed, invalid: result.invalid }
+      removed.push(...result.removed)
+      if (result.value !== undefined) next.push(result.value)
+    }
+    return { value: next, removed }
+  }
+  if (value && typeof value === 'object') {
+    const next: Record<string, unknown> = {}
+    const removed: string[] = []
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      const result = sanitizeToolArgs(child, `${path}.${key}`)
+      if (result.invalid) return { value, removed, invalid: result.invalid }
+      removed.push(...result.removed)
+      if (result.value !== undefined) next[key] = result.value
+    }
+    return { value: next, removed }
+  }
+  return { value, removed: [] }
+}
+
+function actionToToolCall(action: { type: string; [k: string]: unknown }): ToolCall | null {
+  if (!TOOL_NAMES.has(action.type)) return null
+  const { type, ...args } = action
+  return { name: type, args }
+}
+
+function normalizeParsedWork(parsed: ParsedAIResponse) {
+  const actions = parsed.actions ?? []
+  const convertedToolCalls: ToolCall[] = []
+  const executableActions: NonNullable<ParsedAIResponse['actions']> = []
+  const blockedResults: NonNullable<AgentIteration['toolResults']> = []
+
+  for (const action of actions) {
+    const asTool = actionToToolCall(action)
+    if (asTool) {
+      console.warn(`[agent-loop] converted tool-like action '${action.type}' into tool_call`)
+      convertedToolCalls.push(asTool)
+      continue
+    }
+    if (EXECUTABLE_ACTION_TYPES.has(action.type)) {
+      executableActions.push(action)
+      continue
+    }
+    blockedResults.push({
+      name: action.type || 'unknown_action',
+      success: false,
+      data: null,
+      error: `Unknown action type '${action.type}'. Database/system operations must be sent as tool_calls, not actions.`,
+    })
+  }
+
+  return { convertedToolCalls, executableActions, blockedResults }
+}
+
+function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, executableActionCount: number) {
+  if (toolCallCount > 0 || executableActionCount > 0) return false
   return hasOperationalIntent(parsed.text) || hasCompletionClaim(parsed.text)
 }
 
@@ -133,16 +235,35 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const messages = [...opts.messages]
   const iterations: AgentIteration[] = []
   let totalToolCalls = 0
+  let lastBlockedReason: string | null = null
 
   for (let i = 0; i < maxIterations; i++) {
     const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
     const parsed = parseAIResponse(raw)
-    const parsedToolCallCount = parsed.tool_calls?.length ?? 0
-    const parsedActionCount = parsed.actions?.length ?? 0
+    const normalizedWork = normalizeParsedWork(parsed)
+    const parsedToolCallCount = (parsed.tool_calls?.length ?? 0) + normalizedWork.convertedToolCalls.length
+    const parsedActionCount = normalizedWork.executableActions.length
+
+    if (!opts.workspaceId && parsedActionCount > 0 && parsedToolCallCount === 0) {
+      lastBlockedReason = 'The assistant produced chat actions, but this main chat has no workspace context to execute them.'
+      console.warn(`[agent-loop] blocked executable actions without workspace context iteration=${i} contractorId=${opts.contractorId}`)
+      messages.push({ role: 'assistant', content: raw })
+      messages.push({
+        role: 'user',
+        content: `You returned actions, but this is the main command center and there is no workspaceId to execute workspace actions.
+
+If the user requested a database/system operation, use tool_calls.
+If it can only be done inside a workspace/project chat, say that clearly and do not claim it was saved or completed.
+
+Respond as JSON only.`,
+      })
+      continue
+    }
 
     // Detect when the AI narrates operational work without actually calling a tool/action.
     // This is the trust boundary between "chat demo" and "operating system".
     if (shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
+      lastBlockedReason = 'The assistant narrated operational work without a valid executable tool call.'
       console.warn(`[agent-loop] blocked narrated action without tool iteration=${i} contractorId=${opts.contractorId}`)
       console.warn(`[agent-loop] forced retry for missing tool call iteration=${i} contractorId=${opts.contractorId}`)
       messages.push({ role: 'assistant', content: raw })
@@ -150,8 +271,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       continue
     }
 
-    let toolCalls = parsed.tool_calls ?? []
-    const blockedToolResults: NonNullable<AgentIteration['toolResults']> = []
+    let toolCalls = [...(parsed.tool_calls ?? []), ...normalizedWork.convertedToolCalls]
+    const blockedToolResults: NonNullable<AgentIteration['toolResults']> = [...normalizedWork.blockedResults]
+    if (normalizedWork.blockedResults.length > 0) {
+      lastBlockedReason = normalizedWork.blockedResults.map(r => r.error).filter(Boolean).join('; ')
+    }
 
     // Filter out tools not allowed in this channel (security: per-channel permissioning)
     if (opts.channelType) {
@@ -163,11 +287,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
 
     toolCalls = toolCalls.filter(tc => {
+      const sanitized = sanitizeToolArgs(tc.args)
+      if (sanitized.invalid) {
+        const error = `Invalid tool args: ${sanitized.invalid}`
+        console.warn(`[agent-loop] blocked placeholder tool call '${tc.name}' ${sanitized.invalid} contractorId=${opts.contractorId}`)
+        blockedToolResults.push({ name: tc.name, success: false, data: null, error })
+        lastBlockedReason = error
+        return false
+      }
+      if (sanitized.removed.length > 0) {
+        console.warn(`[agent-loop] removed placeholder id args for '${tc.name}': ${sanitized.removed.join(', ')} contractorId=${opts.contractorId}`)
+        tc.args = sanitized.value as Record<string, unknown>
+      }
       const badArgPath = findNullishIdArg(tc.args)
       if (!badArgPath) return true
       const error = `Invalid tool args: ${badArgPath} is required`
       console.warn(`[agent-loop] blocked invalid tool call '${tc.name}' ${badArgPath} contractorId=${opts.contractorId}`)
       blockedToolResults.push({ name: tc.name, success: false, data: null, error })
+      lastBlockedReason = error
       return false
     })
 
@@ -201,9 +338,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const toolResultsFormatted = results.map(r =>
         `TOOL RESULT: ${r.name}\n${r.success ? JSON.stringify(r.data, null, 2).slice(0, 3000) : `ERROR: ${r.error}`}`
       ).join('\n\n')
+      const hasNonSavedResult = results.some(r => {
+        const data = r.data as Record<string, unknown> | null
+        return !r.success || Boolean(data?.needsProject || data?.needsCustomer || data?.needsClarification || data?.approvalRequired)
+      })
       messages.push({
         role: 'user',
-        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success. If tools returned errors or approvalRequired, acknowledge that clearly.`,
+        content: `Tool results:\n\n${toolResultsFormatted}\n\nNow answer the user's original question using these real tool results. This must be the final user-facing answer based on tool results. Do not make up information. Only say saved/created/updated/linked/imported if a tool result confirms success with saved=true, created record ids, linked ids, or an executed mutation result.${hasNonSavedResult ? '\n\nIMPORTANT: At least one tool result did not complete the requested save/mutation or requires clarification/approval. Say exactly what is missing or what failed. Do not say the action is done.' : ''} If tools returned errors or approvalRequired, acknowledge that clearly.`,
       })
       iterations.push(iteration)
       continue
@@ -230,7 +371,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
   }
   const fallback: ParsedAIResponse = {
-    text: iterations[iterations.length - 1]?.text ?? 'I got stuck. Could you rephrase?',
+    text: lastBlockedReason
+      ? `I tried, but it did not save or complete. ${lastBlockedReason}`
+      : iterations[iterations.length - 1]?.text ?? 'I got stuck. Could you rephrase?',
     actions: [], tool_calls: [], final: true,
   }
   return { final: fallback, iterations, totalToolCalls }
