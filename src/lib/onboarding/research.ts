@@ -26,6 +26,9 @@ export interface CompanyWebPresence {
   enabled: boolean
   provider?: string
   summary?: string
+  phone?: string
+  email?: string
+  logoUrl?: string
   reviews?: Array<{ source?: string; rating?: string; reviewCount?: string; url?: string; notes?: string }>
   directoryListings?: Array<{ source?: string; url?: string; notes?: string }>
   mentions?: Array<{ title?: string; url?: string; notes?: string }>
@@ -45,6 +48,7 @@ export interface CompanyResearch {
   location?: string
   phone?: string
   email?: string
+  logoUrl?: string
   socialProfiles: Record<string, string>
   teamSizeEstimate?: string
   businessType?: string  // roofing, restoration, public_adjuster, general_contractor, hvac, plumbing, other
@@ -106,7 +110,7 @@ function extractTextFromHtml(html: string): string {
   return cleaned.replace(/\s+/g, ' ').trim()
 }
 
-function extractMeta(html: string): { title?: string; description?: string; ogTitle?: string; ogDescription?: string; ogSiteName?: string } {
+function extractMeta(html: string): { title?: string; description?: string; ogTitle?: string; ogDescription?: string; ogSiteName?: string; ogImage?: string } {
   const result: any = {}
   const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i)
   if (titleMatch) result.title = titleMatch[1].trim()
@@ -118,6 +122,8 @@ function extractMeta(html: string): { title?: string; description?: string; ogTi
   if (ogDescMatch) result.ogDescription = ogDescMatch[1].trim()
   const ogSiteMatch = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i)
   if (ogSiteMatch) result.ogSiteName = ogSiteMatch[1].trim()
+  const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+  if (ogImageMatch) result.ogImage = ogImageMatch[1].trim()
   return result
 }
 
@@ -142,14 +148,50 @@ function extractSocialLinks(html: string): Record<string, string> {
   return social
 }
 
-function extractPhone(text: string): string | undefined {
-  const m = text.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.]?\d{4}/)
-  return m?.[0]
+function absoluteUrl(base: string, maybeUrl?: string | null): string | undefined {
+  if (!maybeUrl) return undefined
+  const value = maybeUrl.trim()
+  if (!value || /^data:/i.test(value)) return undefined
+  try {
+    return new URL(value, base).toString()
+  } catch {
+    return undefined
+  }
 }
 
-function extractEmail(text: string): string | undefined {
-  const m = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)
-  return m?.[0]
+function extractLogoUrl(html: string, baseUrl: string, meta: ReturnType<typeof extractMeta>): string | undefined {
+  const fromMeta = absoluteUrl(baseUrl, meta.ogImage)
+  if (fromMeta && /logo|brand|sons|roof/i.test(fromMeta)) return fromMeta
+
+  const imgRegex = /<img\b[^>]*>/gi
+  let match: RegExpExecArray | null
+  while ((match = imgRegex.exec(html)) !== null) {
+    const tag = match[0]
+    const src = tag.match(/\bsrc=["']([^"']+)["']/i)?.[1]
+    const alt = tag.match(/\balt=["']([^"']*)["']/i)?.[1] ?? ''
+    const className = tag.match(/\bclass=["']([^"']*)["']/i)?.[1] ?? ''
+    if (!src) continue
+    const signal = `${src} ${alt} ${className}`
+    if (/logo|brand|site-logo|custom-logo/i.test(signal)) {
+      return absoluteUrl(baseUrl, src)
+    }
+  }
+
+  return fromMeta
+}
+
+function extractPhone(htmlOrText: string): string | undefined {
+  const tel = htmlOrText.match(/href=["']tel:([^"']+)["']/i)?.[1]
+  if (tel) return tel.replace(/^\/\//, '').replace(/[^\d+().\-\s]/g, '').trim()
+  const m = htmlOrText.match(/\+?1?[\s.-]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)
+  return m?.[0]?.trim()
+}
+
+function extractEmail(htmlOrText: string): string | undefined {
+  const mailto = htmlOrText.match(/href=["']mailto:([^"'?]+)(?:\?[^"']*)?["']/i)?.[1]
+  if (mailto) return mailto.trim()
+  const m = htmlOrText.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)
+  return m?.[0]?.trim()
 }
 
 function cleanCompanyNameCandidate(value?: string | null): string | undefined {
@@ -174,6 +216,65 @@ function parseJsonObject(raw: string): any | null {
   try { return JSON.parse(candidate.slice(start, end + 1)) } catch { return null }
 }
 
+function textKey(value?: string | null) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/&amp;/g, '&')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(co|company|llc|inc|ltd|the)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function slugKey(value?: string | null) {
+  return textKey(value).replace(/\s+/g, '-')
+}
+
+function hostFromUrl(value?: string | null) {
+  if (!value) return undefined
+  try {
+    return new URL(normalizeUrl(value)).hostname.replace(/^www\./, '').toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
+function titleUrlText(entry: any) {
+  return [entry?.title, entry?.source, entry?.notes, entry?.snippet, entry?.url].filter(Boolean).join(' ')
+}
+
+function isRelevantCompanySource(entry: any, input: { companyName?: string; website?: string }) {
+  const url = typeof entry?.url === 'string' ? entry.url : ''
+  const host = hostFromUrl(url)
+  const websiteHost = hostFromUrl(input.website)
+  if (websiteHost && host === websiteHost) return true
+
+  const company = textKey(input.companyName)
+  if (!company) return true
+  const text = textKey(titleUrlText(entry))
+  const compactText = text.replace(/\s+/g, '')
+  const compactCompany = company.replace(/\s+/g, '')
+  const companySlug = slugKey(input.companyName)
+  const path = (() => {
+    try { return new URL(url).pathname.toLowerCase() } catch { return '' }
+  })()
+
+  // Directory/search results often contain similarly named businesses. For BBB,
+  // require the exact company slug so "Mitchell & Sons Roofing" does not sneak in
+  // when the company is simply "Sons Roofing".
+  if (host?.includes('bbb.org') && companySlug) {
+    return path.includes(`/${companySlug}-`) || path.endsWith(`/${companySlug}`)
+  }
+
+  if (text.includes(company)) return true
+  if (compactCompany && compactText.includes(compactCompany)) return true
+  return Boolean(companySlug && url.toLowerCase().includes(companySlug))
+}
+
+function filterRelevantEntries<T extends { url?: string }>(entries: T[] | undefined, input: { companyName?: string; website?: string }, limit: number) {
+  return (entries ?? []).filter(entry => isRelevantCompanySource(entry, input)).slice(0, limit)
+}
+
 async function researchCompanyWebPresence(input: { companyName?: string; website?: string; location?: string }): Promise<CompanyWebPresence> {
   if (!isOpenAIWebSearchConfigured()) {
     return {
@@ -190,8 +291,10 @@ Company: ${company}
 Website: ${input.website || 'unknown'}
 Likely location/service area: ${input.location || 'unknown'}
 
-Find public information from the broader web, not only the company homepage. Look for:
+Find public information from the broader web, not only the company homepage. Only include sources for this exact company. Exclude similarly named companies unless the source clearly matches the official website/domain or exact company identity.
+Look for:
 - official website confirmation
+- phone, public email, and logo/brand image if available
 - Google/Yelp/Facebook/Angi/HomeAdvisor/other review signals when available
 - BBB profile or BBB rating when available
 - social profiles
@@ -203,6 +306,9 @@ Do not invent ratings, review counts, BBB status, or mentions. If unavailable, s
 Return JSON only:
 {
   "summary": "short practical summary",
+  "phone": "public phone if found",
+  "email": "public email if found",
+  "logoUrl": "official logo or brand image URL if found",
   "reviews": [{"source":"...", "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."}],
   "directoryListings": [{"source":"...", "url":"...", "notes":"..."}],
   "mentions": [{"title":"...", "url":"...", "notes":"..."}],
@@ -222,17 +328,23 @@ Return JSON only:
   }
 
   const parsed = parseJsonObject(result.text) || {}
+  const filterInput = { companyName: input.companyName, website: input.website }
+  const sources = result.sources.filter(source => isRelevantCompanySource(source, filterInput)).slice(0, 12)
+  const bbb = parsed.bbb && typeof parsed.bbb === 'object' && isRelevantCompanySource(parsed.bbb, filterInput) ? parsed.bbb : undefined
   return {
     enabled: true,
     provider: `${result.provider}:${result.model}`,
     summary: typeof parsed.summary === 'string' ? parsed.summary : result.text.slice(0, 800),
-    reviews: Array.isArray(parsed.reviews) ? parsed.reviews.slice(0, 10) : [],
-    directoryListings: Array.isArray(parsed.directoryListings) ? parsed.directoryListings.slice(0, 10) : [],
-    mentions: Array.isArray(parsed.mentions) ? parsed.mentions.slice(0, 10) : [],
-    backlinksOrBlogs: Array.isArray(parsed.backlinksOrBlogs) ? parsed.backlinksOrBlogs.slice(0, 10) : [],
-    bbb: parsed.bbb && typeof parsed.bbb === 'object' ? parsed.bbb : undefined,
+    phone: typeof parsed.phone === 'string' ? parsed.phone : undefined,
+    email: typeof parsed.email === 'string' ? parsed.email : undefined,
+    logoUrl: typeof parsed.logoUrl === 'string' ? parsed.logoUrl : undefined,
+    reviews: Array.isArray(parsed.reviews) ? filterRelevantEntries(parsed.reviews, filterInput, 10) : [],
+    directoryListings: Array.isArray(parsed.directoryListings) ? filterRelevantEntries(parsed.directoryListings, filterInput, 10) : [],
+    mentions: Array.isArray(parsed.mentions) ? filterRelevantEntries(parsed.mentions, filterInput, 10) : [],
+    backlinksOrBlogs: Array.isArray(parsed.backlinksOrBlogs) ? filterRelevantEntries(parsed.backlinksOrBlogs, filterInput, 10) : [],
+    bbb,
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings.filter((x: unknown) => typeof x === 'string').slice(0, 10) : [],
-    sources: result.sources,
+    sources,
   }
 }
 
@@ -252,8 +364,9 @@ export async function researchCompanyByUrl(url: string, opts: { preferredCompany
   const meta = extractMeta(fetched.html)
   const visibleText = extractTextFromHtml(fetched.html)
   const social = extractSocialLinks(fetched.html)
-  const phone = extractPhone(visibleText)
-  const email = extractEmail(visibleText)
+  const phone = extractPhone(fetched.html) || extractPhone(visibleText)
+  const email = extractEmail(fetched.html) || extractEmail(visibleText)
+  const logoUrl = extractLogoUrl(fetched.html, fetched.finalUrl, meta)
   const companyName = opts.preferredCompanyName || cleanCompanyNameCandidate(meta.ogSiteName || meta.ogTitle || meta.title)
   const description = meta.ogDescription || meta.description
 
@@ -304,6 +417,7 @@ Only include fields you can confidently identify from the text. Omit fields you 
     location: aiExtract.location,
     phone,
     email,
+    logoUrl,
     socialProfiles: social,
     teamSizeEstimate: aiExtract.teamSizeEstimate,
     businessType: aiExtract.businessType,
@@ -321,6 +435,9 @@ Only include fields you can confidently identify from the text. Omit fields you 
       sources: [],
       error: err instanceof Error ? err.message : String(err),
     }))
+    result.phone = result.phone || result.webPresence.phone
+    result.email = result.email || result.webPresence.email
+    result.logoUrl = result.logoUrl || result.webPresence.logoUrl
   }
   return result
 }
@@ -366,6 +483,9 @@ This is a best-guess inference from the name only — keep confidence modest.`,
         sources: [],
         error: err instanceof Error ? err.message : String(err),
       }))
+      result.phone = result.webPresence.phone
+      result.email = result.webPresence.email
+      result.logoUrl = result.webPresence.logoUrl
     }
     return result
   } catch (err) {

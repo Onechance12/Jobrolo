@@ -905,6 +905,7 @@ export const TOOLS: ToolDef[] = [
         displayName: preferredCompanyName || research.companyName || undefined,
         phone: research.phone || undefined,
         email: research.email || undefined,
+        logoUrl: research.logoUrl || undefined,
         website: research.website || args.website || undefined,
         metadata: {
           websiteResearch: {

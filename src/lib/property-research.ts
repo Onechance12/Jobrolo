@@ -583,6 +583,10 @@ function dedupeCandidates(candidates: any[]) {
 
 function buildResearchSummary(input: { mode: string; candidates: any[]; providerSummary?: string | null; streets: string[] }) {
   if (!input.candidates.length) return input.mode === 'street_game_plan' ? 'No properties were found for this street research yet. Try adding a city/state, importing a list, or enabling a property provider.' : 'No confident property matches were found yet. Confirm the address or enable a property provider.'
+  const verified = input.candidates.filter(c => !['gps_unverified', 'manual_unverified'].includes(String(c.source || '')))
+  if (!verified.length) {
+    return `I saved the location/address context, but I do not have a verified public property record yet. ${input.providerSummary || 'Confirm the address or enable/configure property research.'}`
+  }
   if (input.mode === 'street_game_plan') {
     const hot = input.candidates.filter(c => c.overallScore >= 55).length
     const follow = input.candidates.filter(c => c.followUpScore >= 30).length
@@ -804,6 +808,10 @@ export async function getStreetResearchRuns(ctx: TenantContext, input: { status?
 
 function buildPropertyResearchCard(run: any, candidates: any[]) {
   const best = candidates[0]
+  const provider = safeJson<Record<string, any>>(run.providerSummaryJson, {})
+  const providerSources = Array.isArray(provider.sources) ? provider.sources : []
+  const warnings = Array.isArray(provider.warnings) ? provider.warnings.filter((x: unknown) => typeof x === 'string').slice(0, 5) : []
+  const verifiedCandidateCount = candidates.filter(c => !['gps_unverified', 'manual_unverified'].includes(String(c.source || ''))).length
   return {
     cardType: 'property_research_result',
     runId: run.id,
@@ -811,6 +819,12 @@ function buildPropertyResearchCard(run: any, candidates: any[]) {
     status: run.status,
     summary: run.resultSummary,
     confidence: run.confidence,
+    provider: provider.provider,
+    providerSummary: provider.summary,
+    providerWarnings: warnings,
+    providerSources: providerSources.slice(0, 5),
+    verifiedCandidateCount,
+    unverifiedOnly: candidates.length > 0 && verifiedCandidateCount === 0,
     bestCandidate: best ? cardCandidate(best) : null,
     candidates: candidates.slice(0, 5).map(cardCandidate),
   }

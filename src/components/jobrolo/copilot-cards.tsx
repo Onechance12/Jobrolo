@@ -476,8 +476,13 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
-            <Building2 className="h-4 w-4" /> {name}
+          <CardTitle className="flex min-w-0 items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
+            {logo && /^https?:\/\//i.test(logo) ? (
+              <img src={logo} alt={`${name} logo`} className="h-8 w-8 rounded-lg border bg-white object-contain p-1" />
+            ) : (
+              <Building2 className="h-4 w-4 flex-shrink-0" />
+            )}
+            <span className="min-w-0 truncate">{name}</span>
           </CardTitle>
           <Badge variant="secondary" className="text-[10px]">{data?.status === 'updated' ? 'updated' : 'saved profile'}</Badge>
         </div>
@@ -1292,6 +1297,9 @@ export function PropertyResearchCard({ data }: { data?: any }) {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const best = data?.bestCandidate || data?.candidate || data?.candidates?.[0]
   const candidates = Array.isArray(data?.candidates) ? data.candidates : []
+  const providerSources = Array.isArray(data?.providerSources) ? data.providerSources : []
+  const providerWarnings = Array.isArray(data?.providerWarnings) ? data.providerWarnings : []
+  const unverifiedOnly = Boolean(data?.unverifiedOnly)
   async function confirm() {
     if (!data?.runId) return
     setState('saving')
@@ -1316,6 +1324,11 @@ export function PropertyResearchCard({ data }: { data?: any }) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">{data?.summary || 'Jobrolo researched this property and found possible matches. Confirm before saving to property memory.'}</p>
+        {unverifiedOnly ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            GPS/address context is saved, but no verified public property-owner record was found yet. Confirm the property before creating a customer or job.
+          </div>
+        ) : null}
         {best ? (
           <div className="rounded-lg border bg-background/70 p-3 text-xs">
             <div className="font-semibold text-foreground">{best.address || 'Possible property match'}</div>
@@ -1326,6 +1339,27 @@ export function PropertyResearchCard({ data }: { data?: any }) {
               {best.reason ? <div>Reason: {best.reason}</div> : null}
               {best.sourceUrl ? <a className="mt-1 inline-flex text-cyan-700 underline underline-offset-2 dark:text-cyan-300" href={best.sourceUrl} target="_blank" rel="noreferrer">Open source</a> : null}
             </div>
+          </div>
+        ) : null}
+        {data?.providerSummary ? (
+          <div className="rounded-lg border bg-background/60 p-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Lookup status:</span> {data.providerSummary}
+          </div>
+        ) : null}
+        {providerWarnings.length ? (
+          <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            {providerWarnings.slice(0, 3).map((warning: string, i: number) => <div key={i}>• {warning}</div>)}
+          </div>
+        ) : null}
+        {providerSources.length ? (
+          <div className="space-y-1 text-xs">
+            <div className="font-medium text-foreground">Sources checked</div>
+            {providerSources.slice(0, 3).map((source: any, i: number) => (
+              <a key={`${source.url || source.title || i}`} href={source.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 truncate text-cyan-700 underline-offset-2 hover:underline dark:text-cyan-300">
+                <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">{source.title || source.url}</span>
+              </a>
+            ))}
           </div>
         ) : null}
         {candidates.length > 1 ? (

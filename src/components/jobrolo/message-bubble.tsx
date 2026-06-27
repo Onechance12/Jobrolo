@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Bot, User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain } from 'lucide-react'
+import { Bot, User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain, ExternalLink } from 'lucide-react'
 import { cn, formatMessageTime, formatFileSize, stripJsonWrapper } from '@/lib/utils'
 import { getChannelConfig } from '@/lib/channels'
 import { DocumentCard } from './document-card'
@@ -124,7 +124,8 @@ function renderInline(text: string): React.ReactNode {
 
 function AttachmentGrid({ attachments }: { attachments: MessageAttachment[] }) {
   const images = attachments.filter(a => a.type === 'image')
-  const files = attachments.filter(a => a.type !== 'image')
+  const links = attachments.filter(a => a.type === 'link')
+  const files = attachments.filter(a => a.type !== 'image' && a.type !== 'link')
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const [failed, setFailed] = useState<Set<string>>(new Set())
   return (
@@ -146,6 +147,11 @@ function AttachmentGrid({ attachments }: { attachments: MessageAttachment[] }) {
           {files.map((f, i) => f.documentId ? <DocumentCard key={f.url + i} attachment={f} /> : <a key={f.url + i} href={f.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground hover:bg-muted min-h-[40px]"><FileText className="w-4 h-4 text-muted-foreground" /><span className="flex-1 truncate">{f.name}</span>{f.size && <span className="text-xs text-muted-foreground/60">{formatFileSize(f.size)}</span>}</a>)}
         </div>
       )}
+      {links.length > 0 && (
+        <div className="space-y-2">
+          {links.map((link, i) => <SourcePreview key={link.url + i} attachment={link} />)}
+        </div>
+      )}
       {lightboxIdx !== null && images[lightboxIdx] && (
         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center" onClick={() => setLightboxIdx(null)}>
           <button className="absolute top-4 right-4 p-3 text-white/70 hover:text-white"><X className="w-6 h-6" /></button>
@@ -155,6 +161,34 @@ function AttachmentGrid({ attachments }: { attachments: MessageAttachment[] }) {
         </div>
       )}
     </div>
+  )
+}
+
+function SourcePreview({ attachment }: { attachment: MessageAttachment }) {
+  let host = attachment.source
+  try {
+    host = host || new URL(attachment.url).hostname.replace(/^www\./, '')
+  } catch {
+    host = host || 'web source'
+  }
+  return (
+    <a
+      href={attachment.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group block rounded-xl border border-border bg-card/80 p-3 text-sm shadow-sm transition hover:border-blue-300 hover:bg-muted/40 dark:hover:border-blue-800"
+    >
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-300">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground">{attachment.name || host}</div>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">{host}</div>
+          {attachment.description ? <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{attachment.description}</p> : null}
+        </div>
+      </div>
+    </a>
   )
 }
 

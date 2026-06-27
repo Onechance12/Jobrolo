@@ -35,10 +35,46 @@ function isUsableFileUrl(value: unknown): value is string {
   return value.startsWith('/api/') || value.startsWith('http://') || value.startsWith('https://')
 }
 
+function hostnameLabel(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return undefined
+  }
+}
+
+function isWebSourceObject(obj: Record<string, any>, url: string, documentId?: string) {
+  if (documentId) return false
+  if (!/^https?:\/\//i.test(url)) return false
+  const hasWebSourceShape = typeof obj.title === 'string'
+    || typeof obj.snippet === 'string'
+    || typeof obj.notes === 'string'
+    || typeof obj.source === 'string'
+    || typeof obj.rating === 'string'
+    || typeof obj.reviewCount === 'string'
+  const mimeType = String(obj.mimeType ?? '')
+  const fileType = String(obj.fileType ?? obj.documentType ?? '')
+  return hasWebSourceShape && !mimeType && !fileType && !obj.thumbnailUrl
+}
+
 function attachmentFromToolObject(obj: Record<string, any>): MessageAttachment | null {
   const url = obj.url ?? obj.fileUrl
   if (!isUsableFileUrl(url)) return null
   const documentId = String(obj.documentId ?? obj.id ?? '').trim() || undefined
+  if (isWebSourceObject(obj, url, documentId)) {
+    const host = hostnameLabel(url)
+    const source = String(obj.source ?? host ?? '').trim() || undefined
+    const name = String(obj.title ?? obj.name ?? source ?? 'Web source').trim()
+    const description = String(obj.snippet ?? obj.notes ?? obj.description ?? '').trim() || undefined
+    return {
+      type: 'link',
+      name,
+      url,
+      mimeType: 'text/html',
+      description,
+      source,
+    }
+  }
   const name = String(obj.name ?? obj.originalName ?? obj.filename ?? 'Saved file')
   const mimeType = String(obj.mimeType ?? '')
   const fileType = String(obj.fileType ?? obj.documentType ?? '')
@@ -84,16 +120,16 @@ function normalizeModelAttachment(value: unknown): MessageAttachment | null {
   if (!value || typeof value !== 'object') return null
   const obj = value as Record<string, any>
   if (!isUsableFileUrl(obj.url)) return null
-  const type = obj.type === 'image' || obj.type === 'file'
+  const type = obj.type === 'image' || obj.type === 'file' || obj.type === 'link'
     ? obj.type
     : (String(obj.mimeType ?? '').startsWith('image/') || obj.thumbnailUrl ? 'image' : 'file')
   const status = String(obj.documentStatus ?? '')
   return {
     type,
-    name: String(obj.name ?? obj.originalName ?? obj.filename ?? 'Saved file'),
+    name: String(obj.name ?? obj.title ?? obj.originalName ?? obj.filename ?? (type === 'link' ? hostnameLabel(String(obj.url)) ?? 'Web source' : 'Saved file')),
     url: obj.url,
     thumbnailUrl: isUsableFileUrl(obj.thumbnailUrl) ? obj.thumbnailUrl : undefined,
-    mimeType: String(obj.mimeType ?? (type === 'image' ? 'image/jpeg' : 'application/octet-stream')),
+    mimeType: String(obj.mimeType ?? (type === 'image' ? 'image/jpeg' : type === 'link' ? 'text/html' : 'application/octet-stream')),
     size: typeof obj.size === 'number' ? obj.size : undefined,
     documentId: obj.documentId ? String(obj.documentId) : undefined,
     documentStatus: ['queued', 'processing', 'reviewed', 'failed', 'needs_ocr', 'pending_review'].includes(status) ? status as MessageAttachment['documentStatus'] : undefined,
@@ -101,6 +137,8 @@ function normalizeModelAttachment(value: unknown): MessageAttachment | null {
     documentSummary: obj.documentSummary,
     documentCategory: obj.documentCategory,
     documentExtractedData: obj.documentExtractedData,
+    description: typeof obj.description === 'string' ? obj.description : typeof obj.snippet === 'string' ? obj.snippet : undefined,
+    source: typeof obj.source === 'string' ? obj.source : type === 'link' ? hostnameLabel(String(obj.url)) : undefined,
   }
 }
 
