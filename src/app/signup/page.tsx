@@ -14,27 +14,27 @@ const FEATURE_PREVIEWS = [
   {
     label: 'Client files',
     tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100 hover:border-blue-200/45 hover:bg-blue-500/20',
-    prompt: 'Show me how Jobrolo helps with client files. Explain it like I am deciding whether to use it.',
+    prompt: 'Teach me how Jobrolo client files work. Explain the problem it solves, what I can ask in chat, and give a realistic roofing example.',
   },
   {
     label: 'Field notes',
     tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100 hover:border-emerald-200/45 hover:bg-emerald-500/20',
-    prompt: 'Show me how Jobrolo helps with field notes, inspections, photos, and job-site updates.',
+    prompt: 'Teach me how Jobrolo helps in the field with inspections, photos, GPS notes, damage observations, and job-site updates. Give practical examples.',
   },
   {
     label: 'Shared chats',
     tone: 'border-cyan-300/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/45 hover:bg-cyan-500/20',
-    prompt: 'Show me how Jobrolo shared chats work for crews, customers, sales reps, and project managers.',
+    prompt: 'Teach me how Jobrolo shared chats work for homeowners, crews, subcontractors, sales reps, and project managers. Explain permissions and examples.',
   },
   {
     label: 'Reports',
     tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100 hover:border-amber-200/45 hover:bg-amber-500/20',
-    prompt: 'Show me how Jobrolo helps create roof reports, scope breakdowns, and customer-facing summaries.',
+    prompt: 'Teach me how Jobrolo helps create roof reports, scope breakdowns, photo reports, and customer-facing summaries. Explain the workflow and examples.',
   },
   {
     label: 'Approvals',
     tone: 'border-violet-300/20 bg-violet-500/10 text-violet-100 hover:border-violet-200/45 hover:bg-violet-500/20',
-    prompt: 'Show me how Jobrolo approvals work so risky actions do not happen without permission.',
+    prompt: 'Teach me how Jobrolo approvals work. Explain what actions need approval, why that matters, and how the user stays in control.',
   },
 ]
 
