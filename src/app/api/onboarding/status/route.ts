@@ -24,18 +24,19 @@ function buildProfile(companyName?: string | null, website?: string | null) {
 }
 
 function buildGreeting(userName: string, companyName?: string | null, website?: string | null): string {
+  const setupMode = `You’re in Jobrolo setup mode right now. I can explain how to use Jobrolo before we start, or we can finish your company profile. I won’t create jobs, chats, files, or customer records until onboarding is complete.`
   if (companyName) {
     const facts = [
       `- Company: ${companyName}`,
       website ? `- Website: ${website}` : null,
       `- Account owner: ${userName}`,
     ].filter(Boolean).join('\n')
-    return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get ${companyName} set up.\n\nAfter reviewing some information, this is what I was able to gather:\n\n${facts}\n\nLet me know if any of this needs updating before moving forward. If it looks good, just let me know.`
+    return `Hey ${userName}, welcome to Jobrolo.\n\n${setupMode}\n\nHere’s what I already have:\n\n${facts}\n\nFirst, what is your role with ${companyName} — owner/admin, sales, project manager, crew/sub, office, customer, or something else? If you were invited to someone else’s company, use that invite link instead of creating a new company workspace.`
   }
   if (website) {
-    return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get your company profile set up.\n\nI found this website from signup: ${website}. What company name should I use for your workspace?`
+    return `Hey ${userName}, welcome to Jobrolo.\n\n${setupMode}\n\nI found this website from signup: ${website}. What company name should I use for your workspace, and what is your role there? If you were invited to an existing company, use your invite link instead.`
   }
-  return `Hey ${userName}, welcome to Jobrolo. There is a lot we can do together, but first let's get your company profile set up.\n\nWhat is your company website or business name?`
+  return `Hey ${userName}, welcome to Jobrolo.\n\n${setupMode}\n\nAre you creating a new company workspace, or joining a company you were invited to? If you’re creating one, tell me your company website or business name and your role.`
 }
 
 export async function GET(req: NextRequest) {

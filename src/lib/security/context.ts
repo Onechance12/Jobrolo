@@ -43,6 +43,17 @@ export interface TenantContext {
   authMethod: 'session' | 'api_key' | 'system' | 'demo'
 }
 
+const ONBOARDING_ALLOWED_PATH_PREFIXES = [
+  '/api/auth',
+  '/api/onboarding',
+  '/api/health',
+]
+
+function isOnboardingAllowedPath(req: NextRequest): boolean {
+  const path = req.nextUrl?.pathname || ''
+  return ONBOARDING_ALLOWED_PATH_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
+}
+
 // Demo bypass: dev only. SECURITY: Crashes in production if JOBROLO_DEMO=1 is set.
 const DEMO_MODE = process.env.JOBROLO_DEMO === '1'
 
@@ -222,6 +233,15 @@ export function getClientIp(req: NextRequest): string {
 export async function requireContext(req: NextRequest): Promise<TenantContext> {
   const ctx = await getContext(req)
   if (!ctx) throw new UnauthorizedError('Authentication required')
+  if (!isOnboardingAllowedPath(req) && ctx.authMethod === 'session' && ctx.user) {
+    const onboarding = await db.onboardingSession.findUnique({
+      where: { contractorId: ctx.contractorId },
+      select: { status: true },
+    })
+    if (!onboarding || onboarding.status !== 'completed') {
+      throw new OnboardingIncompleteError('Finish onboarding before using Jobrolo tools.')
+    }
+  }
   return ctx
 }
 
@@ -233,6 +253,11 @@ export class UnauthorizedError extends Error {
 export class ForbiddenError extends Error {
   statusCode = 403
   constructor(message: string) { super(message) }
+}
+
+export class OnboardingIncompleteError extends ForbiddenError {
+  redirectTo = '/onboarding'
+  constructor(message = 'Finish onboarding before using Jobrolo tools.') { super(message) }
 }
 
 // withContext: wrap an API handler with auth + error handling
@@ -248,7 +273,10 @@ export function withContext<T>(handler: Handler<T>) {
         return NextResponse.json({ error: err.message }, { status: 401 })
       }
       if (err instanceof ForbiddenError) {
-        return NextResponse.json({ error: err.message }, { status: 403 })
+        return NextResponse.json(
+          { error: err.message, redirectTo: err instanceof OnboardingIncompleteError ? err.redirectTo : undefined },
+          { status: 403 },
+        )
       }
       console.error('[withContext] error:', err)
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

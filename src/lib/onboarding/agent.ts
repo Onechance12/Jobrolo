@@ -30,6 +30,8 @@ export interface OnboardingMessage {
 }
 
 export interface BusinessProfile {
+  userRole?: string
+  companyRelationship?: string
   companyName?: string
   website?: string
   phone?: string
@@ -65,6 +67,7 @@ export interface BusinessProfile {
 
 // Info categories the agent tracks — each adds to confidence when covered
 const INFO_CATEGORIES = [
+  'user_role',            // owner/admin/team/customer/crew/sub/etc.
   'company_identity',     // name, website, description
   'company_contact',      // phone, email, address for estimates/invoices/reports
   'brand_assets',         // logo preference / upload reminder
@@ -83,6 +86,7 @@ const INFO_CATEGORIES = [
 // Per-business-type question banks — agent picks from these based on context
 const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>> = {
   roofing: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, sales, project manager, crew/sub, office, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, and business address should show on your estimates, invoices, reports, and customer-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'work_type', question: "Are you mostly doing retail roofing (direct to homeowner) or insurance work (storm damage, claims)?" },
@@ -93,6 +97,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What's the #1 thing you want Jobrolo to help with?" },
   ],
   restoration: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, sales, project manager, crew/sub, office, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, and business address should show on your estimates, invoices, reports, and customer-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'work_type', question: "Are you doing mostly insurance restoration, or also taking on retail work?" },
@@ -104,6 +109,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "Where do you lose the most time right now?" },
   ],
   public_adjuster: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, adjuster, office, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, office address, and license information should show on your client-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and documents, or skip that for later?" },
     { topic: 'services', question: "Do you handle residential, commercial, or both? What claim types — property, casualty, wind/hail?" },
@@ -114,6 +120,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What would make your life easier day-to-day?" },
   ],
   general_contractor: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, sales, project manager, crew/sub, office, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "What trades do you cover? Kitchen/bath, additions, whole-home, disaster recovery?" },
@@ -124,6 +131,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What's the biggest bottleneck in your operation right now?" },
   ],
   hvac: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, sales, technician, dispatcher, office, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "Residential install, commercial service, or both? Do you do new construction or replacement/retrofit?" },
@@ -133,6 +141,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What do you want Jobrolo to help with?" },
   ],
   default: [
+    { topic: 'user_role', question: "What is your role with the company — owner, admin, sales, project manager, crew/sub, office, customer, or something else?" },
     { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
     { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "What services do you offer?" },
@@ -155,6 +164,7 @@ const AUTO_COMPLETE_THRESHOLD = 80  // above this, we push to complete aggressiv
 // ---------------------------------------------------------------------------
 
 const TOPIC_KEYWORDS: Record<string, string[]> = {
+  user_role: ['owner', 'admin', 'manager', 'project manager', 'sales', 'sales rep', 'crew', 'subcontractor', 'sub contractor', 'employee', 'office', 'customer', 'homeowner', 'client', 'dispatcher'],
   company_contact: ['phone', 'email', 'address', 'office', 'business address', 'mailing address', 'estimates', 'invoices', 'reports'],
   brand_assets: ['logo', 'brand', 'branding', 'skip logo', 'upload logo', 'later'],
   software: ['acculynx', 'xactimate', 'jobnimbus', 'servicetitan', 'housecall', 'fieldedge', 'procore', 'buildertrend', 'coconstruct', 'accu lynx', 'eagleview', 'symbility', 'claimxperience', 'encircle', 'dash', 'horizon'],
@@ -247,13 +257,23 @@ function buildSystemPrompt(args: {
   // What's missing
   const missing = INFO_CATEGORIES.filter(c => !coveredTopics.includes(c))
 
-  return `You are Jobrolo's onboarding agent — an AI operations manager onboarding a new contractor named ${userName}.
+  return `You are Jobrolo in ONBOARDING MODE — an AI operations manager onboarding a new contractor named ${userName}.
 
 YOUR GOAL: Learn enough about ${userName}'s business to set up their Jobrolo workspace. You're their new operations manager — act like one. Conversational, warm, curious. NOT a form. NOT a wizard.
+
+ONBOARDING MODE BOUNDARIES:
+- The user should feel like they are already talking to Jobrolo, but the full operating system is not unlocked yet.
+- You may answer questions about what Jobrolo does, how to direct Jobrolo, what kinds of prompts work well, and why setup matters.
+- You must stay in onboarding. Do NOT claim you created/saved jobs, chats, customers, documents, reports, invoices, signatures, files, or tasks during onboarding.
+- If the user asks to do operational work, say that unlocks right after setup, then steer back to the smallest setup step needed.
+- Do not overcomplicate onboarding. Ask only for details that help create the company profile, understand their business, or tailor the first workspace.
+- If the user asks "how do I use Jobrolo?" or similar, teach with 3-5 short examples, then ask whether they want to continue setup.
 
 IMPORTANT: The user's name is "${userName}". Always use this name. Do NOT call them "Mike" or any other name.
 
 COMPANY PROFILE GOAL: Jobrolo uses the company profile on estimates, invoices, roof reports, contracts, signatures, and customer-facing documents. During onboarding, collect or confirm the public-facing company/display name, website, business phone, email, business address, license/insurance details if relevant, public contact, and logo preference. Logo is optional: if they do not have one ready, mark brand_assets covered and tell them they can upload it later.
+
+ROLE + COMPANY RELATIONSHIP GOAL: Early in onboarding, understand who this user is entering as. If they are the owner/admin creating a new company workspace, continue setup. If they say they are joining an existing Jobrolo company, a customer, crew member, subcontractor, employee, or salesperson, explain that joining an existing company requires an invite link or owner/admin approval. Do not imply they can self-join a company by typing its name. Store their role in extractedInfo.userRole and their relationship in extractedInfo.companyRelationship when possible.
 
 CURRENT STATE:
 - Business profile so far:
@@ -285,6 +305,9 @@ CRITICAL RULES (read carefully):
 12. The user's name is "${userName}". Use ONLY this name. Never "Mike" or any other name.
 13. If the user gives company contact details, extract them into phone, email, addressLine1, city, state, postalCode, licenseNumber, publicContactName, or publicContactTitle when possible.
 14. Do NOT require a logo to complete onboarding. If the user says to skip it, add "brand_assets" to newlyCoveredTopics and store logoPreference: "skip_for_now".
+15. If the user is asking a product/how-to question, answer it directly and do not force a setup question in the same breath unless it feels natural.
+16. Never ask for irrelevant CRM details during onboarding. If a detail can be collected later inside Jobrolo, say it can be handled later.
+17. If the user says they were invited, are joining someone else's company, or are a customer/crew/sub/employee, tell them to use their Jobrolo invite link or ask the company owner/admin to invite them. Do not complete new-company onboarding for them unless they clearly choose to create their own company workspace.
 
 AVAILABLE QUESTION BANK (only use for topics NOT yet covered — adapt wording, don't copy verbatim):
 ${availableQuestions || '(all topics covered — move to completion)'}
@@ -401,6 +424,7 @@ function normalizeAiResponse(raw: string): { message: string; extractedInfo: Par
 
 function calculateConfidence(profile: BusinessProfile, coveredTopics: string[]): number {
   let score = 0
+  if (profile.userRole || profile.companyRelationship) score += 6
   if (profile.companyName) score += 10
   if (profile.website) score += 5
   if (profile.phone || profile.email || profile.addressLine1 || profile.location) score += 8
@@ -430,6 +454,7 @@ function calculateConfidence(profile: BusinessProfile, coveredTopics: string[]):
 async function finalizeOnboarding(contractorId: string, profile: BusinessProfile, businessType: string): Promise<void> {
   // 1. Write ContractorMemory entries for everything we learned
   const memoryEntries: Array<{ category: string; content: string }> = []
+  if (profile.userRole || profile.companyRelationship) memoryEntries.push({ category: 'preference', content: `Onboarding user role: ${[profile.userRole, profile.companyRelationship].filter(Boolean).join(' · ')}` })
   if (profile.companyName) memoryEntries.push({ category: 'default', content: `Company name: ${profile.companyName}` })
   if (profile.website) memoryEntries.push({ category: 'default', content: `Website: ${profile.website}` })
   if (profile.phone) memoryEntries.push({ category: 'default', content: `Company phone: ${profile.phone}` })
@@ -802,7 +827,7 @@ export async function getInitialGreeting(contractorId: string, userId: string): 
   let history: OnboardingMessage[] = JSON.parse(session.messagesJson || '[]')
 
   if (history.length === 0) {
-    const greeting = "Welcome to Jobrolo. I'm going to learn your business and build your workspace.\n\nWhat's your company website or business name?"
+    const greeting = "Welcome to Jobrolo. You’re in setup mode, so I can answer questions and help you learn how to direct me, but I won’t create jobs, chats, or files until your workspace is ready.\n\nAre you creating a new company workspace, or joining one you were invited to? If you’re creating one, tell me your company website or business name and your role."
     history = [{ role: 'assistant', content: greeting, timestamp: new Date().toISOString() }]
     await db.onboardingSession.update({
       where: { id: session.id },

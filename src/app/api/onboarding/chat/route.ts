@@ -7,7 +7,7 @@ export const maxDuration = 60
 
 type OnboardingMessage = { role: 'user' | 'assistant'; content: string; timestamp: string }
 
-const FALLBACK_MESSAGE = "Got it. I'm having trouble with the onboarding brain right now, but we can keep going. Are you mostly doing retail work, insurance/storm work, or both?"
+const FALLBACK_MESSAGE = "I hit a setup hiccup, but we can keep onboarding without guessing. In one sentence, are you mostly retail roofing, insurance/storm work, commercial work, or a mix?"
 
 async function persistFallbackTurn(contractorId: string, userId: string, userMessage: string, assistantMessage: string) {
   try {

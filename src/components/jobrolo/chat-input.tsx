@@ -336,7 +336,14 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const startListening = () => { if (listening) { recognitionRef.current?.stop(); setListening(false); return } const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition; if (!SR) return; const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let ft = textRef.current; rec.onresult = (e: any) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const tr = e.results[i][0].transcript; if (e.results[i].isFinal) ft += tr; else interim += tr } setText(ft); setInterimText(interim) }; rec.onend = () => setListening(false); rec.onerror = () => setListening(false); rec.start(); recognitionRef.current = rec; setListening(true) }
   const [interimText, setInterimText] = useState('')
   const promptGroups = promptGroupsFor(mode, shortcuts)
-  const activeShortcutGroup = shortcutSheetGroupId ? promptGroups.find(group => group.id === shortcutSheetGroupId) ?? null : null
+  const uploadPromptGroups = pendingFiles.length ? uploadPromptGroupsFor(mode, pendingFiles) : []
+  const shortcutRailGroups = pendingFiles.length ? uploadPromptGroups : promptGroups
+  const shouldShowShortcutRail = !text.trim() && !listening && shortcutRailGroups.length > 0
+  const activeShortcutGroup = shortcutSheetGroupId ? shortcutRailGroups.find(group => group.id === shortcutSheetGroupId) ?? null : null
+
+  useEffect(() => {
+    if (text.trim()) setShortcutSheetGroupId(null)
+  }, [text])
 
   return (
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
@@ -351,7 +358,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           onClose={() => setInspectionPickerOpen(false)}
         />
       ) : null}
-      {!pendingFiles.length && !listening ? <PromptAssistantRail groups={promptGroups} onOpenGroup={group => setShortcutSheetGroupId(group.id)} /> : null}
+      {shouldShowShortcutRail ? <PromptAssistantRail groups={shortcutRailGroups} onOpenGroup={group => setShortcutSheetGroupId(group.id)} /> : null}
       {activeShortcutGroup ? (
         <ShortcutGroupSheet
           group={activeShortcutGroup}
@@ -600,6 +607,94 @@ function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]
     ...(mode === 'field' ? [field, commandShortcuts, sales, files, company] : [commandShortcuts, sales, files, field, company]),
     ...(custom.length ? [{ id: 'personal', label: 'My shortcuts', reason: 'your saved prompts', tone: 'personal' as const, shortcuts: custom }] : []),
   ].filter(group => group.shortcuts.length)
+}
+
+function uploadPromptGroupsFor(mode: 'command' | 'field', files: File[]): PromptGroup[] {
+  const fileSummary = describePendingUpload(files)
+  const hasImage = files.some(file => file.type.startsWith('image/'))
+  const hasPdf = files.some(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+  const maybePriceSheet = files.some(file => /price|material|supply|supplier|abc|qxo|texas direct|price[-_\s]?list/i.test(file.name))
+  const maybeScope = files.some(file => /scope|estimate|claim|xact|loss|roof/i.test(file.name)) || hasPdf
+
+  const uploadReview: PromptGroup = {
+    id: 'upload-review',
+    label: 'Upload',
+    reason: `${fileSummary} staged`,
+    tone: 'files',
+    shortcuts: [
+      makeCommandShortcut('Review upload', `Review the staged upload (${fileSummary}). Identify what it is, summarize it, and tell me whether it belongs to a customer, project/job, company pricing, company profile, or review queue before saving or linking anything else.`, 'file'),
+      makeCommandShortcut('Show saved result', `After this upload is saved, show me the saved file card with a clickable preview/download link and the document ID. Use the staged upload (${fileSummary}).`, 'file'),
+      makeCommandShortcut('Ask where it belongs', `Save this staged upload (${fileSummary}) first, then ask me which customer, project/job, company profile, or company pricing area it should be attached to.`, 'file'),
+    ],
+  }
+
+  const job: PromptGroup = {
+    id: 'upload-job',
+    label: 'Job',
+    reason: 'attach + save',
+    tone: 'field',
+    shortcuts: [
+      makeCommandShortcut('Attach to current job', `Save this staged upload (${fileSummary}) to the current project/job file. If there is no current project, ask me which customer or job first.`, 'job'),
+      makeCommandShortcut('Create job from upload', `Read this staged upload (${fileSummary}), extract customer/property/project details, detect conflicts with saved records, then create or suggest the correct project/job before linking it.`, 'job'),
+      ...(maybeScope ? [makeCommandShortcut('Save scope', `Read this staged scope/estimate upload (${fileSummary}), extract the scope breakdown, deductible, totals, trades, and line items, then save it to the correct customer/project file after resolving any missing project or customer.`, 'roof')] : []),
+    ],
+  }
+
+  const sales: PromptGroup = {
+    id: 'upload-sales',
+    label: 'Sales',
+    reason: 'lead + client',
+    tone: 'sales',
+    shortcuts: [
+      makeCommandShortcut('Find customer', `Use the staged upload (${fileSummary}) to look for homeowner/customer name, phone, email, address, claim info, and project address. Compare it to saved customers and show matches or conflicts.`, 'client'),
+      makeCommandShortcut('Create lead', `Create a lead from this staged upload (${fileSummary}). Extract any homeowner, phone, address, source, and notes. Ask me only for missing required details.`, 'client'),
+      makeCommandShortcut('Customer update', `Draft a customer-facing update based on this staged upload (${fileSummary}). Do not claim anything is saved unless it is actually attached to the customer/project file.`, 'customer'),
+    ],
+  }
+
+  const pricing: PromptGroup = {
+    id: 'upload-pricing',
+    label: 'Pricing',
+    reason: 'price sheets',
+    tone: 'company',
+    shortcuts: [
+      makeCommandShortcut('Review price sheet', `Treat this staged upload (${fileSummary}) as a supplier/material price sheet if applicable. Extract supplier, effective date, first 10 rows, unit, price, and import status. Keep rows pending review; do not import yet.`, 'template'),
+      makeCommandShortcut('Save company pricing', `If this staged upload (${fileSummary}) is a company price sheet, save it under company pricing/material costs, not under a customer file. Ask before importing rows into the material database.`, 'template'),
+    ],
+  }
+
+  const photos: PromptGroup = {
+    id: 'upload-photos',
+    label: 'Photos',
+    reason: 'tag + inspect',
+    tone: 'field',
+    shortcuts: [
+      makeCommandShortcut('Tag job photos', `Save these staged photos (${fileSummary}) to the current project/job file, group them by exterior, interior, roof, damage, documents, and other, then ask me to confirm any uncertain tags.`, 'file'),
+      makeCommandShortcut('Inspection photos', `Use these staged photos (${fileSummary}) as inspection photos for the current job. Tag the section, attach GPS if available, analyze what they show, and keep the inspection workflow open until I complete it.`, 'file'),
+      makeCommandShortcut('Company logo/avatar', `If this staged image (${fileSummary}) is a logo or profile photo, ask whether it should update the company logo or my user profile photo. Do not attach it to a customer/project by default.`, 'building'),
+    ],
+  }
+
+  return [
+    uploadReview,
+    job,
+    sales,
+    ...(maybePriceSheet || hasPdf ? [pricing] : []),
+    ...(hasImage ? [photos] : []),
+    ...(mode === 'field' && !hasImage ? [photos] : []),
+  ].filter(group => group.shortcuts.length)
+}
+
+function describePendingUpload(files: File[]) {
+  if (files.length === 1) return files[0]?.name || '1 file'
+  const images = files.filter(file => file.type.startsWith('image/')).length
+  const pdfs = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')).length
+  const parts = [
+    images ? `${images} photo${images === 1 ? '' : 's'}` : '',
+    pdfs ? `${pdfs} PDF${pdfs === 1 ? '' : 's'}` : '',
+    files.length - images - pdfs > 0 ? `${files.length - images - pdfs} file${files.length - images - pdfs === 1 ? '' : 's'}` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(', ') : `${files.length} files`
 }
 
 function promptGroupTone(tone: PromptTone) {
