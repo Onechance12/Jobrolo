@@ -21,11 +21,13 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const conversations = useChatStore(s => s.conversations)
   const conversationId = useChatStore(s => s.conversationId)
   const selectConversation = useChatStore(s => s.selectConversation)
+  const deleteConversationLocally = useChatStore(s => s.deleteConversationLocally)
   const workspaces = useWorkspaceStore(s => s.workspaces)
   const currentWorkspaceId = useWorkspaceStore(s => s.currentWorkspaceId)
   const currentChatId = useWorkspaceStore(s => s.currentChatId)
   const enterWorkspace = useWorkspaceStore(s => s.enterWorkspace)
   const exitWorkspace = useWorkspaceStore(s => s.exitWorkspace)
+  const deleteWorkspaceChatLocally = useWorkspaceStore(s => s.deleteWorkspaceChatLocally)
   const [search, setSearch] = useState('')
   const [chatsCollapsed, setChatsCollapsed] = useState(true)
   const [clientChatsCollapsed, setClientChatsCollapsed] = useState(true)
@@ -35,6 +37,8 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const [shortcutsCollapsed, setShortcutsCollapsed] = useState(true)
   const [shortcuts, setShortcuts] = useState<CommandShortcut[]>(DEFAULT_COMMAND_SHORTCUTS)
   const [editingShortcuts, setEditingShortcuts] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null)
 
   const filteredConvos = useMemo(() => {
     if (!search) return conversations
@@ -149,6 +153,19 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/auth/me')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!cancelled) setCurrentUserRole(data?.user?.role ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserRole(null)
+      })
+    return () => { cancelled = true }
+  }, [])
+
   const toggleClient = (key: string) => setClientCollapsedByKey(prev => ({ ...prev, [key]: !prev[key] }))
   const toggleWorkspace = (workspaceId: string) => setWorkspaceCollapsedById(prev => ({ ...prev, [workspaceId]: !prev[workspaceId] }))
 
@@ -185,6 +202,42 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const deleteShortcut = (shortcut: CommandShortcut) => {
     if (!window.confirm(`Delete shortcut "${shortcut.label}"?`)) return
     persistShortcuts(shortcuts.filter(item => item.id !== shortcut.id))
+  }
+
+  const canDeleteChats = hasCompanyWideUiRole(currentUserRole)
+
+  const deletePrivateChat = async (conversation: ConversationInfo) => {
+    if (deletingChatId) return
+    const title = conversation.title || 'New private chat'
+    if (!window.confirm(`Delete private chat "${title}"? This removes the chat thread and its messages.`)) return
+    setDeletingChatId(conversation.id)
+    try {
+      const res = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Could not delete this private chat.')
+      deleteConversationLocally(conversation.id)
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not delete this private chat.')
+    } finally {
+      setDeletingChatId(null)
+    }
+  }
+
+  const deleteSharedChat = async (workspace: WorkspaceInfo, chat: WorkspaceInfo['chats'][number]) => {
+    if (deletingChatId) return
+    const label = chatTitle(chat.title, chat.chatType)
+    if (!window.confirm(`Delete "${label}" from ${workspaceClientLabel(workspace)}? This removes the chat thread and its messages.`)) return
+    setDeletingChatId(chat.id)
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}/chats/${chat.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Could not delete this shared chat.')
+      deleteWorkspaceChatLocally(workspace.id, chat.id, data.fallbackChatId ?? null)
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not delete this shared chat.')
+    } finally {
+      setDeletingChatId(null)
+    }
   }
 
   const resetShortcuts = () => {
@@ -325,22 +378,37 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
                 <div key={label} className="mb-1.5">
                   <div className="px-1 mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{label}</div>
                   {items.map(c => (
-                    <button
+                    <div
                       key={c.id}
-                      onClick={() => { exitWorkspace(); selectConversation(c.id); onNavigate?.() }}
                       className={cn(
-                        'w-full text-left px-2.5 py-2 rounded-lg text-sm min-h-[40px] transition-all duration-150',
+                        'group flex items-center gap-1 rounded-lg transition-all duration-150',
                         c.id === conversationId && !currentWorkspaceId
                           ? 'bg-blue-100 text-blue-900 dark:bg-blue-950/50 dark:text-blue-100'
                           : 'hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-foreground'
                       )}
                     >
-                      <div className="font-medium truncate text-[13px]">{c.title || 'New private chat'}</div>
-                      <div className="flex items-center justify-between mt-0.5">
-                        {c.preview ? <div className="text-[11px] text-muted-foreground truncate flex-1 mr-2">{c.preview}</div> : <div className="flex-1" />}
-                        <span className="text-[10px] text-muted-foreground/60 flex-shrink-0">{timeAgo(c.updatedAt)}</span>
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => { exitWorkspace(); selectConversation(c.id); onNavigate?.() }}
+                        className="min-h-[40px] min-w-0 flex-1 px-2.5 py-2 text-left text-sm"
+                      >
+                        <div className="font-medium truncate text-[13px]">{c.title || 'New private chat'}</div>
+                        <div className="flex items-center justify-between mt-0.5">
+                          {c.preview ? <div className="text-[11px] text-muted-foreground truncate flex-1 mr-2">{c.preview}</div> : <div className="flex-1" />}
+                          <span className="text-[10px] text-muted-foreground/60 flex-shrink-0">{timeAgo(c.updatedAt)}</span>
+                        </div>
+                      </button>
+                      {canDeleteChats ? (
+                        <button
+                          onClick={(event) => { event.stopPropagation(); deletePrivateChat(c) }}
+                          disabled={deletingChatId === c.id}
+                          className="mr-1 rounded-lg p-2 text-muted-foreground hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/30"
+                          aria-label={`Delete private chat ${c.title || 'New private chat'}`}
+                          title="Delete chat"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               ) : null
@@ -418,24 +486,42 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
                           {!workspaceCollapsed ? (
                             <div className="space-y-0.5 pb-1 pl-5 pr-1">
-                              {workspace.chats.map(chat => (
-                                <button
-                                  key={chat.id}
-                                  onClick={() => { enterWorkspace(workspace.id, chat.id); onNavigate?.() }}
-                                  className={cn(
-                                    'flex min-h-[36px] w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
-                                    workspace.id === currentWorkspaceId && chat.id === currentChatId
-                                      ? 'bg-blue-100 text-blue-900 dark:bg-blue-950/50 dark:text-blue-100'
-                                      : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
-                                  )}
-                                >
-                                  <MessageCircle className="h-3.5 w-3.5 shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="truncate font-medium">{chatTitle(chat.title, chat.chatType)}</div>
-                                    <div className="truncate text-[10px] opacity-75">{chatMeta(chat)}</div>
+                              {workspace.chats.map(chat => {
+                                const canDeleteThisSharedChat = canDeleteChats && workspace.chats.length > 1 && String(chat.chatType).toLowerCase() !== 'main'
+                                return (
+                                  <div
+                                    key={chat.id}
+                                    className={cn(
+                                      'group flex items-center gap-1 rounded-lg transition-colors',
+                                      workspace.id === currentWorkspaceId && chat.id === currentChatId
+                                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-950/50 dark:text-blue-100'
+                                        : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                                    )}
+                                  >
+                                    <button
+                                      onClick={() => { enterWorkspace(workspace.id, chat.id); onNavigate?.() }}
+                                      className="flex min-h-[36px] min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs"
+                                    >
+                                      <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate font-medium">{chatTitle(chat.title, chat.chatType)}</div>
+                                        <div className="truncate text-[10px] opacity-75">{chatMeta(chat)}</div>
+                                      </div>
+                                    </button>
+                                    {canDeleteThisSharedChat ? (
+                                      <button
+                                        onClick={(event) => { event.stopPropagation(); deleteSharedChat(workspace, chat) }}
+                                        disabled={deletingChatId === chat.id}
+                                        className="mr-1 rounded-lg p-1.5 text-muted-foreground hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/30"
+                                        aria-label={`Delete ${chatTitle(chat.title, chat.chatType)}`}
+                                        title="Delete chat"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    ) : null}
                                   </div>
-                                </button>
-                              ))}
+                                )
+                              })}
                             </div>
                           ) : null}
                         </div>
@@ -672,6 +758,10 @@ function chatLabel(chatType: string) {
     production: 'Production',
   }
   return labels[chatType] ?? chatType
+}
+
+function hasCompanyWideUiRole(role?: string | null) {
+  return ['owner', 'admin', 'manager', 'project_manager'].includes(String(role ?? '').toLowerCase())
 }
 
 function shortcutIcon(shortcut: CommandShortcut) {

@@ -9,6 +9,7 @@ interface WorkspaceState {
   enterWorkspace: (id: string, chatId?: string) => void
   exitWorkspace: () => void
   setCurrentChat: (id: string) => void
+  deleteWorkspaceChatLocally: (workspaceId: string, chatId: string, fallbackChatId?: string | null) => void
   setMessages: (m: ClientMessage[]) => void
   addMessage: (m: ClientMessage) => void
   updateMessage: (id: string, u: Partial<ClientMessage>) => void
@@ -34,6 +35,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   exitWorkspace: () => set({ currentWorkspaceId: null, currentChatId: null, messages: [], memory: [], isTyping: false, streamingText: '' }),
   setCurrentChat: (id) => set({ currentChatId: id, messages: [], isTyping: false, streamingText: '' }),
+  deleteWorkspaceChatLocally: (workspaceId, chatId, fallbackChatId) => set((s) => {
+    const nextWorkspaces = s.workspaces.map(workspace => {
+      if (workspace.id !== workspaceId) return workspace
+      const chats = workspace.chats.filter(chat => chat.id !== chatId)
+      return { ...workspace, chats, chatCount: chats.length }
+    })
+    const activeDeleted = s.currentWorkspaceId === workspaceId && s.currentChatId === chatId
+    return {
+      workspaces: nextWorkspaces,
+      currentChatId: activeDeleted ? fallbackChatId ?? nextWorkspaces.find(w => w.id === workspaceId)?.chats[0]?.id ?? null : s.currentChatId,
+      messages: activeDeleted ? [] : s.messages,
+      isTyping: false,
+      streamingText: '',
+    }
+  }),
   setMessages: (m) => set({ messages: m }),
   addMessage: (m) => set((s) => ({ messages: [...s.messages, m] })),
   updateMessage: (id, u) => set((s) => ({ messages: s.messages.map(m => m.id === id ? { ...m, ...u } : m) })),
