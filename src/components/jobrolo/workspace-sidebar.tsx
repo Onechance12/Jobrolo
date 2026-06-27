@@ -27,9 +27,9 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const enterWorkspace = useWorkspaceStore(s => s.enterWorkspace)
   const exitWorkspace = useWorkspaceStore(s => s.exitWorkspace)
   const [search, setSearch] = useState('')
-  const [chatsCollapsed, setChatsCollapsed] = useState(false)
-  const [clientChatsCollapsed, setClientChatsCollapsed] = useState(false)
-  const [otherChatsCollapsed, setOtherChatsCollapsed] = useState(false)
+  const [chatsCollapsed, setChatsCollapsed] = useState(true)
+  const [clientChatsCollapsed, setClientChatsCollapsed] = useState(true)
+  const [otherChatsCollapsed, setOtherChatsCollapsed] = useState(true)
   const [clientCollapsedByKey, setClientCollapsedByKey] = useState<Record<string, boolean>>({})
   const [workspaceCollapsedById, setWorkspaceCollapsedById] = useState<Record<string, boolean>>({})
   const [shortcutsCollapsed, setShortcutsCollapsed] = useState(true)
@@ -44,10 +44,12 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
     )
   }, [conversations, search])
 
+  const visibleWorkspaces = useMemo(() => workspaces.filter(w => !isHiddenSidebarWorkspace(w)), [workspaces])
+
   const filteredWorkspaces = useMemo(() => {
-    if (!search) return workspaces
+    if (!search) return visibleWorkspaces
     const q = search.toLowerCase()
-    return workspaces.filter(w => [
+    return visibleWorkspaces.filter(w => [
       w.name,
       w.description,
       w.customer?.name,
@@ -64,7 +66,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
       w.subcontractor?.specialty,
       ...w.chats.flatMap(chat => [chat.title, chat.chatType, chat.lastMessage]),
     ].some(value => String(value ?? '').toLowerCase().includes(q)))
-  }, [workspaces, search])
+  }, [visibleWorkspaces, search])
 
   const groupedConvos = useMemo(() => {
     const groups: Record<string, ConversationInfo[]> = { Today: [], Yesterday: [], 'Previous 7 Days': [], Older: [] }
@@ -81,6 +83,19 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
     }
     return groups
   }, [filteredConvos])
+
+  const sidebarGroupedConvos = useMemo(() => {
+    if (search) return groupedConvos
+    let remaining = 8
+    const next: Record<string, ConversationInfo[]> = { Today: [], Yesterday: [], 'Previous 7 Days': [], Older: [] }
+    for (const label of Object.keys(next)) {
+      const items = groupedConvos[label] || []
+      next[label] = items.slice(0, remaining)
+      remaining -= next[label].length
+      if (remaining <= 0) break
+    }
+    return next
+  }, [groupedConvos, search])
 
   const clientChatGroups = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; subtitle: string; workspaces: WorkspaceInfo[] }>()
@@ -113,7 +128,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
       })
   }, [filteredWorkspaces, currentWorkspaceId])
 
-  const otherSharedWorkspaces = useMemo(() =>
+  const partnerWorkspaces = useMemo(() =>
     filteredWorkspaces.filter(w => !isClientLinkedWorkspace(w)).sort((a, b) => workspaceSortDate(b) - workspaceSortDate(a)),
     [filteredWorkspaces]
   )
@@ -178,6 +193,8 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   }
 
   const visiblePrivateChatCount = Object.values(groupedConvos).flat().length
+  const shownPrivateChatCount = Object.values(sidebarGroupedConvos).flat().length
+  const hiddenPrivateChatCount = Math.max(0, visiblePrivateChatCount - shownPrivateChatCount)
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-r border-border bg-sidebar md:w-64">
@@ -238,25 +255,27 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
         </button>
 
         <div className="overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-card to-blue-500/10 p-2 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <SectionToggle
-              icon={<FileText className="h-4 w-4" />}
-              label="Command shortcuts"
-              count={shortcuts.length}
-              color="violet"
-              collapsed={shortcutsCollapsed && !editingShortcuts}
-              onClick={() => setShortcutsCollapsed(v => !v)}
-            />
-            <button
-              onClick={() => { setShortcutsCollapsed(false); setEditingShortcuts(v => !v) }}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            >
-              {editingShortcuts ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-              {editingShortcuts ? 'Done' : 'Edit'}
-            </button>
-          </div>
-          {(!shortcutsCollapsed || editingShortcuts) ? (
+          <SectionToggle
+            icon={<FileText className="h-4 w-4" />}
+            label="Command shortcuts"
+            count={shortcuts.length}
+            color="violet"
+            hint="Quick prompts"
+            collapsed={shortcutsCollapsed}
+            onClick={() => setShortcutsCollapsed(v => !v)}
+          />
+          {!shortcutsCollapsed ? (
             <>
+              <div className="mb-1 flex items-center justify-between px-1">
+                <div className="text-[10px] text-muted-foreground">Tap to insert. Edit when you want your own prompts.</div>
+                <button
+                  onClick={() => setEditingShortcuts(v => !v)}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                >
+                  {editingShortcuts ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                  {editingShortcuts ? 'Done' : 'Edit'}
+                </button>
+              </div>
               {shortcuts.slice(0, editingShortcuts ? 24 : 8).map(shortcut => (
                 <div key={shortcut.id} className="group flex items-center gap-1">
                   <button
@@ -294,13 +313,14 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
           <div>
             <SectionToggle
               icon={<MessageCircle className="h-4 w-4" />}
-              label="My chats"
+              label="Private chats"
               count={visiblePrivateChatCount}
               color="blue"
+              hint="Ideas, training, notes"
               collapsed={chatsCollapsed}
               onClick={() => setChatsCollapsed(v => !v)}
             />
-            {!chatsCollapsed && (Object.entries(groupedConvos) as Array<[string, ConversationInfo[]]>).map(([label, items]) => (
+            {!chatsCollapsed && (Object.entries(sidebarGroupedConvos) as Array<[string, ConversationInfo[]]>).map(([label, items]) => (
               items.length > 0 ? (
                 <div key={label} className="mb-1.5">
                   <div className="px-1 mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{label}</div>
@@ -325,21 +345,27 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
                 </div>
               ) : null
             ))}
+            {!chatsCollapsed && hiddenPrivateChatCount > 0 ? (
+              <div className="px-2 py-1 text-[11px] text-muted-foreground">
+                Showing recent private chats. Use search for {hiddenPrivateChatCount} older one{hiddenPrivateChatCount === 1 ? '' : 's'}.
+              </div>
+            ) : null}
           </div>
         )}
 
         <div>
           <SectionToggle
             icon={<Briefcase className="h-4 w-4" />}
-            label="Client / job chats"
+            label="Job files"
             count={clientChatGroups.length}
             color="cyan"
+            hint="Clients, jobs, crews"
             collapsed={clientChatsCollapsed}
             onClick={() => setClientChatsCollapsed(v => !v)}
           />
           {!clientChatsCollapsed && clientChatGroups.map(group => {
-            const clientCollapsed = clientCollapsedByKey[group.key] ?? false
             const isActiveClient = group.workspaces.some(w => w.id === currentWorkspaceId)
+            const clientCollapsed = clientCollapsedByKey[group.key] ?? !isActiveClient
             return (
               <div key={group.key} className={cn('mb-1 rounded-2xl border p-1.5', isActiveClient ? 'border-blue-400/60 bg-blue-50/70 dark:border-blue-500/40 dark:bg-blue-950/20' : 'border-border bg-card/40')}>
                 <button
@@ -360,7 +386,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
                 {!clientCollapsed ? (
                   <div className="mt-1 space-y-1">
                     {group.workspaces.map(workspace => {
-                      const workspaceCollapsed = workspaceCollapsedById[workspace.id] ?? false
+                      const workspaceCollapsed = workspaceCollapsedById[workspace.id] ?? workspace.id !== currentWorkspaceId
                       return (
                         <div key={workspace.id} className="rounded-xl bg-background/50">
                           <div className="flex items-center gap-1">
@@ -422,17 +448,18 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
           })}
         </div>
 
-        {otherSharedWorkspaces.length > 0 ? (
+        {partnerWorkspaces.length > 0 ? (
           <div>
             <SectionToggle
               icon={<Users className="h-4 w-4" />}
-              label="Other shared chats"
-              count={otherSharedWorkspaces.length}
+              label="Partner chats"
+              count={partnerWorkspaces.length}
               color="emerald"
+              hint="Realtors, agents, subs"
               collapsed={otherChatsCollapsed}
               onClick={() => setOtherChatsCollapsed(v => !v)}
             />
-            {!otherChatsCollapsed && otherSharedWorkspaces.map(w => (
+            {!otherChatsCollapsed && partnerWorkspaces.map(w => (
               <button
                 key={w.id}
                 onClick={() => { enterWorkspace(w.id); onNavigate?.() }}
@@ -447,7 +474,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
                   {getInitials(w.name)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate text-[13px]">{w.name}</div>
+                  <div className="font-medium truncate text-[13px]">{cleanSidebarText(w.name)}</div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-muted-foreground/60">{sharedChatLabel(w)}</span>
                     {(w.recentMemory?.length ?? 0) > 0 && (
@@ -481,11 +508,34 @@ function isClientLinkedWorkspace(workspace: WorkspaceInfo) {
   return Boolean(workspace.customerId || workspace.customer || workspace.projectId || workspace.project?.customer)
 }
 
+function cleanSidebarText(value?: string | null) {
+  return String(value || '')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .trim()
+}
+
+function isHiddenSidebarWorkspace(workspace: WorkspaceInfo) {
+  const text = [
+    workspace.type,
+    workspace.name,
+    workspace.description,
+    workspace.project?.title,
+  ].map(cleanSidebarText).join(' ').toLowerCase()
+  if (String(workspace.type) === 'onboarding') return true
+  if (!isClientLinkedWorkspace(workspace) && /\b(onboarding|setting up your workspace|welcome to jobrolo)\b/.test(text)) return true
+  if (!isClientLinkedWorkspace(workspace) && /\blet'?s keep building\b/.test(text)) return true
+  return false
+}
+
 function SectionToggle({
   icon,
   label,
   count,
   color,
+  hint,
   collapsed,
   onClick,
 }: {
@@ -493,6 +543,7 @@ function SectionToggle({
   label: string
   count: number
   color: 'blue' | 'cyan' | 'emerald' | 'violet'
+  hint?: string
   collapsed: boolean
   onClick: () => void
 }) {
@@ -527,7 +578,7 @@ function SectionToggle({
       <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl', selected.icon)}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className={cn('block truncate text-sm font-semibold', selected.text)}>{label}</span>
-        <span className="block truncate text-[10px] uppercase tracking-wide text-muted-foreground">{collapsed ? 'Tap to expand' : 'Tap to collapse'}</span>
+        <span className="block truncate text-[10px] uppercase tracking-wide text-muted-foreground">{collapsed ? (hint || 'Tap to expand') : 'Tap to collapse'}</span>
       </span>
       <span className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{count}</span>
       {collapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
@@ -546,16 +597,16 @@ function workspaceClientKey(workspace: WorkspaceInfo) {
 }
 
 function workspaceClientLabel(workspace: WorkspaceInfo) {
-  return workspace.customer?.name
+  return cleanSidebarText(workspace.customer?.name
     ?? workspace.project?.customer?.name
     ?? workspace.name
-    ?? 'Unassigned client'
+    ?? 'Unassigned client')
 }
 
 function workspaceClientSubtitle(workspace: WorkspaceInfo) {
-  const address = workspace.customer?.address ?? workspace.project?.address
+  const address = cleanSidebarText(workspace.customer?.address ?? workspace.project?.address)
   if (address) return address
-  if (workspace.project?.title) return workspace.project.title
+  if (workspace.project?.title) return cleanSidebarText(workspace.project.title)
   return 'Client file'
 }
 
@@ -568,16 +619,16 @@ function groupChatCount(workspaces: WorkspaceInfo[]) {
 }
 
 function workspaceListTitle(workspace: WorkspaceInfo) {
-  if (workspace.project?.title) return workspace.project.title
+  if (workspace.project?.title) return cleanSidebarText(workspace.project.title)
   if (workspace.type === 'customer') return 'Customer file'
-  if (workspace.type === 'subcontractor') return workspace.subcontractor?.company ?? workspace.subcontractor?.name ?? workspace.name
-  return workspace.name
+  if (workspace.type === 'subcontractor') return cleanSidebarText(workspace.subcontractor?.company ?? workspace.subcontractor?.name ?? workspace.name)
+  return cleanSidebarText(workspace.name)
 }
 
 function workspaceDescriptor(workspace: WorkspaceInfo) {
   const pieces = [sharedChatLabel(workspace)]
   if (workspace.project?.status) pieces.push(workspace.project.status)
-  if (workspace.project?.address) pieces.push(workspace.project.address)
+  if (workspace.project?.address) pieces.push(cleanSidebarText(workspace.project.address))
   return pieces.filter(Boolean).join(' · ')
 }
 
