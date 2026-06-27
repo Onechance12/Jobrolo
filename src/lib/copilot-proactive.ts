@@ -74,6 +74,10 @@ function safeJson<T = any>(value: string | null | undefined, fallback: T): T {
   try { return JSON.parse(value) as T } catch { return fallback }
 }
 
+function profileAddress(profile: any) {
+  return [profile?.addressLine1, profile?.addressLine2, profile?.city, profile?.state, profile?.postalCode].filter(Boolean).join(', ')
+}
+
 async function resolveTarget(ctx: TenantContext, target: ProactiveTarget) {
   if (target.workspaceId) {
     const workspace = await db.workspace.findFirst({
@@ -107,7 +111,7 @@ async function resolveTarget(ctx: TenantContext, target: ProactiveTarget) {
     if (latest) conversationId = latest.id
   }
   if (!conversationId) {
-    const created = await db.conversation.create({ data: { contractorId: ctx.contractorId, title: 'Jobrolo Operator' } })
+    const created = await db.conversation.create({ data: { contractorId: ctx.contractorId, title: 'Onboarding' } })
     conversationId = created.id
   }
   return { kind: 'global' as const, conversationId, workspace: null, chatId: null, projectId: target.projectId ?? null }
@@ -175,6 +179,49 @@ export async function collectProactiveCards(ctx: TenantContext, target: Proactiv
   const projectFilter = target.projectId ? { projectId: target.projectId } : {}
 
   const cards: CandidateCard[] = []
+
+  if (!target.projectId && ['owner', 'project_manager', 'coordinator'].includes(role)) {
+    const profile = await db.contractorProfile.findUnique({ where: { contractorId: ctx.contractorId } }).catch(() => null)
+    const missingProfileItems = [
+      !profile?.website ? 'website' : null,
+      !profile?.phone ? 'phone' : null,
+      !profile?.email ? 'email' : null,
+      !profileAddress(profile) ? 'address' : null,
+      !(profile?.logoUrl || profile?.logoDocumentId) ? 'logo' : null,
+      !profile?.licenseNumber ? 'license' : null,
+    ].filter(Boolean) as string[]
+    if (missingProfileItems.length) {
+      const companyName = profile?.displayName || profile?.companyName || profile?.legalName || ctx.contractor.company || ctx.contractor.name || 'your company'
+      cards.push({
+        dedupeKey: `company_setup:${ctx.user?.id ?? 'system'}:${missingProfileItems.join(',')}`,
+        content: `Let’s finish setting up ${companyName} so estimates, invoices, reports, contracts, signatures, and customer-facing documents look complete.`,
+        contextType: 'company_profile',
+        priority: 74,
+        windowHours: 72,
+        contextData: {
+          cardType: 'company_profile',
+          status: 'setup_needed',
+          profile: profile ? {
+            companyName: profile.companyName,
+            legalName: profile.legalName,
+            displayName: profile.displayName,
+            logoUrl: profile.logoUrl,
+            logoDocumentId: profile.logoDocumentId,
+            address: profileAddress(profile),
+            phone: profile.phone,
+            email: profile.email,
+            website: profile.website,
+            licenseNumber: profile.licenseNumber,
+            ownerName: profile.ownerName,
+            publicContactName: profile.publicContactName,
+            publicContactTitle: profile.publicContactTitle,
+          } : { companyName },
+          missingItems: missingProfileItems,
+          guidance: 'Use the prompt buttons to research public info, add missing contact details, upload pricing, or upload agreements/templates.',
+        },
+      })
+    }
+  }
 
   const inboxItems = await db.inboxItem.findMany({
     where: {

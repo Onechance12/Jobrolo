@@ -284,9 +284,8 @@ export function WorkspaceSidebar({ onNewChat, onNavigate, onCollapse }: Props) {
           </div>
           <div className="flex items-center gap-1">
             {onCollapse && (
-              <button onClick={onCollapse} className="hidden lg:inline-flex items-center gap-1.5 rounded-lg border border-border bg-sidebar-accent/30 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground" aria-label="Collapse menu">
+              <button onClick={onCollapse} className="hidden lg:grid h-8 w-8 place-items-center rounded-lg border border-border bg-sidebar-accent/30 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground" aria-label="Hide full menu" title="Hide full menu">
                 <PanelLeftClose className="w-3.5 h-3.5" />
-                Collapse
               </button>
             )}
             {onNavigate && (

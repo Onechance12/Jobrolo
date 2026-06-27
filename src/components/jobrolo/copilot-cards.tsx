@@ -857,6 +857,16 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     !address ? 'address' : null,
     !hasLogo ? 'logo' : null,
   ].filter(Boolean)
+  const setupActions = [
+    !phone ? { label: 'Add phone', prompt: 'Update my company profile phone number to ' } : null,
+    !email ? { label: 'Add email', prompt: 'Update my company profile email to ' } : null,
+    !website ? { label: 'Research company', prompt: 'Research my company online and suggest missing company profile updates. Show what is new before saving.' } : null,
+    !address ? { label: 'Add address', prompt: 'Update my company profile address to ' } : null,
+    !hasLogo ? { label: 'Add logo', prompt: 'I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.' } : null,
+    !licenseNumber ? { label: 'Add license', prompt: 'Update my company profile license number to ' } : null,
+    { label: 'Upload price list', prompt: 'I want to upload a material price list for company pricing. Keep it company-level, review extracted rows, and ask before importing.' },
+    { label: 'Upload agreement', prompt: 'I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.' },
+  ].filter(Boolean) as Array<{ label: string; prompt: string }>
 
   function insertPrompt(text: string) {
     window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
@@ -898,8 +908,22 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
           {contact ? <ProfileRow label="Public contact" value={contact} /> : null}
         </div>
         {missing.length ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            Missing document profile items: {missing.join(', ')}. These help estimates, invoices, reports, contracts, and signatures look complete. You can update them from chat.
+          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <div>
+              Missing document profile items: {missing.join(', ')}. These help estimates, invoices, reports, contracts, and signatures look complete.
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {setupActions.slice(0, 8).map(action => (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={() => insertPrompt(action.prompt)}
+                  className="rounded-full border border-amber-300/70 bg-amber-100/80 px-2.5 py-1 text-[11px] font-semibold text-amber-950 transition hover:bg-amber-200 dark:border-amber-700/70 dark:bg-amber-900/40 dark:text-amber-50 dark:hover:bg-amber-900/70"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
       </CardContent>
@@ -907,8 +931,8 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         <Button size="sm" variant="outline" onClick={() => insertPrompt('Make edits to company profile: ')}>
           <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit from chat
         </Button>
-        <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company website and suggest updates to my company profile: ${website || ''}`.trim())}>
-          <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research website
+        <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company online and suggest missing company profile updates. Show what is new before saving.${website ? ` Website: ${website}` : ''}`)}>
+          <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research
         </Button>
         {!hasLogo ? (
           <Button size="sm" variant="outline" onClick={() => insertPrompt('I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.')}>

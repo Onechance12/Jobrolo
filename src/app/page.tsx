@@ -50,6 +50,28 @@ function isInspectionPhotoWorkflowRequest(text: string) {
   )
 }
 
+function companySetupFromBusinessContext(raw: string | null) {
+  try {
+    const parsed = raw ? JSON.parse(raw) : null
+    const profile = parsed?.contractor?.profile ?? {}
+    const missing = [
+      !profile?.website ? 'website' : null,
+      !profile?.phone ? 'phone' : null,
+      !profile?.email ? 'email' : null,
+      !profile?.address ? 'address' : null,
+      !(profile?.logoUrl || profile?.logoDocumentId) ? 'logo' : null,
+      !profile?.licenseNumber ? 'license' : null,
+    ].filter(Boolean) as string[]
+    return {
+      companyName: profile?.displayName || profile?.companyName || parsed?.contractor?.company || parsed?.contractor?.name || '',
+      missing,
+      hasProfile: Boolean(profile && Object.keys(profile).length),
+    }
+  } catch {
+    return { companyName: '', missing: [] as string[], hasProfile: false }
+  }
+}
+
 export default function Page() {
   const [initialLoading, setInitialLoading] = useState(true)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
@@ -115,6 +137,7 @@ export default function Page() {
   const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId)
   const currentChat = currentWorkspace?.chats.find(c => c.id === currentChatId) ?? null
   const actionNeededCount = actionItems.filter(item => !['actioned', 'archived'].includes(String(item.status ?? ''))).length
+  const companySetup = companySetupFromBusinessContext(businessContext)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevMsgCount = useRef(0)
 
@@ -566,7 +589,7 @@ export default function Page() {
           </div>
         </div>
       ) : (
-        <div className="hidden lg:flex h-full w-14 flex-shrink-0 flex-col items-center gap-3 border-r border-border bg-sidebar px-2 py-3">
+        <div className="hidden lg:flex h-full w-14 flex-shrink-0 flex-col items-center gap-2 border-r border-border bg-sidebar px-2 py-3">
           <img src="/logo.png" alt="Jobrolo" className="h-9 w-9 rounded-lg object-cover" />
           <button
             onClick={() => setDesktopSidebarCollapsed(false)}
@@ -576,6 +599,23 @@ export default function Page() {
           >
             <PanelLeftOpen className="h-5 w-5" />
           </button>
+          <div className="my-1 h-px w-8 bg-border" />
+          {[
+            { label: 'Command Center', icon: <Home className="h-5 w-5" />, action: () => { exitWorkspace(); setDesktopSidebarCollapsed(false) } },
+            { label: 'Shortcuts', icon: <MessageCircle className="h-5 w-5" />, action: () => { setDesktopSidebarCollapsed(false) } },
+            { label: 'Job files', icon: <Briefcase className="h-5 w-5" />, action: () => { setDesktopSidebarCollapsed(false) } },
+            { label: 'Company setup', icon: <Settings className="h-5 w-5" />, action: () => handleStartPrompt('Show my saved company profile as a card. Include missing items and prompt buttons to finish setup.') },
+          ].map(item => (
+            <button
+              key={item.label}
+              onClick={item.action}
+              className="grid h-10 w-10 place-items-center rounded-xl border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              aria-label={item.label}
+              title={item.label}
+            >
+              {item.icon}
+            </button>
+          ))}
         </div>
       )}
 
@@ -828,8 +868,42 @@ export default function Page() {
                   <div className="w-14 h-14 rounded-2xl glow-blue overflow-hidden mb-3">
                     <img src="/logo.png" alt="Jobrolo" className="w-full h-full object-cover" />
                   </div>
-                  <h3 className="font-semibold text-foreground mb-1">How can I help today?</h3>
-                  <p className="text-sm text-muted-foreground max-w-sm">Ask me anything. I'll route updates to the right people.</p>
+                  <h3 className="font-semibold text-foreground mb-1">
+                    {companySetup.missing.length ? `Let’s finish setting up ${companySetup.companyName || 'Jobrolo'}` : 'How can I help today?'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    {companySetup.missing.length
+                      ? `I can help finish the company profile, upload pricing/agreements, add your profile photo, and teach you the best prompts to run the business from chat.`
+                      : `Ask me anything. I'll route updates to the right people.`}
+                  </p>
+                  {companySetup.missing.length ? (
+                    <div className="mt-4 flex max-w-md flex-wrap justify-center gap-2">
+                      <button
+                        onClick={() => handleStartPrompt('Show my saved company profile as a card. Include missing items and prompt buttons to finish setup.')}
+                        className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-500/20 dark:text-blue-200"
+                      >
+                        Company setup
+                      </button>
+                      <button
+                        onClick={() => handleStartPrompt('Research my company online and suggest missing company profile updates. Show what is new before saving.')}
+                        className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-500/20 dark:text-cyan-200"
+                      >
+                        Research
+                      </button>
+                      <button
+                        onClick={() => handleStartPrompt('I want to upload a material price list for company pricing. Keep it company-level, review extracted rows, and ask before importing.')}
+                        className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-500/20 dark:text-amber-100"
+                      >
+                        Upload price list
+                      </button>
+                      <button
+                        onClick={() => handleStartPrompt('I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.')}
+                        className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-500/20 dark:text-violet-100"
+                      >
+                        Upload agreement
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>

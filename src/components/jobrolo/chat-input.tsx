@@ -595,9 +595,11 @@ function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]
     tone: 'company',
     shortcuts: [
       makeCommandShortcut('Company profile', 'Show my saved company profile as a card. Include missing items for estimates, invoices, reports, contracts, and signatures.', 'building'),
-      makeCommandShortcut('Research website', 'Research my company website and online presence, dedupe sources, show link previews, and suggest profile updates before saving.', 'globe'),
+      makeCommandShortcut('Research', 'Research my company online and suggest missing company profile updates. Dedupe sources, show link previews, and show what is new before saving.', 'globe'),
       makeCommandShortcut('Update company info', 'Update my company profile from chat. Ask for only the missing field or correction you need.', 'building'),
       makeCommandShortcut('Add logo', 'I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.', 'building'),
+      makeCommandShortcut('Price list', 'I want to upload a material price list for company pricing. Keep it company-level, review extracted rows, and ask before importing.', 'template'),
+      makeCommandShortcut('Agreement', 'I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.', 'template'),
     ],
   }
   const custom = shortcuts
