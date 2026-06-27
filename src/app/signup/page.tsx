@@ -112,6 +112,49 @@ function LobbyAnswer({ content }: { content: string }) {
   )
 }
 
+function EntryActionPills({
+  onAsk,
+  onMode,
+  disabled,
+}: {
+  onAsk: (prompt: string) => void
+  onMode: (mode: EntryMode) => void
+  disabled?: boolean
+}) {
+  const prompts = [
+    { label: 'How it works', prompt: 'Walk me through how Jobrolo works like I am a roofing contractor seeing it for the first time. Keep it practical.' },
+    { label: 'Client files', prompt: 'Show me how client files work in Jobrolo, with an example from first lead to job packet.' },
+    { label: 'Field + photos', prompt: 'Show me how field notes, GPS, inspection photos, and reports work together in Jobrolo.' },
+    { label: 'Invites + roles', prompt: 'Explain how inviting employees, crews, subcontractors, and homeowners works, including permissions.' },
+  ]
+  return (
+    <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Try asking</div>
+      <div className="flex flex-wrap gap-2">
+        {prompts.map(item => (
+          <button
+            key={item.label}
+            type="button"
+            onClick={() => onAsk(item.prompt)}
+            disabled={disabled}
+            className="rounded-full border border-blue-300/20 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-100 transition hover:border-blue-200/45 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {item.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onMode('signup')}
+          disabled={disabled}
+          className="rounded-full border border-cyan-300/35 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200/60 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Create workspace
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function SignupPage() {
   const router = useRouter()
   const [mode, setMode] = useState<EntryMode | null>(null)
@@ -123,11 +166,35 @@ export default function SignupPage() {
   const [lobbyMessages, setLobbyMessages] = useState<LobbyMessage[]>([])
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', companyName: '', website: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
-  const endRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLElement | null>(null)
+  const messageRefs = useRef<Array<HTMLDivElement | null>>([])
+  const previousLobbyMessageCountRef = useRef(0)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [mode, lockedNotice, lobbyMessages, lobbySending])
+    const container = scrollRef.current
+    if (!container) return
+    const previousCount = previousLobbyMessageCountRef.current
+    previousLobbyMessageCountRef.current = lobbyMessages.length
+
+    if (lobbyMessages.length <= previousCount) return
+    const lastIndex = lobbyMessages.length - 1
+    const lastMessage = lobbyMessages[lastIndex]
+    if (!lastMessage) return
+
+    requestAnimationFrame(() => {
+      const current = scrollRef.current
+      if (!current) return
+      if (lastMessage.role === 'assistant') {
+        const node = messageRefs.current[lastIndex]
+        if (!node) return
+        const containerRect = current.getBoundingClientRect()
+        const nodeRect = node.getBoundingClientRect()
+        current.scrollTop += nodeRect.top - containerRect.top - 16
+      } else {
+        current.scrollTop = current.scrollHeight
+      }
+    })
+  }, [lobbyMessages])
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -272,7 +339,7 @@ export default function SignupPage() {
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-end gap-4 pb-4">
           {lockedNotice ? (
             <div className="ml-auto max-w-[88%] rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
@@ -327,7 +394,11 @@ export default function SignupPage() {
           </div>
 
           {lobbyMessages.map((message, index) => (
-            <div key={`${message.role}-${index}`} className={`flex items-start gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
+            <div
+              key={`${message.role}-${index}`}
+              ref={node => { messageRefs.current[index] = node }}
+              className={`flex items-start gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}
+            >
               {message.role === 'assistant' ? (
                 <JobroloChatIcon />
               ) : null}
@@ -338,7 +409,12 @@ export default function SignupPage() {
                     : 'rounded-bl-md border border-white/10 bg-[#0b1220] text-slate-100'
                 }`}
               >
-                {message.role === 'assistant' ? <LobbyAnswer content={message.content} /> : message.content}
+                {message.role === 'assistant' ? (
+                  <>
+                    <LobbyAnswer content={message.content} />
+                    <EntryActionPills onAsk={prompt => void sendLobbyMessage(prompt)} onMode={chooseMode} disabled={lobbySending} />
+                  </>
+                ) : message.content}
               </div>
             </div>
           ))}
@@ -425,7 +501,6 @@ export default function SignupPage() {
             </div>
           ) : null}
 
-          <div ref={endRef} />
         </div>
       </main>
 

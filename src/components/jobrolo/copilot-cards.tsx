@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
   Building2,
+  CalendarDays,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Camera,
   Copy,
   ExternalLink,
@@ -299,6 +301,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('canvassing_game_plan')) {
     return <CanvassingGamePlanCard data={contextData as any} />
+  }
+  if (cardType.includes('schedule_calendar') || cardType.includes('calendar_overview')) {
+    return <ScheduleCalendarCard data={contextData as any} />
   }
   if (cardType.includes('schedule_event')) {
     return <ScheduleEventCard data={contextData as any} />
@@ -1284,6 +1289,130 @@ export function ScheduleEventCard({ data }: { data?: any }) {
         ) : null}
         {status === 'logged' ? <p className="text-xs text-blue-700 dark:text-blue-300">Logged to the job timeline.</p> : null}
         {status === 'failed' ? <p className="text-xs text-rose-600">Could not log that action.</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function dateLabelFromKey(dateKey: string) {
+  const date = new Date(`${dateKey}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return dateKey
+  return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+function shortTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+export function ScheduleCalendarCard({ data }: { data?: any }) {
+  const monthLabel = String(data?.monthLabel || 'Calendar')
+  const days = Array.isArray(data?.days) ? data.days : []
+  const appointments = Array.isArray(data?.appointments) ? data.appointments : []
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const selectedDay = data?.selectedDate ? String(data.selectedDate) : todayKey
+  const selected = days.find((d: any) => String(d.date) === selectedDay) ?? days.find((d: any) => Number(d.count) > 0) ?? null
+  const selectedAppointments = Array.isArray(selected?.appointments) ? selected.appointments : appointments.filter((a: any) => String(a.date) === String(selected?.date || selectedDay))
+
+  const insertPrompt = (text: string) => {
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-cyan-200 bg-cyan-50/50 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20 sm:max-w-xl">
+      <CardHeader className="border-b bg-gradient-to-br from-cyan-500/10 via-transparent to-blue-500/10 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-4 w-4 text-cyan-700 dark:text-cyan-300" />
+              {monthLabel}
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {Number(data?.count || appointments.length)} scheduled item{Number(data?.count || appointments.length) === 1 ? '' : 's'}. Tap a day to ask Jobrolo about it.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => insertPrompt('Schedule an appointment. Ask me what day, time, customer/project, and who it is with.')}
+          >
+            Schedule
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-3">
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <div key={`${day}-${index}`}>{day}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((day: any) => {
+            const count = Number(day?.count || 0)
+            const dateKey = String(day?.date || '')
+            const inMonth = day?.inMonth !== false
+            const isToday = dateKey === todayKey
+            return (
+              <button
+                key={dateKey}
+                type="button"
+                onClick={() => insertPrompt(`What appointments do I have on ${dateLabelFromKey(dateKey)}? If I need to schedule one, ask me what time and who it is with.`)}
+                className={cn(
+                  'relative min-h-10 rounded-xl border p-1.5 text-left text-xs transition hover:border-cyan-300 hover:bg-cyan-500/10',
+                  inMonth ? 'border-border bg-background/70 text-foreground' : 'border-transparent bg-transparent text-muted-foreground/45',
+                  isToday ? 'ring-1 ring-cyan-400/60' : ''
+                )}
+              >
+                <span className="font-semibold">{dateKey ? Number(dateKey.slice(-2)) : ''}</span>
+                {count ? (
+                  <span className="absolute bottom-1 right-1 rounded-full bg-cyan-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+
+        <section className="rounded-xl border bg-background/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {selected ? dateLabelFromKey(String(selected.date)) : 'Today'}
+              </div>
+              <div className="text-[11px] text-muted-foreground">Quick view, not a separate calendar page.</div>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => insertPrompt(`Schedule an appointment on ${selected ? dateLabelFromKey(String(selected.date)) : 'this day'}. Ask me what time and who it is with.`)}
+            >
+              Add
+            </Button>
+          </div>
+          {selectedAppointments.length ? (
+            <div className="space-y-2">
+              {selectedAppointments.slice(0, 4).map((appt: any) => (
+                <button
+                  key={appt.id || `${appt.title}-${appt.startTime}`}
+                  type="button"
+                  onClick={() => insertPrompt(`Tell me about the appointment "${appt.title || 'appointment'}" on ${dateLabelFromKey(String(appt.date || selected?.date || selectedDay))}.`)}
+                  className="flex w-full items-start gap-2 rounded-lg border bg-background/80 p-2 text-left hover:bg-muted/60"
+                >
+                  <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-700 dark:text-cyan-300" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">{appt.title || 'Appointment'}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {[shortTime(appt.startTime), appt.customerName, appt.projectTitle, appt.location].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nothing scheduled on this day yet.</p>
+          )}
+        </section>
       </CardContent>
     </Card>
   )

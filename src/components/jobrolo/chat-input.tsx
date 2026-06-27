@@ -571,6 +571,7 @@ function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]
       makeCommandShortcut('Saved clients', 'Only use saved database records. Show me my saved clients and any active projects.', 'client'),
       makeCommandShortcut('Create lead', 'Create a new potential lead. Ask me for any missing homeowner, phone, address, source, and notes.', 'client'),
       makeCommandShortcut('Customer update', 'Draft a friendly customer update for the current customer or project. Ask what changed if needed.', 'customer'),
+      makeCommandShortcut('Calendar', 'Show my calendar as a chat card with appointments by day. Let me tap a day to ask what is scheduled or schedule something new.', 'attention'),
       makeCommandShortcut('Follow up', 'Show me who needs follow-up today from saved tasks, leads, customers, and projects.', 'attention'),
       makeCommandShortcut('Customer chat', 'Create a customer-facing chat for this customer/project and give me the invite/link card.', 'customer'),
     ],

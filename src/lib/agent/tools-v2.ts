@@ -3495,6 +3495,114 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'show_calendar',
+    description: 'Show a chat-native visual calendar card with scheduled appointments. Use when the user asks to open calendar, show schedule visually, see appointments on a day/month, or schedule from a calendar card.',
+    schema: z.object({
+      month: z.string().optional().describe('YYYY-MM month to show'),
+      selectedDate: z.string().optional().describe('YYYY-MM-DD date to highlight'),
+      projectId: z.string().optional(),
+      customerId: z.string().optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      const selectedDate = args.selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(args.selectedDate) ? args.selectedDate : undefined
+      const monthInput = args.month && /^\d{4}-\d{2}$/.test(args.month)
+        ? `${args.month}-01T12:00:00`
+        : selectedDate
+          ? `${selectedDate.slice(0, 7)}-01T12:00:00`
+          : undefined
+      const base = monthInput ? new Date(monthInput) : new Date()
+      const monthStart = new Date(base.getFullYear(), base.getMonth(), 1)
+      const monthEnd = new Date(base.getFullYear(), base.getMonth() + 1, 0, 23, 59, 59, 999)
+      const gridStart = new Date(monthStart)
+      gridStart.setDate(monthStart.getDate() - monthStart.getDay())
+      const gridEnd = new Date(monthEnd)
+      gridEnd.setDate(monthEnd.getDate() + (6 - monthEnd.getDay()))
+
+      const appointments = await db.appointment.findMany({
+        where: {
+          contractorId,
+          ...(args.projectId ? { projectId: args.projectId } : {}),
+          ...(args.customerId ? { customerId: args.customerId } : {}),
+          status: { not: 'cancelled' },
+          startTime: { gte: gridStart, lte: gridEnd },
+        },
+        orderBy: { startTime: 'asc' },
+        take: 150,
+      })
+
+      const projectIds = Array.from(new Set(appointments.map(appt => appt.projectId).filter(Boolean) as string[]))
+      const customerIds = Array.from(new Set(appointments.map(appt => appt.customerId).filter(Boolean) as string[]))
+      const projects: Array<{ id: string; title: string; address: string | null }> = projectIds.length
+        ? await db.project.findMany({ where: { contractorId, id: { in: projectIds } }, select: { id: true, title: true, address: true } })
+        : []
+      const customers: Array<{ id: string; name: string }> = customerIds.length
+        ? await db.customer.findMany({ where: { contractorId, id: { in: customerIds } }, select: { id: true, name: true } })
+        : []
+      const projectById = new Map<string, { id: string; title: string; address: string | null }>(projects.map(project => [project.id, project]))
+      const customerById = new Map<string, { id: string; name: string }>(customers.map(customer => [customer.id, customer]))
+      const dateKey = (date: Date) => {
+        const y = date.getFullYear()
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}`
+      }
+      const appointmentCards = appointments.map(appt => {
+        const project = appt.projectId ? projectById.get(appt.projectId) : null
+        const customer = appt.customerId ? customerById.get(appt.customerId) : null
+        return {
+          id: appt.id,
+          title: appt.title,
+          type: appt.type,
+          status: appt.status,
+          date: dateKey(appt.startTime),
+          startTime: appt.startTime.toISOString(),
+          endTime: appt.endTime.toISOString(),
+          location: appt.location,
+          projectId: appt.projectId,
+          projectTitle: project?.title ?? null,
+          projectAddress: project?.address ?? null,
+          customerId: appt.customerId,
+          customerName: customer?.name ?? null,
+        }
+      })
+      const byDate = new Map<string, typeof appointmentCards>()
+      for (const appt of appointmentCards) {
+        const list = byDate.get(appt.date) ?? []
+        list.push(appt)
+        byDate.set(appt.date, list)
+      }
+      const days: Array<{ date: string; inMonth: boolean; count: number; appointments: typeof appointmentCards }> = []
+      for (let cursor = new Date(gridStart); cursor <= gridEnd; cursor.setDate(cursor.getDate() + 1)) {
+        const key = dateKey(cursor)
+        const list = byDate.get(key) ?? []
+        days.push({
+          date: key,
+          inMonth: cursor.getMonth() === monthStart.getMonth(),
+          count: list.length,
+          appointments: list.slice(0, 5),
+        })
+      }
+      const card = {
+        cardType: 'schedule_calendar',
+        month: dateKey(monthStart).slice(0, 7),
+        monthLabel: monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        selectedDate: selectedDate ?? dateKey(new Date()),
+        count: appointmentCards.length,
+        days,
+        appointments: appointmentCards,
+      }
+      return {
+        success: true,
+        data: {
+          count: appointmentCards.length,
+          appointments: appointmentCards,
+          card,
+        },
+      }
+    },
+  },
+  {
     name: 'update_project_schedule',
     description: 'Update a project stage or production schedule. Use for moving a job through the roofing/claim lifecycle: inspection scheduled, adjuster meeting scheduled, scope review, supplement needed, contract signed, material ordered, production scheduled, in production, final inspection, closed.',
     schema: z.object({
