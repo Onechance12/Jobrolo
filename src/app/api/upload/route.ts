@@ -162,13 +162,6 @@ export async function POST(req: NextRequest) {
 
       const mimeType = validation.detectedMime || file.type || 'application/octet-stream'
       const documentId = uuidv4()
-      const saved = await saveUpload({
-        name: originalName,
-        type: mimeType,
-        size: file.size,
-        data,
-        storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId, customerId }),
-      })
       const detectedFileType = fileTypeFor(originalName, mimeType)
       const fileType = uploadPurpose === 'company_logo'
         ? 'company_logo'
@@ -177,14 +170,26 @@ export async function POST(req: NextRequest) {
           : uploadPurpose === 'company_pricing'
             ? 'price_sheet'
             : detectedFileType
-      const uploadContext = uploadPurpose || photoSection || photoSectionLabel
+      const shouldStoreAsCompanyPricing = fileType === 'price_sheet'
+      const documentWorkspaceId = shouldStoreAsCompanyPricing ? undefined : workspaceId
+      const documentProjectId = shouldStoreAsCompanyPricing ? undefined : projectId
+      const documentCustomerId = shouldStoreAsCompanyPricing ? undefined : customerId
+      const saved = await saveUpload({
+        name: originalName,
+        type: mimeType,
+        size: file.size,
+        data,
+        storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId: documentProjectId, customerId: documentCustomerId }),
+      })
+      const uploadContext = uploadPurpose || photoSection || photoSectionLabel || shouldStoreAsCompanyPricing
         ? {
             uploadContext: {
-              uploadPurpose: uploadPurpose || null,
+              uploadPurpose: uploadPurpose || (shouldStoreAsCompanyPricing ? 'company_pricing' : null),
               photoSection: photoSection || null,
               photoSectionLabel: photoSectionLabel || null,
               captureLocation,
               capturedFrom: 'chat_input',
+              companyPricingDefault: shouldStoreAsCompanyPricing,
             },
           }
         : captureLocation
@@ -214,9 +219,9 @@ export async function POST(req: NextRequest) {
               ? 'User profile photo uploaded.'
               : undefined,
           extractedData: uploadContext ? JSON.stringify(uploadContext) : undefined,
-          workspaceId,
-          projectId,
-          customerId,
+          workspaceId: documentWorkspaceId,
+          projectId: documentProjectId,
+          customerId: documentCustomerId,
         },
       })
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
@@ -258,12 +263,12 @@ export async function POST(req: NextRequest) {
       }
 
       let locationResolution: unknown = undefined
-      if (!companyLevelUpload && captureLocation) {
+      if (!companyLevelUpload && !shouldStoreAsCompanyPricing && captureLocation) {
         try {
           locationResolution = await resolveFieldEntity(ctx, {
             documentId: document.id,
-            projectId,
-            customerId,
+            projectId: documentProjectId,
+            customerId: documentCustomerId,
             currentLocation: {
               latitude: captureLocation.latitude,
               longitude: captureLocation.longitude,
@@ -288,7 +293,7 @@ export async function POST(req: NextRequest) {
             userId: ctx.user.id,
             type: 'doc_analysis',
             input: { documentId: document.id, heicConversionNeeded: saved.needsConversion },
-            workspaceId,
+            workspaceId: documentWorkspaceId,
             priority: 4,
           })
           kickAgentJob(analysisJob.id, `upload:${requestId}`)
@@ -313,9 +318,23 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const needsLink = !companyLevelUpload && !customerId && !projectId && !workspaceId
+    const companyPricingUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => d.fileType === 'price_sheet')
+    const needsLink = !companyLevelUpload && !companyPricingUpload && !customerId && !projectId && !workspaceId
     return NextResponse.json({
       documents,
+      ...(companyPricingUpload ? {
+        needsLink: false,
+        deferLinkPrompt: true,
+        suggestedPrompt: documents.length === 1
+          ? 'Saved this as a company price sheet. I’ll extract the rows for review before importing anything into material pricing.'
+          : `Saved ${documents.length} company price sheets. I’ll extract the rows for review before importing anything into material pricing.`,
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+          uploadPurpose: 'company_pricing',
+        },
+      } : {}),
       ...(companyLevelUpload ? {
         needsLink: false,
         deferLinkPrompt: true,

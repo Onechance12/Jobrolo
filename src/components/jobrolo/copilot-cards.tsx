@@ -101,6 +101,49 @@ type CompanyProfileLike = {
   profile?: Record<string, unknown> | null
 } & Record<string, unknown>
 
+type CustomerFileDocumentLike = {
+  id?: string
+  originalName?: string
+  fileType?: string
+  status?: string
+  mimeType?: string
+  size?: number
+  aiSummary?: string | null
+  url?: string | null
+  thumbnailUrl?: string | null
+  customerId?: string | null
+  projectId?: string | null
+}
+
+type CustomerFileLike = {
+  customer?: {
+    id?: string
+    name?: string | null
+    email?: string | null
+    phone?: string | null
+    address?: string | null
+    customerNumber?: string | null
+    clientNumber?: string | null
+  } | null
+  projects?: Array<{
+    id?: string
+    title?: string | null
+    status?: string | null
+    priority?: string | null
+    address?: string | null
+    projectNumber?: string | null
+    customerProjectNumber?: string | null
+  }>
+  documents?: CustomerFileDocumentLike[]
+  photos?: CustomerFileDocumentLike[]
+  recentUnlinkedDocuments?: CustomerFileDocumentLike[]
+  companyPricingCandidates?: CustomerFileDocumentLike[]
+  notes?: Array<{ id?: string; content?: string; type?: string; createdAt?: string }>
+  tasks?: Array<{ id?: string; title?: string; status?: string; priority?: string }>
+  counts?: Record<string, number>
+  guidance?: string
+}
+
 type ReportPhotoCandidateLike = {
   documentId?: string
   reportPhotoId?: string | null
@@ -269,6 +312,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('document_link_review')) {
     return <DocumentLinkReviewCard data={contextData as any} />
   }
+  if (cardType.includes('customer_file')) {
+    return <CustomerFileCard data={contextData as CustomerFileLike} />
+  }
   if (cardType.includes('scope_breakdown')) {
     return <ScopeBreakdownCard data={contextData as any} />
   }
@@ -297,6 +343,251 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
     return <InboxActionCard item={contextData as InboxLike} />
   }
   return null
+}
+
+function CustomerFileCard({ data }: { data?: CustomerFileLike | null }) {
+  if (!data?.customer) return null
+  const customer = data.customer
+  const projects = data.projects ?? []
+  const photos = (data.photos ?? []).filter(doc => doc.fileType !== 'company_logo' && doc.fileType !== 'user_avatar')
+  const documents = (data.documents ?? []).filter(doc => doc.fileType !== 'company_logo' && doc.fileType !== 'user_avatar')
+  const pricing = data.companyPricingCandidates ?? []
+  const notes = data.notes ?? []
+  const customerLabel = textValue(customer.name) || 'Customer file'
+  const customerNumber = textValue(customer.customerNumber || customer.clientNumber)
+  const primaryProject = projects[0]
+  const groupedPhotos = groupPhotosForCustomerFile(photos)
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="border-b border-blue-200/70 bg-gradient-to-br from-blue-500/10 via-transparent to-cyan-500/10 pb-3 dark:border-blue-900/60">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="truncate text-base text-blue-950 dark:text-blue-100">{customerLabel}</CardTitle>
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+              {[textValue(customer.phone), textValue(customer.email), textValue(customer.address)].filter(Boolean).join(' · ') || 'Saved customer record'}
+            </p>
+          </div>
+          {customerNumber ? <Badge variant="secondary" className="shrink-0 text-[10px]">ID {customerNumber}</Badge> : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <MetricTile label="Jobs" value={String(projects.length)} />
+          <MetricTile label="Photos" value={String(photos.length)} />
+          <MetricTile label="Files" value={String(documents.length)} />
+        </div>
+
+        <section className="rounded-xl border bg-background/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Projects / jobs</div>
+              <div className="text-[11px] text-muted-foreground">One customer can have multiple jobs, side work, or future projects.</div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Create a new project/job for ${customerLabel}. Ask what this job is for, then use the next customer project number.`)}>
+              Create job
+            </Button>
+          </div>
+          {projects.length ? (
+            <div className="space-y-2">
+              {projects.slice(0, 4).map((project, index) => (
+                <div key={project.id || index} className="rounded-lg border bg-background/70 p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-foreground">{textValue(project.title) || `Project ${index + 1}`}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{textValue(project.address) || textValue(customer.address) || 'No job address saved'}</div>
+                    </div>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      {textValue(project.customerProjectNumber) || textValue(project.projectNumber) || `Job ${index + 1}`}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No projects are saved yet. Create one before saving scopes, reports, crew chats, or job-specific photos.</p>
+          )}
+        </section>
+
+        <section className="rounded-xl border bg-background/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Photos</div>
+              <div className="text-[11px] text-muted-foreground">Grouped so you can review, edit context, or delete without knowing file names.</div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Show photos for ${customerLabel} grouped by exterior, interior, roof, damage, documents, and other. Use saved database records only.`)}>
+              Show all
+            </Button>
+          </div>
+          {photos.length ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                {groupedPhotos.map(group => (
+                  <Button key={group.label} size="sm" variant="secondary" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Show ${group.label.toLowerCase()} photos for ${customerLabel}. Let me select photos to remove, edit notes/context, or add to a report.`)}>
+                    {group.label} · {group.items.length}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {photos.slice(0, 9).map(photo => (
+                  <CustomerPhotoTile key={photo.id || photo.url || photo.originalName} photo={photo} customerName={customerLabel} />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No job photos are attached to this customer/project yet.</p>
+          )}
+        </section>
+
+        <section className="rounded-xl border bg-background/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Files</div>
+              <div className="text-[11px] text-muted-foreground">Scopes, estimates, contracts, invoices, reports, and other job documents.</div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Show files for ${customerLabel} as clickable cards grouped by document type. Use saved database records only.`)}>
+              Open files
+            </Button>
+          </div>
+          {documents.length ? (
+            <div className="space-y-2">
+              {documents.slice(0, 6).map(doc => <CustomerDocumentRow key={doc.id || doc.url || doc.originalName} doc={doc} customerName={customerLabel} />)}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No job files are attached yet.</p>
+          )}
+        </section>
+
+        {pricing.length ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-100">
+            <div className="mb-2 flex items-start gap-2">
+              <Package className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide">Company pricing candidates</div>
+                <p className="mt-0.5 text-xs opacity-80">Price sheets belong in company pricing/material costs by default, not buried inside a customer file.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {pricing.slice(0, 4).map(doc => <CustomerDocumentRow key={doc.id || doc.url || doc.originalName} doc={doc} customerName={customerLabel} pricing />)}
+            </div>
+          </section>
+        ) : null}
+
+        {notes.length ? (
+          <section className="rounded-xl border bg-background/70 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent notes</div>
+            <div className="space-y-1.5">
+              {notes.slice(0, 3).map(note => <p key={note.id || note.content} className="line-clamp-2 text-xs text-muted-foreground">{note.content}</p>)}
+            </div>
+          </section>
+        ) : null}
+
+        {data.guidance ? <p className="rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">{data.guidance}</p> : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" onClick={() => insertJobroloPrompt(`Create a clean job packet summary for ${customerLabel}. Include customer info, projects, photos, files, price sheets that need company-pricing review, notes, and missing next steps.`)}>
+          Job packet
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(primaryProject?.id ? `Create a roof/property report for ${customerLabel}'s project ${primaryProject.customerProjectNumber || primaryProject.projectNumber || primaryProject.title}. Let me choose which photos to include before finalizing.` : `Create a project for ${customerLabel}, then start a roof/property report.`)}>
+          Property report
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+function groupPhotosForCustomerFile(photos: CustomerFileDocumentLike[]) {
+  const groups = [
+    { label: 'Exterior', test: /(exterior|elevation|front|side|back)/i },
+    { label: 'Roof', test: /(roof|slope|facet|ridge|valley|shingle)/i },
+    { label: 'Damage', test: /(damage|hail|wind|dent|crease|soft metal|gutter|vent)/i },
+    { label: 'Interior', test: /(interior|ceiling|wall|drywall|room|leak)/i },
+    { label: 'Documents', test: /(scope|estimate|invoice|contract|paper|document)/i },
+  ]
+  const used = new Set<CustomerFileDocumentLike>()
+  const result = groups.map(group => {
+    const items = photos.filter(photo => {
+      const text = `${photo.originalName ?? ''} ${photo.fileType ?? ''} ${photo.aiSummary ?? ''}`.toLowerCase()
+      const match = group.test.test(text)
+      if (match) used.add(photo)
+      return match
+    })
+    return { label: group.label, items }
+  }).filter(group => group.items.length > 0)
+  const other = photos.filter(photo => !used.has(photo))
+  if (other.length) result.push({ label: 'Other', items: other })
+  return result
+}
+
+function CustomerPhotoTile({ photo, customerName }: { photo: CustomerFileDocumentLike; customerName: string }) {
+  const imageUrl = textValue(photo.thumbnailUrl) || textValue(photo.url)
+  const name = textValue(photo.originalName) || 'Photo'
+  const id = textValue(photo.id)
+  return (
+    <div className="group overflow-hidden rounded-lg border bg-background/70">
+      <a href={textValue(photo.url) || imageUrl || '#'} target="_blank" rel="noopener noreferrer" className="block aspect-square bg-muted">
+        {imageUrl ? <img src={imageUrl} alt={name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-muted-foreground"><Camera className="h-5 w-5" /></div>}
+      </a>
+      <div className="flex border-t">
+        <button className="flex-1 px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => insertJobroloPrompt(`Edit notes/context for photo "${name}"${id ? ` (documentId: ${id})` : ''} in ${customerName}'s file: `)}>
+          Edit
+        </button>
+        <button className="flex-1 border-l px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => insertJobroloPrompt(`Delete photo "${name}"${id ? ` (documentId: ${id})` : ''} from ${customerName}'s file. Tell me exactly what will be deleted and ask for approval before deleting.`)}>
+          Delete
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CustomerDocumentRow({ doc, customerName, pricing = false }: { doc: CustomerFileDocumentLike; customerName: string; pricing?: boolean }) {
+  const name = textValue(doc.originalName) || 'Saved file'
+  const id = textValue(doc.id)
+  const url = textValue(doc.url)
+  const type = humanize(textValue(doc.fileType) || 'file')
+  return (
+    <div className="rounded-lg border bg-background/70 p-2">
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-300">
+          {pricing ? <Package className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-foreground">{name}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span>{type}</span>
+            {doc.status ? <span>· {doc.status}</span> : null}
+          </div>
+          {doc.aiSummary ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{doc.aiSummary}</p> : null}
+        </div>
+        {url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <ExternalLink className="h-4 w-4" />
+          </a>
+        ) : null}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {pricing ? (
+          <>
+            <Button size="sm" variant="secondary" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Review the first 10 material price rows from "${name}"${id ? ` (documentId: ${id})` : ''}. Tell me whether they are pending import or already saved.`)}>
+              Review rows
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Move "${name}"${id ? ` (documentId: ${id})` : ''} to company pricing/material costs. Do not import rows until I confirm.`)}>
+              Move to pricing
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="secondary" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Open and summarize "${name}"${id ? ` (documentId: ${id})` : ''} from ${customerName}'s file.`)}>
+              Review
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Edit notes/context for "${name}"${id ? ` (documentId: ${id})` : ''} in ${customerName}'s file: `)}>
+              Edit
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function money(value: unknown) {

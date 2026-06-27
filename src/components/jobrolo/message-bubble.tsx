@@ -14,11 +14,13 @@ export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Prop
   const isUser = message.role === 'user'
   const content = isUser ? message.content : stripJsonWrapper(message.content)
   const cardType = String((message.contextData as any)?.cardType || (message.contextData as any)?.type || message.contextType || '').toLowerCase()
-  const preferStructuredCard = !isUser && (cardType.includes('company_profile') || cardType.includes('company_research')) && content.length > 180
+  const preferStructuredCard = !isUser && (cardType.includes('company_profile') || cardType.includes('company_research') || cardType.includes('customer_file')) && content.length > 180
   const visibleContent = preferStructuredCard
     ? cardType.includes('company_research')
       ? 'I found company profile suggestions. Review the card below and tell me what to save or change.'
-      : 'Here’s the saved company profile.'
+      : cardType.includes('customer_file')
+        ? 'Here’s the saved customer file.'
+        : 'Here’s the saved company profile.'
     : content
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>

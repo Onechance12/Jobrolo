@@ -466,6 +466,19 @@ function compactDocument(d: { id: string; originalName: string; fileType: string
   }
 }
 
+function isProfileAssetDocument(d: { fileType?: string | null }) {
+  return d.fileType === 'company_logo' || d.fileType === 'user_avatar'
+}
+
+function isPriceSheetDocument(d: { fileType?: string | null; originalName?: string | null }) {
+  const name = String(d.originalName ?? '').toLowerCase()
+  return d.fileType === 'price_sheet' || /\b(price|pricing|material|abc|qxo|supplier)\b/.test(name)
+}
+
+function isPhotoDocument(d: { fileType?: string | null; mimeType?: string | null }) {
+  return d.fileType === 'photo' || String(d.mimeType ?? '').startsWith('image/')
+}
+
 function normalizePhone(value?: string | null) {
   return String(value ?? '').replace(/\D/g, '')
 }
@@ -1884,34 +1897,81 @@ export const TOOLS: ToolDef[] = [
         }),
       ])
 
-      const photos = documents.filter(d => d.fileType === 'photo' || d.mimeType.startsWith('image/'))
+      const customerRecord = withCustomerNumber(customer)
+      const projectOrdinalById = new Map(
+        [...projects]
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .map((project, index) => [project.id, index + 1]),
+      )
+      const numberedProjects = projects.map(project => ({
+        ...withProjectNumber(project),
+        customerProjectNumber: customerRecord.customerNumber ? `${customerRecord.customerNumber}-${projectOrdinalById.get(project.id) ?? 1}` : null,
+      }))
+      const visibleDocuments = documents.filter(d => !isProfileAssetDocument(d))
+      const attachedPriceSheets = visibleDocuments.filter(isPriceSheetDocument)
+      const jobDocuments = visibleDocuments.filter(d => !isPhotoDocument(d) && !isPriceSheetDocument(d))
+      const photos = visibleDocuments.filter(isPhotoDocument)
+      const unlinkedVisibleDocuments = recentUnlinkedDocuments.filter(d => !isProfileAssetDocument(d))
+      const companyPricingCandidates = [...attachedPriceSheets, ...unlinkedVisibleDocuments.filter(isPriceSheetDocument)]
+      const unlinkedJobCandidates = unlinkedVisibleDocuments.filter(d => !isPriceSheetDocument(d))
+      const cardDocuments = jobDocuments.map(compactDocument)
+      const cardPhotos = photos.map(compactDocument)
+      const cardPricing = companyPricingCandidates.map(compactDocument)
 
       return {
         success: true,
         data: {
+          noAutoAttachments: true,
           found: true,
           query: rawQuery,
           normalizedQuery: normalizeCustomerFileQuery(rawQuery),
           searchedTerms: terms,
-          customer: withCustomerNumber(customer),
+          customer: customerRecord,
           counts: {
             projects: projects.length,
-            documents: documents.length,
+            documents: jobDocuments.length,
             photos: photos.length,
             notes: notes.length,
             tasks: tasks.length,
             documentLinks: documentLinks.length,
-            recentUnlinkedDocuments: recentUnlinkedDocuments.length,
+            recentUnlinkedDocuments: unlinkedJobCandidates.length,
+            companyPricingCandidates: companyPricingCandidates.length,
           },
-          projects: projects.map(p => withProjectNumber(p)),
+          projects: numberedProjects,
           workspace: directWorkspace,
-          documents: documents.map(compactDocument),
-          photos: photos.map(compactDocument),
+          documents: cardDocuments,
+          photos: cardPhotos,
           notes,
           tasks,
           documentLinks,
-          recentUnlinkedDocuments: recentUnlinkedDocuments.map(compactDocument),
-          guidance: recentUnlinkedDocuments.length
+          recentUnlinkedDocuments: unlinkedJobCandidates.map(compactDocument),
+          companyPricingCandidates: cardPricing,
+          card: {
+            cardType: 'customer_file',
+            customer: customerRecord,
+            projects: numberedProjects,
+            documents: cardDocuments,
+            photos: cardPhotos,
+            notes: notes.slice(0, 6),
+            tasks: tasks.slice(0, 10),
+            documentLinks,
+            recentUnlinkedDocuments: unlinkedJobCandidates.map(compactDocument),
+            companyPricingCandidates: cardPricing,
+            counts: {
+              projects: projects.length,
+              documents: jobDocuments.length,
+              photos: photos.length,
+              notes: notes.length,
+              tasks: tasks.length,
+              documentLinks: documentLinks.length,
+              recentUnlinkedDocuments: unlinkedJobCandidates.length,
+              companyPricingCandidates: companyPricingCandidates.length,
+            },
+            guidance: companyPricingCandidates.length
+              ? 'Price sheets are company pricing/material cost records by default. Review/import them through pricing tools instead of treating them as customer photos/files.'
+              : undefined,
+          },
+          guidance: unlinkedJobCandidates.length
             ? 'Some recent uploads are not linked to any customer/project/workspace yet. Do not say they are in this customer file unless a link tool succeeds.'
             : undefined,
         },

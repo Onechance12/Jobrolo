@@ -187,6 +187,7 @@ function collectAttachmentsFromValue(value: unknown, out: Map<string, MessageAtt
   }
   if (typeof value !== 'object') return
   const obj = value as Record<string, any>
+  if (obj.noAutoAttachments || obj.cardType === 'customer_file') return
   const attachment = attachmentFromToolObject(obj)
   if (attachment) out.set(canonicalAttachmentKey(attachment), attachment)
   for (const child of Object.values(obj)) collectAttachmentsFromValue(child, out, depth + 1)
@@ -294,6 +295,7 @@ function deriveCardFromToolResults(iterations: Array<{ toolResults?: Array<{ dat
     'created_chat',
     'company_research_review',
     'company_profile',
+    'customer_file',
     'action_center',
     'field_inspection_lead',
     'canvassing_lead',
