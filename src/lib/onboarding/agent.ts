@@ -174,7 +174,7 @@ function detectCoveredTopics(message: string): string[] {
   for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
     // Use word-boundary-aware matching: check that the keyword is surrounded by
     // non-alphanumeric characters (space, punctuation, start/end) to avoid
-    // matching "roof" inside "sonsroofs.com"
+    // matching a trade word inside the website domain itself
     if (keywords.some(kw => {
       const pattern = new RegExp(`(^|[^a-z])${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`, 'i')
       return pattern.test(lower)

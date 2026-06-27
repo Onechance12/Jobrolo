@@ -29,16 +29,16 @@ Menus and modules are secondary support. Users should be able to ask the main ch
   - provider: `openai-compatible`
   - model: `gpt-4o-mini`
   - status: `200`
-- Timothy Dison was created successfully from chat.
+- Test Customer A was created successfully from chat.
   - Render logs show `create_customer` executed with `success=true`.
-- Timothy can be retrieved from saved database records.
-  - Live logs show `search_customers` found Timothy Dison with saved email, phone, and address.
+- the test customer can be retrieved from saved database records.
+  - Live logs show `search_customers` found Test Customer A with saved email, phone, and address.
 - Upload save-first behavior is partly working.
   - Logs show `[upload] received`, `[upload] saved document`, and `[upload] queued analysis`.
   - Saved upload document IDs observed:
     - `cmqtzjkxw000znp2ee2imvt1y` — `IMG_6999.jpeg`
-    - `cmqtzq3lj002dnp2e3hvbm5b7` — `IMG_7035.jpeg`
-    - `cmqtzs7sn002vnp2edqv4pf4e` — `TEXAS_DIRECT_RFG_CONTR_PRICE_LIST_03-28-2025.pdf`
+    - `cmqtzq3lj002dnp2e3hvbm5b7` — `sample-photo.jpeg`
+    - `cmqtzs7sn002vnp2edqv4pf4e` — `supplier-price-list.pdf`
     - `cmqu0hpkv00djnp2es39qls10` — `IMG_7050.jpeg`
 - The uploaded price sheet did process more than the UI made obvious.
   - Logs show embedded text extraction of 8,181 characters.
@@ -69,7 +69,7 @@ Required rule:
 
 ### P1 — Customer file resolver
 
-Timothy exists in the DB, but “Timothy’s file” was answered through stitched-together `search_customers` plus broad `list_documents`.
+the test customer exists in the DB, but “the customer’s file” was answered through stitched-together `search_customers` plus broad `list_documents`.
 
 That is fragile because documents may be:
 
@@ -78,7 +78,7 @@ That is fragile because documents may be:
 - linked to a workspace
 - floating/unlinked after upload
 
-Need a dedicated resolver that normalizes “Timothy’s file,” searches name/phone/email/address, resolves a customer ID, and returns customer, projects, documents, photos, notes, tasks, workspace/chats, and nearby unlinked documents.
+Need a dedicated resolver that normalizes “the customer’s file,” searches name/phone/email/address, resolves a customer ID, and returns customer, projects, documents, photos, notes, tasks, workspace/chats, and nearby unlinked documents.
 
 ### P1 — Upload save-first/process-later
 
@@ -191,7 +191,7 @@ Required behavior:
   "attachments": [
     {
       "type": "image",
-      "name": "IMG_7035.jpeg",
+      "name": "sample-photo.jpeg",
       "url": "/api/storage/photos/...",
       "thumbnailUrl": "/api/storage/thumbnails/...",
       "documentId": "..."
@@ -245,10 +245,10 @@ Patch status:
 
 ### P1 — Customer/document conflict detection
 
-The Timothy test revealed a high-risk conflict:
+The the test customer test revealed a high-risk conflict:
 
-- saved Timothy Dison: `806-678-0907`, `12701 Harvest Grove`
-- extracted document: Timothy Disen, `(214) 263-6363`, `4524 Lakecrest Dr`
+- saved Test Customer A: `saved-phone`, `saved-address`
+- extracted document: Test Customer B, `extracted-phone`, `extracted-address`
 
 Patch status:
 
@@ -404,7 +404,7 @@ If not saved:
 ### Phase 2 — Customer/job resolver
 
 1. Add reliable customer file resolver.
-2. Ensure Timothy-style name/phone/email/address lookups work.
+2. Ensure the test customer-style name/phone/email/address lookups work.
 3. Tie retrieval to customerId/projectId.
 
 ### Phase 3 — Uploads/photos
@@ -446,15 +446,15 @@ If not saved:
 
 ## Live tests after next deploy
 
-1. `Search customers for Timothy.`
-2. `Search customers for Dison.`
-3. `Search customers for 806-678-0907.`
-4. `Only use saved database records. Show me Timothy Dison’s file.`
-5. `Create a project chat for Timothy Dison’s hail claim at 12701 Harvest Grove.`
-6. `Save this conversation to Timothy Dison’s job file.`
-7. Upload one photo to Timothy’s project.
-8. `Show me Timothy’s photos.`
-9. Paste scope text and say: `Save this scope breakdown to Timothy’s project.`
+1. `Search customers for the test customer.`
+2. `Search customers for customer-name.`
+3. `Search customers for saved-phone.`
+4. `Only use saved database records. Show me Test Customer A’s file.`
+5. `Create a project chat for Test Customer A’s hail claim at saved-address.`
+6. `Save this conversation to Test Customer A’s job file.`
+7. Upload one photo to the customer’s project.
+8. `Show me the customer’s photos.`
+9. Paste scope text and say: `Save this scope breakdown to the customer’s project.`
 10. `What needs my approval right now?`
 
 ## Full trust audit — June 27, 2026
@@ -471,7 +471,7 @@ If not saved:
 - Every visible card must be actionable: files need working open/download actions, approvals need clear payload details, and notifications need hide/archive/delete where role-safe.
 - Chat routing needs stronger state: private chats, job files, crew chats, customer chats, and referral/partner chats should each answer who can see it, what it is attached to, and how it can be invited/shared.
 - Field workflow needs a clean pipeline: potential lead → inspection lead → confirmed customer/project → job chats/report/scope. The app should never create an inspection without a lead, and it should never create a customer/project without confirmation when property data conflicts.
-- Company profile research should remain chat-first: show source/logo/review previews, let the owner save/edit/remove from the card or by chat, and preserve corrected canonical names such as “SONS ROOFING.”
+- Company profile research should remain chat-first: show source/logo/review previews, let the owner save/edit/remove from the card or by chat, and preserve corrected canonical names such as “the corrected company name.”
 - Property research is only production-ready after a real provider/web-search path is configured and tested for address, owner, property, and county/CAD-style lookup behavior.
 
 ### Trust tests required before calling the app “live-operator ready”

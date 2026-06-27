@@ -125,9 +125,9 @@ function looksLikePlaceholder(value: string, key: string) {
       lower === 'project id' ||
       lower === 'customer id' ||
       lower === 'document id' ||
-      lower === "timothy's id" ||
+      lower === "customer's id" ||
       lower.endsWith('_id') ||
-      /\b(customer|project|document|scope|timothy)\b.*\bid\b/.test(lower)
+      /\b(customer|project|document|scope)\b.*\bid\b/.test(lower)
     )
   }
   if (key === 'rawText') {
@@ -859,8 +859,7 @@ function documentHintFromPriceSheetText(text: string) {
   const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
   if (filename) return filename
   const lower = clean.toLowerCase()
-  if (lower.includes('texas direct') || lower.includes('texas')) return 'Texas Direct'
-  if (lower.includes('qxo') || lower.includes('txd') || lower.includes('new con')) return 'QXO TXD New Con'
+  if (lower.includes('price sheet') || lower.includes('price list') || lower.includes('supplier')) return 'price sheet'
   return ''
 }
 

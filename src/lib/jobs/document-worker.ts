@@ -844,7 +844,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
 
   // ----- Side effects: review routing only -----
   // Do NOT silently create/update/link customers from extracted document text.
-  // Extraction can be wrong ("Dison" vs "Disen", different phone/address, etc.).
+  // Extraction can be wrong (minor name spelling differences, different phone/address, etc.).
   // Route a review item instead so the operator explicitly decides how to attach it.
   if (analysis?.detectedCustomer?.name) {
     try {

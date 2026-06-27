@@ -286,8 +286,8 @@ function isRelevantCompanySource(entry: any, input: { companyName?: string; webs
   const path = segments.join('/')
 
   // Directory/search results often contain similarly named businesses. For BBB,
-  // require the exact company slug so "Mitchell & Sons Roofing" does not sneak in
-  // when the company is simply "Sons Roofing".
+  // require the exact company slug so similarly named companies do not sneak in
+  // when the saved company name is shorter or more generic.
   if (host?.includes('bbb.org') && companySlug) {
     return segments.some(segment => segment === companySlug || segment.startsWith(`${companySlug}-`))
   }

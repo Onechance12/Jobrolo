@@ -1740,7 +1740,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'get_customer_file',
-    description: 'Resolve a customer by name, first/last name, phone, email, or address and return the saved customer file: customer details, projects/jobs, workspaces/chats, documents/photos, notes, tasks, and recent unlinked uploads. Use for "Timothy’s file", "show what is actually saved", "pull the job packet", or "what do we have on this customer".',
+    description: 'Resolve a customer by name, first/last name, phone, email, or address and return the saved customer file: customer details, projects/jobs, workspaces/chats, documents/photos, notes, tasks, and recent unlinked uploads. Use for "the customer file", "show what is actually saved", "pull the job packet", or "what do we have on this customer".',
     schema: z.object({
       query: z.string().max(300).optional(),
       name: z.string().max(300).optional(),
@@ -2195,7 +2195,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_project_for_customer',
-    description: 'Create a real project/job for an existing customer, optionally generating a 6-digit job number and project workspace. Use for "create a job/project for Timothy", "create a new 6-digit project/job", or before saving scope text to a job file.',
+    description: 'Create a real project/job for an existing customer, optionally generating a 6-digit job number and project workspace. Use for "create a job/project for this customer", "create a new 6-digit project/job", or before saving scope text to a job file.',
     schema: z.object({
       customerId: z.string().max(200).optional(),
       customerName: z.string().max(300).optional(),
@@ -2255,7 +2255,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_project_chat',
-    description: 'Create or open a chat channel for a customer/project workspace, such as a crew chat, roofing crew chat, gutter crew chat, window crew chat, subcontractor chat, customer-facing chat, sales chat, supplement chat, production chat, or insurance chat. Use when the user says "create a crew chat for Timothy" or wants to route a message to a job-specific chat. Separate trade crew chatTypes can coexist on the same job.',
+    description: 'Create or open a chat channel for a customer/project workspace, such as a crew chat, roofing crew chat, gutter crew chat, window crew chat, subcontractor chat, customer-facing chat, sales chat, supplement chat, production chat, or insurance chat. Use when the user says "create a crew chat for this customer/job" or wants to route a message to a job-specific chat. Separate trade crew chatTypes can coexist on the same job.',
     schema: z.object({
       workspaceId: z.string().max(200).optional(),
       projectId: z.string().max(200).optional(),
@@ -2877,7 +2877,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'delete_documents_by_name',
-    description: 'Delete ALL documents whose filename contains the search term. Use when user says "delete all Disen files" or "remove all estimates for Timothy". Pass the search term (e.g. "Disen", "Timothy", "estimate"). Returns count of deleted files.',
+    description: 'Delete ALL documents whose filename contains the search term. Use when user says "delete all files matching this customer name" or "remove all estimates for this customer". Pass the user-provided search term, such as the customer name, address fragment, or "estimate". Returns count of deleted files.',
     schema: z.object({
       nameFilter: z.string().min(1).max(200),
     }),
@@ -2929,7 +2929,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'detach_document_from_customer',
-    description: 'Detach/unlink a saved document/photo from a customer, project, or workspace without deleting the file. Use when the user says "remove this file from Bhuvana", "this price sheet is not for this customer", "move it out of the customer file", or wants to keep a file for company pricing instead of a job file. This never deletes the document.',
+    description: 'Detach/unlink a saved document/photo from a customer, project, or workspace without deleting the file. Use when the user says "remove this file from this customer", "this price sheet is not for this customer", "move it out of the customer file", or wants to keep a file for company pricing instead of a job file. This never deletes the document.',
     schema: z.object({
       documentId: z.string().min(1).max(200).optional(),
       filename: z.string().min(1).max(300).optional(),
@@ -4431,7 +4431,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'create_canvassing_lead_at_location',
-    description: 'Create a potential/customer lead from a door knock, conversation, name/address, or current GPS location when it does not yet have a confirmed customer/project. Use for "create a lead for Natalie at 486 North Charles St" or door/conversation leads before an inspection is set. Do NOT use this for a newly landed inspection/appointment; use start_field_inspection_lead instead.',
+    description: 'Create a potential/customer lead from a door knock, conversation, name/address, or current GPS location when it does not yet have a confirmed customer/project. Use for "create a lead for this homeowner at this address" or door/conversation leads before an inspection is set. Do NOT use this for a newly landed inspection/appointment; use start_field_inspection_lead instead.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),

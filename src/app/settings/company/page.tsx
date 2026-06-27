@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react'
 type Profile = Record<string, string | null | undefined>
 
 const fields: Array<{ key: string; label: string; type?: string; textarea?: boolean; placeholder?: string }> = [
-  { key: 'companyName', label: 'Company Name', placeholder: 'Sons Roofing' },
+  { key: 'companyName', label: 'Company Name', placeholder: 'Your Company Name' },
   { key: 'legalName', label: 'Legal Name' },
   { key: 'displayName', label: 'Display Name' },
   { key: 'phone', label: 'Phone' },
