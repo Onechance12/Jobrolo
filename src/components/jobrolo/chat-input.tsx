@@ -1,7 +1,7 @@
 'use client'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square, Building2, Globe2, Users, Save, MapPin, AlertCircle, Briefcase, UserPlus } from 'lucide-react'
+import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square, Building2, Globe2, Users, MapPin, AlertCircle, Briefcase, UserPlus } from 'lucide-react'
 import { cn, formatFileSize, isImageFile } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 import {
@@ -68,7 +68,7 @@ Use this location for the user's "where I am / here / near me" request. Do not a
 }
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mode = 'command' }: Props) {
-  const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [showShortcutMenu, setShowShortcutMenu] = useState(false); const [listening, setListening] = useState(false)
+  const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -124,7 +124,6 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       setInspectionSectionId(match?.id ?? null)
       setInspectionPickerOpen(true)
       setShowAttachMenu(false)
-      setShowShortcutMenu(false)
       setLocalError(null)
     }
     window.addEventListener('jobrolo:open-file-picker', openFilePicker)
@@ -204,7 +203,6 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       setText(inspectionPromptForSection(selectedInspectionSection))
     }
     setShowAttachMenu(false)
-    setShowShortcutMenu(false)
     window.setTimeout(() => {
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (cameraInputRef.current) cameraInputRef.current.value = ''
@@ -214,7 +212,6 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     setInspectionSectionId(sectionId ?? null)
     setInspectionPickerOpen(true)
     setShowAttachMenu(false)
-    setShowShortcutMenu(false)
     setLocalError(null)
   }
   const chooseInspectionSection = (sectionId: string) => {
@@ -234,27 +231,19 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const insertPrompt = (prompt: string) => {
     setText(prompt)
     setShowAttachMenu(false)
-    setShowShortcutMenu(false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
-  const saveCurrentPromptAsShortcut = () => {
-    const prompt = text.trim()
-    if (!prompt) return
-    const label = prompt.length > 34 ? `${prompt.slice(0, 31)}…` : prompt
-    const next = [makeCommandShortcut(label, prompt), ...shortcuts.filter(s => s.prompt !== prompt)].slice(0, 24)
-    setShortcuts(next)
-    try {
-      window.localStorage.setItem(COMMAND_SHORTCUTS_KEY, JSON.stringify(next))
-      window.dispatchEvent(new Event(COMMAND_SHORTCUTS_UPDATED_EVENT))
-    } catch {}
-    setShowAttachMenu(false)
-    setShowShortcutMenu(false)
-    setLocalError('Saved this prompt as a shortcut on this device.')
-    requestAnimationFrame(() => textareaRef.current?.focus())
+  const runShortcut = (shortcut: CommandShortcut) => {
+    if (shortcut.icon === 'field' || shortcut.id.startsWith('field-')) {
+      runFieldQuickPrompt(shortcut, openInspectionIntake, setText)
+      return
+    }
+    insertPrompt(shortcut.prompt)
   }
 
   const startListening = () => { if (listening) { recognitionRef.current?.stop(); setListening(false); return } const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition; if (!SR) return; const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let ft = textRef.current; rec.onresult = (e: any) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const tr = e.results[i][0].transcript; if (e.results[i].isFinal) ft += tr; else interim += tr } setText(ft); setInterimText(interim) }; rec.onend = () => setListening(false); rec.onerror = () => setListening(false); rec.start(); recognitionRef.current = rec; setListening(true) }
   const [interimText, setInterimText] = useState('')
+  const promptGroups = promptGroupsFor(mode, shortcuts)
 
   return (
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
@@ -269,73 +258,14 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           onClose={() => setInspectionPickerOpen(false)}
         />
       ) : null}
-      {text === '' && !pendingFiles.length && !listening && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {(mode === 'field' ? FIELD_QUICK_PROMPTS : shortcuts.slice(0, 6)).map(s => (
-            <button
-              key={s.id}
-              onClick={() => mode === 'field' ? runFieldQuickPrompt(s, openInspectionIntake, setText) : setText(s.prompt)}
-              className={cn(
-                'inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors',
-                mode === 'field'
-                  ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:bg-emerald-950/50'
-                  : 'bg-muted text-muted-foreground hover:bg-muted-foreground/20'
-              )}
-            >
-              {mode === 'field' ? shortcutIcon({ ...s, icon: 'field' } as CommandShortcut) : null}
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {!pendingFiles.length && !listening ? <PromptAssistantRail groups={promptGroups} onRun={runShortcut} /> : null}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
       <div className="flex items-end gap-2">
-        <div className="relative flex-shrink-0"><button onClick={() => { setShowAttachMenu(v => !v); setShowShortcutMenu(false) }} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
+        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[260px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
             {mode === 'field' ? <MenuButton icon={<Camera className="w-5 h-5 text-emerald-600 dark:text-emerald-300" />} label="Inspection photos" hint="Choose roof/interior/attic section" onClick={() => openInspectionIntake(null)} /> : null}
             <MenuButton icon={<Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" />} label="Take photo" hint="Save field photos" onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click() }} />
             <MenuButton icon={<Paperclip className="w-5 h-5 text-muted-foreground" />} label="Attach file" hint="PDFs, docs, images" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }} />
-          </div></>)}
-        </div>
-        <div className="relative flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => { setShowShortcutMenu(v => !v); setShowAttachMenu(false) }}
-            disabled={disabled || submitting}
-            className="hidden min-h-[44px] items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50 min-[420px]:inline-flex"
-            aria-label="Open command shortcuts"
-          >
-            <FileText className="h-4 w-4" />
-            Shortcuts
-          </button>
-          <button
-            type="button"
-            onClick={() => { setShowShortcutMenu(v => !v); setShowAttachMenu(false) }}
-            disabled={disabled || submitting}
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:opacity-50 min-[420px]:hidden"
-            aria-label="Open command shortcuts"
-          >
-            <FileText className="h-4 w-4" />
-          </button>
-          {showShortcutMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowShortcutMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[280px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
-            <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Command shortcuts</div>
-            <div className="my-1 border-t border-border" />
-            {shortcuts.slice(0, 16).map((cmd) => (
-              <MenuButton
-                key={cmd.id}
-                icon={shortcutIcon(cmd)}
-                label={cmd.label}
-                hint="Insert editable prompt"
-                onClick={() => insertPrompt(cmd.prompt)}
-              />
-            ))}
-            {text.trim() ? (
-              <>
-                <div className="my-1 border-t border-border" />
-                <MenuButton icon={<Save className="w-5 h-5 text-amber-600 dark:text-amber-300" />} label="Save typed prompt" hint="Add to your shortcuts" onClick={saveCurrentPromptAsShortcut} />
-              </>
-            ) : null}
-            <div className="px-3 pb-2 pt-1 text-[10px] text-muted-foreground/60">Edit shortcuts from the Command Center menu.</div>
           </div></>)}
         </div>
         <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder={placeholder ?? 'Message Jobrolo…'} rows={1} disabled={disabled || submitting} suppressHydrationWarning className="flex-1 resize-none bg-muted/50 border border-border rounded-lg px-3 py-2.5 text-[16px] leading-6 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50 max-h-40 min-h-[44px]" />
@@ -487,6 +417,159 @@ function MenuButton({ icon, label, hint, onClick }: { icon: ReactNode; label: st
         <div className="text-[10px] text-muted-foreground/60">{hint}</div>
       </span>
     </button>
+  )
+}
+
+type PromptTone = 'field' | 'sales' | 'files' | 'company' | 'personal'
+
+type PromptGroup = {
+  id: string
+  label: string
+  reason: string
+  tone: PromptTone
+  shortcuts: CommandShortcut[]
+}
+
+function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]): PromptGroup[] {
+  const field: PromptGroup = {
+    id: 'field',
+    label: 'Field',
+    reason: mode === 'field' ? 'inspection tools' : 'location + inspections',
+    tone: 'field',
+    shortcuts: FIELD_QUICK_PROMPTS,
+  }
+  const sales: PromptGroup = {
+    id: 'sales',
+    label: 'Sales',
+    reason: 'leads + clients',
+    tone: 'sales',
+    shortcuts: [
+      makeCommandShortcut('Saved clients', 'Only use saved database records. Show me my saved clients and any active projects.', 'client'),
+      makeCommandShortcut('Create lead', 'Create a new potential lead. Ask me for any missing homeowner, phone, address, source, and notes.', 'client'),
+      makeCommandShortcut('Customer update', 'Draft a friendly customer update for the current customer or project. Ask what changed if needed.', 'customer'),
+      makeCommandShortcut('Follow up', 'Show me who needs follow-up today from saved tasks, leads, customers, and projects.', 'attention'),
+      makeCommandShortcut('Customer chat', 'Create a customer-facing chat for this customer/project and give me the invite/link card.', 'customer'),
+    ],
+  }
+  const files: PromptGroup = {
+    id: 'files',
+    label: 'Files',
+    reason: 'docs + photos',
+    tone: 'files',
+    shortcuts: [
+      makeCommandShortcut('Show files', 'Only use saved database records. Show me the files for the current customer or project with clickable file cards.', 'template'),
+      makeCommandShortcut('Review docs', 'Show documents that need review, what each one is, and what decision is needed.', 'attention'),
+      makeCommandShortcut('Price rows', 'Review the first 10 extracted price sheet rows with unit and price, and tell me whether they are pending import or already saved.', 'template'),
+      makeCommandShortcut('Save scope', 'Save this pasted or uploaded scope to the correct customer/project file. If a project is missing, create or ask before saving.', 'roof'),
+      makeCommandShortcut('Roof report', 'Start a roof report from the current project files/photos, then finish it in chat instead of opening a builder page.', 'roof'),
+    ],
+  }
+  const company: PromptGroup = {
+    id: 'company',
+    label: 'Company',
+    reason: 'profile + brand',
+    tone: 'company',
+    shortcuts: [
+      makeCommandShortcut('Company profile', 'Show my saved company profile as a card. Include missing items for estimates, invoices, reports, contracts, and signatures.', 'building'),
+      makeCommandShortcut('Research website', 'Research my company website and online presence, dedupe sources, show link previews, and suggest profile updates before saving.', 'globe'),
+      makeCommandShortcut('Update company info', 'Update my company profile from chat. Ask for only the missing field or correction you need.', 'building'),
+      makeCommandShortcut('Add logo', 'I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.', 'building'),
+    ],
+  }
+  const custom = shortcuts
+    .filter(shortcut => !DEFAULT_COMMAND_SHORTCUTS.some(base => base.id === shortcut.id))
+    .slice(0, 7)
+
+  return [
+    ...(mode === 'field' ? [field, sales, files, company] : [sales, files, field, company]),
+    ...(custom.length ? [{ id: 'personal', label: 'My shortcuts', reason: 'your saved prompts', tone: 'personal' as const, shortcuts: custom }] : []),
+  ]
+}
+
+function promptGroupTone(tone: PromptTone) {
+  switch (tone) {
+    case 'field':
+      return {
+        shell: 'border-emerald-400/35 bg-emerald-500/10 dark:bg-emerald-950/30',
+        icon: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+        pill: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-950 hover:bg-emerald-500/18 dark:text-emerald-100',
+      }
+    case 'sales':
+      return {
+        shell: 'border-blue-400/30 bg-blue-500/10 dark:bg-blue-950/25',
+        icon: 'bg-blue-500/15 text-blue-700 dark:text-blue-200',
+        pill: 'border-blue-400/25 bg-blue-500/10 text-blue-950 hover:bg-blue-500/18 dark:text-blue-100',
+      }
+    case 'files':
+      return {
+        shell: 'border-amber-400/35 bg-amber-500/10 dark:bg-amber-950/25',
+        icon: 'bg-amber-500/15 text-amber-700 dark:text-amber-200',
+        pill: 'border-amber-400/25 bg-amber-500/10 text-amber-950 hover:bg-amber-500/18 dark:text-amber-100',
+      }
+    case 'company':
+      return {
+        shell: 'border-violet-400/30 bg-violet-500/10 dark:bg-violet-950/25',
+        icon: 'bg-violet-500/15 text-violet-700 dark:text-violet-200',
+        pill: 'border-violet-400/25 bg-violet-500/10 text-violet-950 hover:bg-violet-500/18 dark:text-violet-100',
+      }
+    default:
+      return {
+        shell: 'border-slate-400/25 bg-slate-500/10 dark:bg-slate-900/35',
+        icon: 'bg-slate-500/15 text-slate-700 dark:text-slate-200',
+        pill: 'border-slate-400/25 bg-slate-500/10 text-slate-950 hover:bg-slate-500/18 dark:text-slate-100',
+      }
+  }
+}
+
+function promptGroupIcon(tone: PromptTone) {
+  const cls = 'h-4 w-4'
+  switch (tone) {
+    case 'field': return <MapPin className={cls} />
+    case 'sales': return <Users className={cls} />
+    case 'files': return <FileText className={cls} />
+    case 'company': return <Building2 className={cls} />
+    default: return <Briefcase className={cls} />
+  }
+}
+
+function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: (shortcut: CommandShortcut) => void }) {
+  if (!groups.length) return null
+  return (
+    <div className="-mx-3 mb-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex w-max max-w-none gap-2">
+        {groups.map(group => {
+          const tone = promptGroupTone(group.tone)
+          return (
+            <section key={group.id} className={cn('min-w-[236px] max-w-[282px] rounded-2xl border p-2 shadow-sm backdrop-blur', tone.shell)}>
+              <div className="mb-1.5 flex items-center gap-2 px-1">
+                <span className={cn('inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full', tone.icon)}>
+                  {promptGroupIcon(group.tone)}
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-semibold text-foreground">{group.label}</div>
+                  <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{group.reason}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {group.shortcuts.slice(0, 7).map(shortcut => (
+                  <button
+                    key={shortcut.id}
+                    type="button"
+                    onClick={() => onRun(shortcut)}
+                    className={cn('inline-flex min-h-[31px] max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', tone.pill)}
+                  >
+                    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+                      {shortcutIcon(shortcut)}
+                    </span>
+                    <span className="truncate">{shortcut.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

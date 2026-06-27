@@ -4120,8 +4120,9 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     execute: async (args, contractorId, ctx) => {
       const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
-      const unsafeInternalNotes = args.notes && /Common recovery examples:|You said "|MUST call the correct tool|Respond as JSON only\.|Tool results:/i.test(args.notes)
+      const unsafeInternalNotes = args.notes && /Common recovery examples:|You said "|MUST call the correct tool|correct tool or include the correct action|Respond as JSON only\.|Tool results:|narrated operational work/i.test(args.notes)
       const safeNotes = unsafeInternalNotes ? undefined : args.notes?.trim()
+      const safeAddress = args.address && args.address.trim() !== '.' ? args.address.trim() : undefined
       let sessionId = args.sessionId
       if (!sessionId) {
         const existingSession = await db.canvassingSession.findFirst({
@@ -4152,7 +4153,7 @@ export const TOOLS: ToolDef[] = [
       ].filter(Boolean).join('\n')
       const lead = await createCanvassingLead(tenant, {
         sessionId,
-        address: args.address,
+        address: safeAddress,
         homeownerName: args.homeownerName,
         phone: args.phone,
         notes,
@@ -4175,8 +4176,8 @@ export const TOOLS: ToolDef[] = [
       const propertyResearch = shouldResearchProperty
         ? await researchPropertyNow(tenant, {
             mode: 'approaching_house',
-            query: args.address || 'current GPS location',
-            address: args.address,
+            query: safeAddress || 'current GPS location',
+            address: safeAddress,
             location: args.location,
             notes: safeNotes,
             allowProviderLookup: true,
@@ -4223,7 +4224,14 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: ['main', 'sales', 'management'],
     execute: async (args, contractorId, ctx) => {
-      const lead = await createCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), args)
+      const unsafeInternalNotes = args.notes && /Common recovery examples:|You said "|MUST call the correct tool|correct tool or include the correct action|Respond as JSON only\.|Tool results:|narrated operational work/i.test(args.notes)
+      const safeNotes = unsafeInternalNotes ? undefined : args.notes?.trim()
+      const safeAddress = args.address && args.address.trim() !== '.' ? args.address.trim() : undefined
+      const lead = await createCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), {
+        ...args,
+        address: safeAddress,
+        notes: safeNotes,
+      })
       return { success: true, data: { lead, card: { cardType: 'canvassing_lead', leadId: lead.id, address: lead.address, homeownerName: lead.homeownerName, phone: lead.phone, status: lead.status, latitude: lead.latitude, longitude: lead.longitude } } }
     },
   },

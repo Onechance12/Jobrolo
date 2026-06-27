@@ -57,6 +57,68 @@ function normalizeLocation(input?: LocationInput | null) {
   return { lat, lng, accuracyMeters: input.accuracyMeters ?? null, source: input.source ?? null }
 }
 
+type NormalizedLocation = NonNullable<ReturnType<typeof normalizeLocation>>
+
+type ReverseGeocodeResult = {
+  address?: string
+  city?: string
+  state?: string
+  postalCode?: string
+  displayName?: string
+  source: string
+  confidence: number
+}
+
+function joinAddressParts(parts: Array<string | null | undefined>) {
+  return parts.map(part => (part || '').trim()).filter(Boolean).join(', ')
+}
+
+async function reverseGeocodeLocation(loc: NormalizedLocation): Promise<ReverseGeocodeResult | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
+  try {
+    const url = new URL('https://nominatim.openstreetmap.org/reverse')
+    url.searchParams.set('format', 'jsonv2')
+    url.searchParams.set('lat', String(loc.lat))
+    url.searchParams.set('lon', String(loc.lng))
+    url.searchParams.set('zoom', '18')
+    url.searchParams.set('addressdetails', '1')
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Jobrolo/0.2 property-research (https://jobrolo.onrender.com)',
+      },
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    const json: any = await res.json().catch(() => null)
+    const a = json?.address || {}
+    const road = a.road || a.pedestrian || a.residential || a.path || a.footway
+    const houseNumber = a.house_number
+    const street = [houseNumber, road].filter(Boolean).join(' ').trim()
+    const city = a.city || a.town || a.village || a.hamlet || a.suburb || a.municipality
+    const state = a.state
+    const postalCode = a.postcode
+    const address = street
+      ? joinAddressParts([street, city, state ? `${state}${postalCode ? ` ${postalCode}` : ''}` : postalCode])
+      : (typeof json?.display_name === 'string' ? json.display_name : undefined)
+    if (!address) return null
+    return {
+      address,
+      city,
+      state,
+      postalCode,
+      displayName: typeof json?.display_name === 'string' ? json.display_name : undefined,
+      source: 'openstreetmap_reverse_geocode',
+      confidence: street ? 0.72 : 0.5,
+    }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 function extractStreetName(value?: string | null) {
   const base = (value || '').trim()
   if (!base) return null
@@ -454,9 +516,18 @@ function inferredCandidate(input: PropertyResearchInput) {
 
 export async function researchPropertyNow(ctx: TenantContext, input: PropertyResearchInput) {
   const loc = normalizeLocation(input.location)
-  const streets = uniqueStrings(input.streets || [])
-  const normalizedAddress = normalizePropertyAddress(input.address)
-  const mode = input.mode || (streets.length ? 'street_game_plan' : input.address ? 'address_lookup' : 'approaching_house')
+  const reverseGeocode = !input.address && loc ? await reverseGeocodeLocation(loc).catch(() => null) : null
+  const effectiveInput: PropertyResearchInput = reverseGeocode ? {
+    ...input,
+    address: reverseGeocode.address || input.address,
+    city: input.city || reverseGeocode.city,
+    state: input.state || reverseGeocode.state,
+    postalCode: input.postalCode || reverseGeocode.postalCode,
+    query: input.query && !/current gps|where i am|where i'm at|my location/i.test(input.query) ? input.query : (reverseGeocode.address || input.query),
+  } : input
+  const streets = uniqueStrings(effectiveInput.streets || [])
+  const normalizedAddress = normalizePropertyAddress(effectiveInput.address)
+  const mode = effectiveInput.mode || (streets.length ? 'street_game_plan' : effectiveInput.address ? 'address_lookup' : 'approaching_house')
 
   const run = await db.propertyResearchRun.create({
     data: {
@@ -464,37 +535,37 @@ export async function researchPropertyNow(ctx: TenantContext, input: PropertyRes
       userId: ctx.user?.id,
       mode,
       status: 'researching',
-      query: input.query ?? undefined,
-      requestedAddress: input.address ?? undefined,
+      query: effectiveInput.query ?? undefined,
+      requestedAddress: effectiveInput.address ?? undefined,
       normalizedAddress: normalizedAddress || undefined,
       streetNamesJson: streets.length ? JSON.stringify(streets) : undefined,
-      city: input.city ?? undefined,
-      state: input.state ?? undefined,
-      postalCode: input.postalCode ?? undefined,
+      city: effectiveInput.city ?? undefined,
+      state: effectiveInput.state ?? undefined,
+      postalCode: effectiveInput.postalCode ?? undefined,
       latitude: loc?.lat,
       longitude: loc?.lng,
       accuracyMeters: loc?.accuracyMeters ?? undefined,
-      focusMode: input.focusMode ?? undefined,
-      energyLevel: input.energyLevel ?? undefined,
-      mindset: input.mindset ?? input.notes ?? undefined,
-      timeBudgetMinutes: input.timeBudgetMinutes ?? undefined,
-      goalDoors: input.goalDoors ?? undefined,
-      goalConversations: input.goalConversations ?? undefined,
-      goalInspections: input.goalInspections ?? undefined,
-      metadataJson: JSON.stringify({ notes: input.notes, locationSource: loc?.source, allowProviderLookup: input.allowProviderLookup !== false }),
+      focusMode: effectiveInput.focusMode ?? undefined,
+      energyLevel: effectiveInput.energyLevel ?? undefined,
+      mindset: effectiveInput.mindset ?? effectiveInput.notes ?? undefined,
+      timeBudgetMinutes: effectiveInput.timeBudgetMinutes ?? undefined,
+      goalDoors: effectiveInput.goalDoors ?? undefined,
+      goalConversations: effectiveInput.goalConversations ?? undefined,
+      goalInspections: effectiveInput.goalInspections ?? undefined,
+      metadataJson: JSON.stringify({ notes: effectiveInput.notes, locationSource: loc?.source, reverseGeocode, allowProviderLookup: effectiveInput.allowProviderLookup !== false }),
     },
   })
 
   try {
-    const memories = await findCachedPropertyCandidates(ctx, input)
-    const provider = input.allowProviderLookup === false ? { candidates: [], provider: 'skipped', summary: 'Provider lookup skipped.' } : await callPropertyProviders(ctx, input)
+    const memories = await findCachedPropertyCandidates(ctx, effectiveInput)
+    const provider = effectiveInput.allowProviderLookup === false ? { candidates: [], provider: 'skipped', summary: 'Provider lookup skipped.' } : await callPropertyProviders(ctx, effectiveInput)
     const rawCandidates = [
-      ...memories.map(m => memoryToCandidate(m, input.focusMode)),
+      ...memories.map(m => memoryToCandidate(m, effectiveInput.focusMode)),
       ...(provider.candidates || []).map(raw => {
-        const data = providerCandidateToData(raw, input)
-        return { ...data, ...scoreCandidate({ candidate: data, focusMode: input.focusMode }) }
+        const data = providerCandidateToData(raw, effectiveInput)
+        return { ...data, ...scoreCandidate({ candidate: data, focusMode: effectiveInput.focusMode }) }
       }),
-      inferredCandidate(input),
+      inferredCandidate(effectiveInput),
     ].filter(Boolean) as any[]
 
     const deduped = dedupeCandidates(rawCandidates).slice(0, mode === 'street_game_plan' ? 250 : 12)
@@ -558,7 +629,7 @@ export async function researchPropertyNow(ctx: TenantContext, input: PropertyRes
     })
 
     if (mode === 'street_game_plan') {
-      const streetRun = await createStreetResearchRunFromCandidates(ctx, updated, created, input)
+      const streetRun = await createStreetResearchRunFromCandidates(ctx, updated, created, effectiveInput)
       return { run: updated, candidates: created, streetRun, summary: resultSummary, card: buildStreetResearchCard(updated, created, streetRun) }
     }
 
