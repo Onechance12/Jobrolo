@@ -278,6 +278,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('operator_briefing')) {
     return <OperatorBriefingCard data={contextData as any} content={content} />
   }
+  if (cardType.includes('company_research')) {
+    return <CompanyResearchReviewCard data={contextData as any} />
+  }
   if (cardType.includes('company_profile')) {
     return <CompanyProfileCard data={contextData as CompanyProfileLike} />
   }
@@ -518,6 +521,179 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         ) : null}
       </CardFooter>
     </Card>
+  )
+}
+
+export function CompanyResearchReviewCard({ data }: { data?: any }) {
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed' | 'hidden'>('idle')
+  if (status === 'hidden') return null
+
+  const research = data?.research ?? {}
+  const suggested = data?.suggestedProfileUpdate ?? {}
+  const webPresence = research?.webPresence ?? suggested?.metadata?.websiteResearch?.webPresence ?? {}
+  const name = textValue(suggested.displayName) || textValue(suggested.companyName) || textValue(research.companyName) || 'Company research'
+  const website = textValue(suggested.website) || textValue(research.website)
+  const phone = textValue(suggested.phone) || textValue(research.phone)
+  const email = textValue(suggested.email) || textValue(research.email)
+  const logoUrl = textValue(suggested.logoUrl) || textValue(research.logoUrl) || textValue(webPresence.logoUrl)
+  const description = textValue(research.description) || textValue(webPresence.summary)
+  const services = Array.isArray(research.services) ? research.services.filter(Boolean).slice(0, 6) : []
+  const serviceAreas = Array.isArray(research.serviceAreas) ? research.serviceAreas.filter(Boolean).slice(0, 5) : []
+  const reviews = Array.isArray(webPresence.reviews) ? webPresence.reviews : []
+  const googleReviews = webPresence.googleReviews || reviews.find((r: any) => /google/i.test(String(r?.source || r?.url || r?.notes || '')))
+  const bbb = webPresence.bbb
+  const sources = [
+    ...(Array.isArray(webPresence.sources) ? webPresence.sources : []),
+    ...(Array.isArray(webPresence.mentions) ? webPresence.mentions : []),
+    ...(Array.isArray(webPresence.directoryListings) ? webPresence.directoryListings : []),
+    ...(Array.isArray(webPresence.backlinksOrBlogs) ? webPresence.backlinksOrBlogs : []),
+  ].filter(Boolean)
+
+  async function save() {
+    setStatus('saving')
+    try {
+      const res = await fetch('/api/contractor/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(suggested),
+      })
+      setStatus(res.ok ? 'saved' : 'failed')
+    } catch {
+      setStatus('failed')
+    }
+  }
+
+  function editInChat() {
+    insertJobroloPrompt(`Update my company profile from the research, but apply these corrections: company name is ${name}. `)
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
+            {logoUrl ? (
+              <img src={logoUrl} alt={`${name} logo`} className="h-10 w-10 flex-shrink-0 rounded-xl border bg-white object-contain p-1" />
+            ) : (
+              <Building2 className="h-4 w-4 flex-shrink-0" />
+            )}
+            <span className="min-w-0 truncate">Review company research</span>
+          </CardTitle>
+          <Badge variant="secondary" className="text-[10px]">suggested</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div>
+          <div className="font-semibold text-foreground">{name}</div>
+          {description ? <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
+        </div>
+        <div className="grid gap-2 text-xs sm:grid-cols-2">
+          {phone ? <ProfileRow icon={<Phone className="h-3.5 w-3.5" />} label="Phone" value={phone} /> : null}
+          {email ? <ProfileRow icon={<Mail className="h-3.5 w-3.5" />} label="Email" value={email} /> : null}
+          {website ? <ProfileRow icon={<Globe2 className="h-3.5 w-3.5" />} label="Website" value={website} /> : null}
+          {textValue(research.location) ? <ProfileRow icon={<MapPin className="h-3.5 w-3.5" />} label="Location" value={textValue(research.location)} /> : null}
+        </div>
+        {(googleReviews || bbb) ? (
+          <div className="grid gap-2 text-xs sm:grid-cols-2">
+            {googleReviews ? <ReviewSignal title="Google reviews" data={googleReviews} /> : null}
+            {bbb ? <ReviewSignal title="BBB" data={bbb} /> : null}
+          </div>
+        ) : null}
+        {services.length || serviceAreas.length ? (
+          <div className="grid gap-2 text-xs sm:grid-cols-2">
+            {services.length ? <TagBox title="Services" items={services} /> : null}
+            {serviceAreas.length ? <TagBox title="Service areas" items={serviceAreas} /> : null}
+          </div>
+        ) : null}
+        {sources.length ? <ResearchSourceList sources={sources} /> : null}
+        <div className="rounded-lg border border-blue-200 bg-background/70 p-2 text-xs text-muted-foreground dark:border-blue-900/60">
+          If something is wrong, just tell me in chat — for example: “phone is wrong, use…” or “don’t use that BBB link.” I’ll update the profile from your correction.
+        </div>
+        {status === 'saved' ? <p className="text-xs text-blue-700 dark:text-blue-300">Saved to company profile.</p> : null}
+        {status === 'failed' ? <p className="text-xs text-rose-600">Could not save this profile update. Try “save these company updates” in chat.</p> : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" disabled={status === 'saving' || status === 'saved'} onClick={save}>
+          {status === 'saving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+          {status === 'saved' ? 'Saved' : 'Save updates'}
+        </Button>
+        <Button size="sm" variant="outline" onClick={editInChat}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit in chat</Button>
+        <Button size="sm" variant="ghost" onClick={() => setStatus('hidden')}><XCircle className="mr-1.5 h-3.5 w-3.5" />Remove</Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+function ReviewSignal({ title, data }: { title: string; data: any }) {
+  const rating = textValue(data?.rating)
+  const reviewCount = textValue(data?.reviewCount)
+  const notes = textValue(data?.notes)
+  const url = textValue(data?.url)
+  return (
+    <div className="rounded-lg border bg-background/70 p-2">
+      <div className="mb-0.5 flex items-center justify-between gap-2 font-medium text-foreground">
+        <span>{title}</span>
+        {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline dark:text-blue-300"><ExternalLink className="h-3.5 w-3.5" /></a> : null}
+      </div>
+      <div className="text-muted-foreground">
+        {[rating, reviewCount ? `${reviewCount} reviews` : null].filter(Boolean).join(' · ') || notes || 'Found in web research'}
+      </div>
+      {notes && (rating || reviewCount) ? <div className="mt-1 text-muted-foreground">{notes}</div> : null}
+    </div>
+  )
+}
+
+function TagBox({ title, items }: { title: string; items: unknown[] }) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-2">
+      <div className="mb-1 font-medium text-foreground">{title}</div>
+      <div className="flex flex-wrap gap-1">
+        {items.slice(0, 8).map((item, i) => <Badge key={`${String(item)}-${i}`} variant="secondary" className="text-[10px]">{String(item)}</Badge>)}
+      </div>
+    </div>
+  )
+}
+
+function sourceLabel(source: any) {
+  const title = textValue(source?.title)
+  if (title && !/^url$/i.test(title)) return title
+  const sourceName = textValue(source?.source)
+  if (sourceName && !/^url$/i.test(sourceName)) return sourceName
+  const url = textValue(source?.url)
+  if (url) {
+    try { return new URL(url).hostname.replace(/^www\./, '') } catch {}
+  }
+  return 'Web source'
+}
+
+function ResearchSourceList({ sources }: { sources: any[] }) {
+  const seen = new Set<string>()
+  const items = sources.filter(source => {
+    const key = textValue(source?.url) || `${sourceLabel(source)}:${textValue(source?.notes) || textValue(source?.snippet)}`
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, 6)
+  if (!items.length) return null
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div className="font-medium text-foreground">Source previews</div>
+      {items.map((source, i) => {
+        const url = textValue(source?.url)
+        const notes = textValue(source?.notes) || textValue(source?.snippet)
+        const label = sourceLabel(source)
+        return (
+          <a key={`${url || label}-${i}`} href={url || '#'} target={url ? '_blank' : undefined} rel="noreferrer" className="block rounded-lg border bg-background/70 p-2 transition hover:bg-muted/50">
+            <div className="flex items-center gap-1.5 font-medium text-foreground">
+              <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 dark:text-blue-300" />
+              <span className="min-w-0 truncate">{label}</span>
+            </div>
+            {notes ? <div className="mt-1 line-clamp-2 text-muted-foreground">{notes}</div> : null}
+            {url ? <div className="mt-1 truncate text-muted-foreground/70">{url}</div> : null}
+          </a>
+        )
+      })}
+    </div>
   )
 }
 

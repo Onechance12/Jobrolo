@@ -929,6 +929,13 @@ export const TOOLS: ToolDef[] = [
           found: true,
           research,
           suggestedProfileUpdate,
+          card: {
+            cardType: 'company_research_review',
+            status: 'review',
+            research,
+            suggestedProfileUpdate,
+            guidance: 'Review these suggested company profile updates. If anything is wrong, tell Jobrolo in chat and it will update the profile from your correction.',
+          },
           message: 'Website research completed. If the user wants this saved, call update_contractor_profile with suggestedProfileUpdate fields.',
         },
       }

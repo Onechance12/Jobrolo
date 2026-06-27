@@ -73,14 +73,20 @@ function isWebSourceObject(obj: Record<string, any>, url: string, documentId?: s
   return hasWebSourceShape && !mimeType && !fileType && !obj.thumbnailUrl
 }
 
+function cleanSourceName(value: unknown, fallback?: string) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text || /^url$/i.test(text)) return fallback
+  return text
+}
+
 function attachmentFromToolObject(obj: Record<string, any>): MessageAttachment | null {
   const url = obj.url ?? obj.fileUrl
   if (!isUsableFileUrl(url)) return null
   const documentId = String(obj.documentId ?? obj.id ?? '').trim() || undefined
   if (isWebSourceObject(obj, url, documentId)) {
     const host = hostnameLabel(url)
-    const source = String(obj.source ?? host ?? '').trim() || undefined
-    const name = String(obj.title ?? obj.name ?? source ?? 'Web source').trim()
+    const source = cleanSourceName(obj.source, host)
+    const name = cleanSourceName(obj.title, cleanSourceName(obj.name, source ?? host ?? 'Web source')) ?? 'Web source'
     const description = String(obj.snippet ?? obj.notes ?? obj.description ?? '').trim() || undefined
     return {
       type: 'link',
@@ -154,7 +160,7 @@ function normalizeModelAttachment(value: unknown): MessageAttachment | null {
     documentCategory: obj.documentCategory,
     documentExtractedData: obj.documentExtractedData,
     description: typeof obj.description === 'string' ? obj.description : typeof obj.snippet === 'string' ? obj.snippet : undefined,
-    source: typeof obj.source === 'string' ? obj.source : type === 'link' ? hostnameLabel(String(obj.url)) : undefined,
+    source: cleanSourceName(obj.source, type === 'link' ? hostnameLabel(String(obj.url)) : undefined),
   }
 }
 

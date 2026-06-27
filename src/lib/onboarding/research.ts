@@ -29,6 +29,7 @@ export interface CompanyWebPresence {
   phone?: string
   email?: string
   logoUrl?: string
+  googleReviews?: { found?: boolean; rating?: string; reviewCount?: string; url?: string; notes?: string }
   reviews?: Array<{ source?: string; rating?: string; reviewCount?: string; url?: string; notes?: string }>
   directoryListings?: Array<{ source?: string; url?: string; notes?: string }>
   mentions?: Array<{ title?: string; url?: string; notes?: string }>
@@ -337,6 +338,7 @@ Find public information from the broader web, not only the company homepage. Onl
 Look for:
 - official website confirmation
 - phone, public email, and logo/brand image if available
+- Google Business Profile / Google review rating and review count if visible in search results
 - Google/Yelp/Facebook/Angi/HomeAdvisor/other review signals when available
 - BBB profile or BBB rating when available
 - social profiles
@@ -351,6 +353,7 @@ Return JSON only:
   "phone": "public phone if found",
   "email": "public email if found",
   "logoUrl": "official logo or brand image URL if found",
+  "googleReviews": {"found": true, "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."},
   "reviews": [{"source":"...", "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."}],
   "directoryListings": [{"source":"...", "url":"...", "notes":"..."}],
   "mentions": [{"title":"...", "url":"...", "notes":"..."}],
@@ -373,6 +376,7 @@ Return JSON only:
   const filterInput = { companyName: input.companyName, website: input.website }
   const sources = filterRelevantEntries(result.sources, filterInput, 12)
   const bbb = parsed.bbb && typeof parsed.bbb === 'object' && isRelevantCompanySource(parsed.bbb, filterInput) ? parsed.bbb : undefined
+  const googleReviews = parsed.googleReviews && typeof parsed.googleReviews === 'object' ? parsed.googleReviews : undefined
   return {
     enabled: true,
     provider: `${result.provider}:${result.model}`,
@@ -380,6 +384,7 @@ Return JSON only:
     phone: typeof parsed.phone === 'string' ? parsed.phone : undefined,
     email: typeof parsed.email === 'string' ? parsed.email : undefined,
     logoUrl: typeof parsed.logoUrl === 'string' ? parsed.logoUrl : undefined,
+    googleReviews,
     reviews: Array.isArray(parsed.reviews) ? filterRelevantEntries(parsed.reviews, filterInput, 10) : [],
     directoryListings: Array.isArray(parsed.directoryListings) ? filterRelevantEntries(parsed.directoryListings, filterInput, 10) : [],
     mentions: Array.isArray(parsed.mentions) ? filterRelevantEntries(parsed.mentions, filterInput, 10) : [],
