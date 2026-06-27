@@ -558,7 +558,7 @@ export default function Page() {
       {leftDrawerOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setLeftDrawerOpen(false)} />
-          <div className="relative z-10 h-full w-72 flex flex-col animate-slide-in-right">
+          <div className="relative z-10 h-full w-[min(92vw,22rem)] min-w-0 flex flex-col animate-slide-in-right">
             <WorkspaceSidebar onNewChat={handleNewChat} onNavigate={() => setLeftDrawerOpen(false)} />
             <div className="p-2 border-t border-border bg-sidebar">
               <button onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
