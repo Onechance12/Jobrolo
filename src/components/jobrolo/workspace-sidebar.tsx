@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo, type ReactNode } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import { cn, getInitials, timeAgo, truncate } from '@/lib/utils'
-import { Plus, Search, X, ChevronDown, ChevronRight, LayoutGrid, FileText, MapPin, Building2, Globe2, Users, AlertCircle, Briefcase, UserPlus, Pencil, Trash2, RotateCcw, Check, MessageCircle } from 'lucide-react'
+import { Plus, Search, X, ChevronDown, ChevronRight, LayoutGrid, FileText, MapPin, Building2, Globe2, Users, AlertCircle, Briefcase, UserPlus, Pencil, Trash2, RotateCcw, Check, MessageCircle, PanelLeftClose } from 'lucide-react'
 import type { ConversationInfo, WorkspaceInfo } from '@/lib/types'
 import {
   COMMAND_SHORTCUTS_KEY,
@@ -284,8 +284,9 @@ export function WorkspaceSidebar({ onNewChat, onNavigate, onCollapse }: Props) {
           </div>
           <div className="flex items-center gap-1">
             {onCollapse && (
-              <button onClick={onCollapse} className="hidden lg:inline-flex p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors" aria-label="Collapse menu">
-                <X className="w-4 h-4" />
+              <button onClick={onCollapse} className="hidden lg:inline-flex items-center gap-1.5 rounded-lg border border-border bg-sidebar-accent/30 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground" aria-label="Collapse menu">
+                <PanelLeftClose className="w-3.5 h-3.5" />
+                Collapse
               </button>
             )}
             {onNavigate && (

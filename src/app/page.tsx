@@ -13,7 +13,7 @@ import { FieldCopilotDrawer } from '@/components/jobrolo/field-copilot-drawer'
 import { FieldEntryStrip } from '@/components/jobrolo/field-entry-strip'
 import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
-import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle, Trash2, PanelLeftOpen } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
@@ -550,21 +550,33 @@ export default function Page() {
   return (
     <div className="h-dvh w-full max-w-full flex bg-background text-foreground overflow-hidden">
       {/* LEFT PANEL — Navigation (desktop) */}
-      {!desktopSidebarCollapsed && (
-      <div className="hidden lg:flex h-full w-64 flex-shrink-0">
-        <div className="w-full flex flex-col h-full">
-          <WorkspaceSidebar onNewChat={handleNewChat} onCollapse={() => setDesktopSidebarCollapsed(true)} />
-          <div className="p-2 border-t border-border">
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              Sign out
-            </button>
+      {!desktopSidebarCollapsed ? (
+        <div className="hidden lg:flex h-full w-64 flex-shrink-0">
+          <div className="w-full flex flex-col h-full">
+            <WorkspaceSidebar onNewChat={handleNewChat} onCollapse={() => setDesktopSidebarCollapsed(true)} />
+            <div className="p-2 border-t border-border">
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="hidden lg:flex h-full w-14 flex-shrink-0 flex-col items-center gap-3 border-r border-border bg-sidebar px-2 py-3">
+          <img src="/logo.png" alt="Jobrolo" className="h-9 w-9 rounded-lg object-cover" />
+          <button
+            onClick={() => setDesktopSidebarCollapsed(false)}
+            className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-sidebar-accent/40 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            aria-label="Expand menu"
+            title="Expand menu"
+          >
+            <PanelLeftOpen className="h-5 w-5" />
+          </button>
+        </div>
       )}
 
       {/* LEFT PANEL — Mobile drawer */}
@@ -591,15 +603,15 @@ export default function Page() {
         >
           <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              {/* Menu: mobile opens drawer, desktop collapses/expands sidebar */}
+              {/* Menu: mobile opens drawer, desktop can reopen the collapsed rail */}
               <button
                 onClick={() => {
-                  if (window.matchMedia('(min-width: 1024px)').matches) setDesktopSidebarCollapsed(v => !v)
+                  if (window.matchMedia('(min-width: 1024px)').matches) setDesktopSidebarCollapsed(false)
                   else setLeftDrawerOpen(true)
                 }}
-                className="p-2 -ml-2 rounded-md hover:bg-muted text-foreground"
-                aria-label={desktopSidebarCollapsed ? 'Expand menu' : 'Menu'}
-                title={desktopSidebarCollapsed ? 'Expand menu' : 'Menu'}
+                className={cn('p-2 -ml-2 rounded-md hover:bg-muted text-foreground', !desktopSidebarCollapsed && 'lg:hidden')}
+                aria-label="Menu"
+                title="Menu"
               >
                 <Menu className="w-5 h-5" />
               </button>
