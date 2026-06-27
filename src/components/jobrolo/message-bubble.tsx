@@ -80,7 +80,8 @@ export function StreamingBubble({ text }: { text: string }) {
 
 function FormattedContent({ content }: { content: string }) {
   if (!content) return null
-  const lines = content.split('\n')
+  const normalized = content.replace(/!\[([^\]]*)\]\s*\n\s*\((https?:\/\/[^)\s]+)\)/g, '![$1]($2)')
+  const lines = normalized.split('\n')
   const elements: React.ReactNode[] = []
   let listItems: string[] = []
   const flush = () => {
@@ -98,6 +99,10 @@ function FormattedContent({ content }: { content: string }) {
     } else if (line.trim() === '') {
       flush()
       elements.push(<div key={`s-${i}`} className="h-1.5" />)
+    } else if (markdownImageFromLine(line)) {
+      flush()
+      const img = markdownImageFromLine(line)!
+      elements.push(<MarkdownImage key={`img-${i}`} alt={img.alt} src={img.src} />)
     } else {
       flush()
       elements.push(<p key={`p-${i}`} className="my-0.5">{renderInline(line)}</p>)
@@ -105,6 +110,29 @@ function FormattedContent({ content }: { content: string }) {
   }
   flush()
   return <div className="space-y-0.5 max-w-full break-words [overflow-wrap:anywhere]">{elements}</div>
+}
+
+function markdownImageFromLine(line: string): { alt: string; src: string } | null {
+  const match = line.trim().match(/^!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)$/)
+  if (!match) return null
+  return { alt: match[1] || 'Image', src: match[2] }
+}
+
+function MarkdownImage({ alt, src }: { alt: string; src: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1 text-sm text-muted-foreground underline-offset-2 hover:underline">
+        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{alt || 'View image'}</span>
+      </a>
+    )
+  }
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" className="my-2 block max-w-[260px] overflow-hidden rounded-xl border border-border bg-muted/40">
+      <img src={src} alt={alt} className="max-h-56 w-full object-contain" onError={() => setFailed(true)} />
+    </a>
+  )
 }
 
 function renderInline(text: string): React.ReactNode {
