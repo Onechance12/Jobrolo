@@ -5,6 +5,7 @@ import { verifyPassword } from '@/lib/security/password'
 import { issueSession, setSessionCookie } from '@/lib/security/session'
 import { audit } from '@/lib/security/context'
 import { rateLimitByIp } from '@/lib/security/rate-limit'
+import { markCommandCenterOnboardingReady } from '@/lib/onboarding/command-center-ready'
 export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
@@ -58,16 +59,20 @@ export async function POST(req: NextRequest) {
       tv: user.tokenVersion ?? 0,
     })
 
-    // Check onboarding status to decide redirect
-    const onboarding = await db.onboardingSession.findUnique({ where: { contractorId: user.contractorId } })
-    const onboardingComplete = !!onboarding && onboarding.status === 'completed'
-    const redirectTo = onboardingComplete ? '/' : '/onboarding'
+    // Onboarding/setup now happens inside the real Command Center. Keep the
+    // legacy onboarding session satisfied so users are not routed to the old
+    // disconnected setup-mode page after login.
+    await markCommandCenterOnboardingReady({
+      contractorId: user.contractorId,
+      userId: user.id,
+      companyName: user.contractor.company || user.contractor.name,
+    })
 
     const res = NextResponse.json({
       success: true,
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
       contractor: { id: user.contractor.id, name: user.contractor.name, company: user.contractor.company },
-      redirectTo,
+      redirectTo: '/',
     })
     setSessionCookie(res, token)
 

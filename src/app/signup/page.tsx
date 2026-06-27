@@ -211,7 +211,7 @@ export default function SignupPage() {
         setError(data.error || 'Signup failed')
         return
       }
-      router.push(data.redirectTo || '/onboarding')
+      router.push(data.redirectTo || '/')
       router.refresh()
     } catch {
       setError('Network error. Please try again.')
@@ -464,7 +464,7 @@ export default function SignupPage() {
               <form onSubmit={handleSignup} className="rounded-3xl rounded-tl-md border border-cyan-400/20 bg-[#08111f] p-4 shadow-2xl shadow-black/30 sm:p-5">
                 <div className="mb-4">
                   <div className="text-sm font-semibold text-white">Let’s create your company workspace.</div>
-                  <div className="text-xs text-slate-400">After this, I’ll continue onboarding in chat and lock tools until setup is complete.</div>
+                  <div className="text-xs text-slate-400">After this, Jobrolo opens the real Command Center and helps finish setup from chat.</div>
                 </div>
                 <div className="space-y-4">
                   <div>
@@ -480,7 +480,7 @@ export default function SignupPage() {
                     <Input id="password" type="password" value={signupForm.password} onChange={e => setSignupForm({ ...signupForm, password: e.target.value })} required disabled={loading} minLength={8} className="mt-1 border-white/10 bg-slate-950 text-white" placeholder="At least 8 characters" />
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <p className="mb-3 text-xs text-slate-400">Optional, but it helps onboarding start smarter:</p>
+                    <p className="mb-3 text-xs text-slate-400">Optional, but it helps Jobrolo start smarter:</p>
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="companyName" className="text-slate-200">Company name</Label>

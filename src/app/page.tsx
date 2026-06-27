@@ -151,7 +151,6 @@ export default function Page() {
         if (meRes.ok) {
           const me = await meRes.json()
           if (!me.authenticated) { window.location.href = '/signup'; return }
-          if (!me.onboardingComplete) { window.location.href = '/onboarding'; return }
           setUserName(me.user?.name || 'there')
           setUserAvatar(me.user?.avatar || null)
           currentUserRole = me.user?.role || currentUserRole

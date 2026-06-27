@@ -5,6 +5,7 @@ import { bootstrapTenant } from '@/lib/security/bootstrap'
 import { issueSession, setSessionCookie } from '@/lib/security/session'
 import { audit } from '@/lib/security/context'
 import { rateLimitByIp } from '@/lib/security/rate-limit'
+import { markCommandCenterOnboardingReady } from '@/lib/onboarding/command-center-ready'
 export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
@@ -53,6 +54,13 @@ export async function POST(req: NextRequest) {
     const user = await db.user.findUnique({ where: { id: userId }, include: { contractor: true } })
     if (!user) throw new Error('User creation failed')
 
+    await markCommandCenterOnboardingReady({
+      contractorId,
+      userId,
+      companyName: companyName?.trim() || user.contractor.company || user.contractor.name,
+      website: website?.trim() || undefined,
+    })
+
     const token = await issueSession({
       sub: user.id,
       cid: user.contractorId,
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest) {
       success: true,
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
       contractor: { id: user.contractor.id, name: user.contractor.name, company: user.contractor.company },
-      redirectTo: '/onboarding',
+      redirectTo: '/',
     })
     setSessionCookie(res, token)
 

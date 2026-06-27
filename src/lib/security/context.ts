@@ -17,6 +17,7 @@ import { createHash, timingSafeEqual, randomBytes } from 'node:crypto'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { getSessionCookie, verifySession } from './session'
+import { markCommandCenterOnboardingReady } from '@/lib/onboarding/command-center-ready'
 
 export interface AuthUser {
   id: string
@@ -239,7 +240,11 @@ export async function requireContext(req: NextRequest): Promise<TenantContext> {
       select: { status: true },
     })
     if (!onboarding || onboarding.status !== 'completed') {
-      throw new OnboardingIncompleteError('Finish onboarding before using Jobrolo tools.')
+      await markCommandCenterOnboardingReady({
+        contractorId: ctx.contractorId,
+        userId: ctx.user.id,
+        companyName: ctx.contractor.company || ctx.contractor.name,
+      })
     }
   }
   return ctx
@@ -256,8 +261,8 @@ export class ForbiddenError extends Error {
 }
 
 export class OnboardingIncompleteError extends ForbiddenError {
-  redirectTo = '/onboarding'
-  constructor(message = 'Finish onboarding before using Jobrolo tools.') { super(message) }
+  redirectTo = '/'
+  constructor(message = 'Open Jobrolo Command Center to finish setup.') { super(message) }
 }
 
 // withContext: wrap an API handler with auth + error handling
