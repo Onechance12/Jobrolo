@@ -31,6 +31,7 @@ const DEFAULT_OPTIONS: RateLimitOptions = {
 
 const ROUTE_LIMITS: Record<string, RateLimitOptions> = {
   '/api/chat': { capacity: 10, refillRate: 0.5 }, // 10 burst, 1 per 2s sustained
+  '/api/public/entry-chat': { capacity: 8, refillRate: 0.08 }, // public lobby chat: 8 burst, ~5/min sustained
   '/api/workspaces/[id]/chat': { capacity: 10, refillRate: 0.5 },
   '/api/upload': { capacity: 20, refillRate: 1 },
   '/api/tts': { capacity: 5, refillRate: 0.2 }, // 5 burst, 1 per 5s

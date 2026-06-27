@@ -1,21 +1,31 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2, LockKeyhole, LogIn, Sparkles, UserPlus } from 'lucide-react'
+import { Bell, Loader2, LockKeyhole, LogIn, Menu, Mic, Plus, Send, Sparkles, UserPlus } from 'lucide-react'
 
 type EntryMode = 'signup' | 'login'
+type LobbyMessage = { role: 'user' | 'assistant'; content: string }
 
 export default function SignupPage() {
   const router = useRouter()
   const [mode, setMode] = useState<EntryMode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lockedNotice, setLockedNotice] = useState<string | null>(null)
+  const [lobbyInput, setLobbyInput] = useState('')
+  const [lobbySending, setLobbySending] = useState(false)
+  const [lobbyMessages, setLobbyMessages] = useState<LobbyMessage[]>([])
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', companyName: '', website: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const endRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [mode, lockedNotice, lobbyMessages, lobbySending])
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,60 +78,174 @@ export default function SignupPage() {
   const chooseMode = (nextMode: EntryMode) => {
     setMode(nextMode)
     setError(null)
+    setLockedNotice(null)
+  }
+
+  const showLocked = (label: string) => {
+    setLockedNotice(`${label} unlocks after you sign in and finish setup. For now, I can help you sign in, create a workspace, or explain how Jobrolo works.`)
+  }
+
+  const sendLobbyMessage = async () => {
+    const text = lobbyInput.trim()
+    if (!text || lobbySending) return
+
+    setLobbyInput('')
+    setLockedNotice(null)
+    setLobbyMessages(prev => [...prev, { role: 'user', content: text }])
+    setLobbySending(true)
+    try {
+      const res = await fetch('/api/public/entry-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      setLobbyMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: res.ok
+            ? data.message || 'I can answer Jobrolo questions here. To access your company workspace, sign in or create a workspace.'
+            : data.error || 'I can answer Jobrolo questions here. Try again in a moment.',
+        },
+      ])
+    } catch {
+      setLobbyMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'I had trouble answering from the lobby chat. You can still sign in or create a workspace, and I’ll continue setup there.',
+        },
+      ])
+    } finally {
+      setLobbySending(false)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-[#050914] px-4 py-6 text-slate-100">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col">
-        <header className="mb-6 flex items-center justify-between">
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#050914] text-slate-100">
+      <header className="shrink-0 border-b border-white/10 bg-[#07101d]/95 px-3 py-2.5 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Jobrolo" className="h-11 w-11 rounded-2xl object-cover shadow-[0_0_28px_rgba(37,99,235,0.45)]" />
+            <button
+              type="button"
+              onClick={() => showLocked('The menu')}
+              className="grid h-10 w-10 place-items-center rounded-xl text-slate-300 hover:bg-white/[0.06]"
+              aria-label="Menu locked during account entry"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <img src="/logo.png" alt="Jobrolo" className="h-10 w-10 rounded-xl object-cover shadow-[0_0_24px_rgba(37,99,235,0.45)]" />
             <div>
               <div className="text-sm font-semibold text-white">Jobrolo</div>
-              <div className="text-xs text-slate-400">Account entry</div>
+              <div className="text-xs text-slate-400">Account entry · setup mode</div>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-blue-300/20 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100">
-            <LockKeyhole className="h-3.5 w-3.5" />
-            Secure setup
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => showLocked('Notifications')}
+              className="hidden h-10 min-w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-2 text-slate-300 hover:bg-white/[0.08] sm:inline-flex"
+              aria-label="Notifications locked during account entry"
+            >
+              <Bell className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => showLocked('Create/start')}
+              className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+              aria-label="Start menu locked during account entry"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => showLocked('Your profile')}
+              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-blue-500/15 text-xs font-semibold text-blue-100 hover:bg-blue-500/25"
+              aria-label="Profile locked during account entry"
+            >
+              <LockKeyhole className="h-4 w-4" />
+            </button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <main className="flex flex-1 flex-col justify-center gap-4">
-          <div className="flex gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+      <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-end gap-4 pb-4">
+          {lockedNotice ? (
+            <div className="ml-auto max-w-[88%] rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
+              {lockedNotice}
+            </div>
+          ) : null}
+
+          <div className="flex items-end gap-3">
+            <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
               <Sparkles className="h-4 w-4" />
             </div>
-            <div className="max-w-[86%] rounded-2xl rounded-tl-md border border-white/10 bg-[#0b1220] px-4 py-3 text-[15px] leading-relaxed text-slate-100">
-              Hey — I’m Jobrolo. Are we signing you into an existing workspace, or creating a new company workspace?
+            <div className="max-w-[calc(100%-3.25rem)] rounded-2xl rounded-bl-md border border-white/10 bg-[#0b1220] px-4 py-3 text-[15px] leading-relaxed text-slate-100 shadow-xl shadow-black/20">
+              <div className="font-medium text-white">Hey — I’m Jobrolo.</div>
+              <div className="mt-1">Are we signing you into an existing workspace, or creating a new company workspace?</div>
+              <div className="mt-2 text-sm text-slate-300">
+                You can also ask me questions here before creating an account. I can explain what Jobrolo does, how invites work, and how setup flows — real company tools unlock after sign-in.
+              </div>
               <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-100">
                 If someone texted or emailed you an invite, use that invite link instead. That attaches you to the right company, chat, and permissions.
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => chooseMode('login')}
+                  className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'login' ? 'border-blue-300/50 bg-blue-500/25 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-blue-300/35 hover:bg-blue-500/15'}`}
+                >
+                  <LogIn className="h-4 w-4" />
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseMode('signup')}
+                  className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'signup' ? 'border-cyan-300/50 bg-cyan-500/20 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-cyan-300/35 hover:bg-cyan-500/15'}`}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Create workspace
+                </button>
               </div>
             </div>
           </div>
 
-          <div className="ml-12 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => chooseMode('login')}
-              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'login' ? 'border-blue-300/50 bg-blue-500/25 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-blue-300/35 hover:bg-blue-500/15'}`}
-            >
-              <LogIn className="h-4 w-4" />
-              Sign in
-            </button>
-            <button
-              type="button"
-              onClick={() => chooseMode('signup')}
-              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'signup' ? 'border-cyan-300/50 bg-cyan-500/20 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-cyan-300/35 hover:bg-cyan-500/15'}`}
-            >
-              <UserPlus className="h-4 w-4" />
-              Create workspace
-            </button>
-          </div>
+          {lobbyMessages.map((message, index) => (
+            <div key={`${message.role}-${index}`} className={`flex items-end gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
+              {message.role === 'assistant' ? (
+                <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+              ) : null}
+              <div
+                className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-xl shadow-black/20 ${
+                  message.role === 'user'
+                    ? 'rounded-br-md bg-blue-600 text-white'
+                    : 'rounded-bl-md border border-white/10 bg-[#0b1220] text-slate-100'
+                }`}
+              >
+                {message.content}
+              </div>
+            </div>
+          ))}
+
+          {lobbySending ? (
+            <div className="flex items-end gap-3">
+              <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-white/10 bg-[#0b1220] px-4 py-3 text-sm text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Thinking…
+              </div>
+            </div>
+          ) : null}
 
           {mode === 'login' ? (
-            <div className="ml-0 sm:ml-12">
-              <form onSubmit={handleLogin} className="rounded-3xl border border-blue-400/20 bg-[#08111f] p-5 shadow-2xl shadow-black/30">
+            <div className="ml-0 sm:ml-14">
+              <form onSubmit={handleLogin} className="rounded-3xl rounded-tl-md border border-blue-400/20 bg-[#08111f] p-4 shadow-2xl shadow-black/30 sm:p-5">
                 <div className="mb-4">
                   <div className="text-sm font-semibold text-white">Welcome back.</div>
                   <div className="text-xs text-slate-400">Sign in and I’ll route you to the right place.</div>
@@ -150,8 +274,8 @@ export default function SignupPage() {
           ) : null}
 
           {mode === 'signup' ? (
-            <div className="ml-0 sm:ml-12">
-              <form onSubmit={handleSignup} className="rounded-3xl border border-cyan-400/20 bg-[#08111f] p-5 shadow-2xl shadow-black/30">
+            <div className="ml-0 sm:ml-14">
+              <form onSubmit={handleSignup} className="rounded-3xl rounded-tl-md border border-cyan-400/20 bg-[#08111f] p-4 shadow-2xl shadow-black/30 sm:p-5">
                 <div className="mb-4">
                   <div className="text-sm font-semibold text-white">Let’s create your company workspace.</div>
                   <div className="text-xs text-slate-400">After this, I’ll continue onboarding in chat and lock tools until setup is complete.</div>
@@ -190,8 +314,54 @@ export default function SignupPage() {
               </form>
             </div>
           ) : null}
-        </main>
-      </div>
+
+          <div ref={endRef} />
+        </div>
+      </main>
+
+      <footer className="shrink-0 border-t border-white/10 bg-[#07101d] px-3 py-2.5">
+        <div className="mx-auto flex max-w-3xl items-end gap-2">
+          <button
+            type="button"
+            onClick={() => showLocked('Attachments')}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-400 hover:bg-white/[0.06]"
+            aria-label="Attachments locked during account entry"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <textarea
+            value={lobbyInput}
+            onChange={e => setLobbyInput(e.target.value)}
+            onKeyDown={e => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault()
+                void sendLobbyMessage()
+              }
+            }}
+            rows={1}
+            disabled={lobbySending}
+            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-xl border border-white/10 bg-[#0b1220] px-3 py-2.5 text-[15px] leading-6 text-white outline-none placeholder:text-slate-500 focus:border-blue-400/70 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+            placeholder="Ask Jobrolo how it works…"
+          />
+          <button
+            type="button"
+            onClick={() => showLocked('Voice')}
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-blue-600/80 text-white shadow-lg shadow-blue-950/30"
+            aria-label="Voice locked during account entry"
+          >
+            <Mic className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void sendLobbyMessage()}
+            disabled={!lobbyInput.trim() || lobbySending}
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-950/30 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500 sm:grid"
+            aria-label="Send lobby chat message"
+          >
+            {lobbySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
+      </footer>
     </div>
   )
 }
