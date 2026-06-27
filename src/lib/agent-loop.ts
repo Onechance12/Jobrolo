@@ -215,7 +215,13 @@ function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, e
 }
 
 function recentPlainMessages(messages: ChatMessage[], limit = 6) {
-  return messages.slice(Math.max(0, messages.length - limit)).map(m => plainMessageText(m.content)).join('\n')
+  const out: string[] = []
+  for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
+    const message = messages[i]
+    if (message.role !== 'user' || isInternalAgentInstruction(message.content)) continue
+    out.unshift(plainMessageText(message.content))
+  }
+  return out.join('\n')
 }
 
 function looksLikeApprovalReplayFailure(text: string) {
@@ -230,8 +236,33 @@ function plainMessageText(text: string) {
     .trim()
 }
 
+function isInternalAgentInstruction(text: string) {
+  const clean = plainMessageText(text)
+  return (
+    clean.startsWith('You said "') ||
+    clean.startsWith('Tool results:') ||
+    clean.startsWith('You returned actions, but') ||
+    clean.startsWith('The latest user request is') ||
+    clean.startsWith('The latest user reply') ||
+    clean.startsWith('A recent assistant message asked') ||
+    clean.startsWith('The user asked:') ||
+    clean.includes('Common recovery examples:') ||
+    clean.includes('Respond as JSON only.')
+  )
+}
+
+function lastExternalUserMessage(messages: ChatMessage[], beforeIndex = messages.length) {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message?.role === 'user' && !isInternalAgentInstruction(message.content)) {
+      return { index: i, message }
+    }
+  }
+  return null
+}
+
 function latestUserText(messages: ChatMessage[]) {
-  const latest = lastMessageByRole(messages, 'user')
+  const latest = lastExternalUserMessage(messages) ?? lastMessageByRole(messages, 'user')
   return latest ? plainMessageText(latest.message.content) : ''
 }
 
@@ -509,12 +540,12 @@ function isFieldInspectionLeadRequest(text: string) {
   if (!lower) return false
   if (/\b(open|show|pull up|display)\b.{0,40}\bmap\b/.test(lower)) return false
   const hasLocation = lower.includes('[browser_location]') || /\b(use my location|my location|where i am|where i'm at|current location|near me|nearby|gps|here|this house|this property)\b/.test(lower)
-  const hasInspectionIntent = /\b(landed|got|set|start|walking up|arrived|outside|mowing|inspection|inspect|appointment|field check|property lookup|search customer info|search property)\b/.test(lower)
-  return hasLocation && hasInspectionIntent && /\binspection|inspect|property|customer info|current house|this house\b/.test(lower)
+  const hasInspectionIntent = /\b(inspection|inspect|appointment|field check|walking up|arrived for|landed (?:an? )?inspection|got (?:an? )?inspection|set (?:an? )?inspection|start (?:an? )?inspection|outside mowing)\b/.test(lower)
+  return hasLocation && hasInspectionIntent
 }
 
 function isFieldLocationResolveRequest(messages: ChatMessage[]) {
-  const latestUser = lastMessageByRole(messages, 'user')
+  const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return false
   const latest = plainMessageText(latestUser.message.content)
   const lower = latest.toLowerCase()
@@ -582,7 +613,7 @@ function buildFieldLocationResolveToolCall(userText: string): ToolCall | null {
 }
 
 function buildDeterministicToolCall(messages: ChatMessage[]): ToolCall | null {
-  const latestUser = lastMessageByRole(messages, 'user')
+  const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
@@ -601,7 +632,7 @@ function documentHintFromPriceSheetText(text: string) {
 }
 
 function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
-  const latestUser = lastMessageByRole(messages, 'user')
+  const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
@@ -648,7 +679,8 @@ Common recovery examples:
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
 - To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
-- To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is a new property/lead with browser GPS.
+- To create a named/address potential lead before an inspection is set, call create_canvassing_lead_at_location with homeownerName/address/phone/status="new".
+- To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is clearly an inspection/appointment at a new property with browser GPS.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.

@@ -4078,7 +4078,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'start_field_inspection_lead',
-    description: 'Save a newly landed field inspection from the current GPS/location when the user is at an unknown house and there is not yet a confirmed customer/project/appointment. Use for phrases like "walking up for an inspection", "I just landed this inspection", "they were outside mowing", "add this inspection at my location", or "search customer info and add my location". Creates or reuses an active FIELD session, creates an inspection-set lead/pin, logs the field outcome, and optionally runs property lookup. This is not a door-knocking canvassing run and it does not create a real customer/project until the user confirms conversion.',
+    description: 'Save a newly landed field inspection from the current GPS/location when the user is at an unknown house and there is not yet a confirmed customer/project/appointment. Use for phrases like "walking up for an inspection", "I just landed this inspection", "they were outside mowing", or "add this inspection at my location". Do NOT use for generic "create a lead" or property research unless the user clearly says this is an inspection/appointment. Creates or reuses an active FIELD session, creates an inspection-set lead/pin, logs the field outcome, and optionally runs property lookup. This is not a door-knocking canvassing run and it does not create a real customer/project until the user confirms conversion.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),
@@ -4091,6 +4091,8 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: ['main', 'sales', 'management', 'crew'],
     execute: async (args, contractorId, ctx) => {
       const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      const unsafeInternalNotes = args.notes && /Common recovery examples:|You said "|MUST call the correct tool|Respond as JSON only\.|Tool results:/i.test(args.notes)
+      const safeNotes = unsafeInternalNotes ? undefined : args.notes?.trim()
       let sessionId = args.sessionId
       if (!sessionId) {
         const existingSession = await db.canvassingSession.findFirst({
@@ -4116,7 +4118,7 @@ export const TOOLS: ToolDef[] = [
         }
       }
       const notes = [
-        args.notes?.trim(),
+        safeNotes,
         'New inspection landed in the field. Save as inspection lead until customer/project is confirmed.',
       ].filter(Boolean).join('\n')
       const lead = await createCanvassingLead(tenant, {
@@ -4135,8 +4137,8 @@ export const TOOLS: ToolDef[] = [
         sessionId,
         type: 'inspection_set',
         status: 'inspection_set',
-        summary: args.notes || 'Inspection landed from the field.',
-        notes: args.notes,
+        summary: safeNotes || 'Inspection landed from the field.',
+        notes: safeNotes,
         location: args.location,
         metadata: { fieldInspection: true },
       })
@@ -4147,7 +4149,7 @@ export const TOOLS: ToolDef[] = [
             query: args.address || 'current GPS location',
             address: args.address,
             location: args.location,
-            notes: args.notes,
+            notes: safeNotes,
             allowProviderLookup: true,
           }).catch(error => ({ error: error instanceof Error ? error.message : 'Property lookup failed' }))
         : null
@@ -4171,7 +4173,7 @@ export const TOOLS: ToolDef[] = [
             longitude: lead.longitude,
             propertyResearch: propertyResearch && typeof propertyResearch === 'object' ? propertyResearch : null,
             photoSections: ['Front elevation', 'All elevations', 'Roof overview', 'Roof slopes/facets', 'Hail/wind damage', 'Soft metals / gutters / vents', 'Interior', 'Attic', 'Detached structures', 'Documents / scope'],
-            summary: args.notes || 'Inspection landed from the field.',
+            summary: safeNotes || 'Inspection landed from the field.',
           },
         },
       }
@@ -4180,7 +4182,7 @@ export const TOOLS: ToolDef[] = [
 
   {
     name: 'create_canvassing_lead_at_location',
-    description: 'Create a door-knocking canvassing lead/pin from the current GPS location when the user is working a canvassing territory and wants to log a house/door that does not yet have a customer or project. Do NOT use this for a newly landed inspection; use start_field_inspection_lead instead.',
+    description: 'Create a potential/customer lead from a door knock, conversation, name/address, or current GPS location when it does not yet have a confirmed customer/project. Use for "create a lead for Natalie at 486 North Charles St" or door/conversation leads before an inspection is set. Do NOT use this for a newly landed inspection/appointment; use start_field_inspection_lead instead.',
     schema: z.object({
       sessionId: z.string().optional(),
       address: z.string().optional(),
