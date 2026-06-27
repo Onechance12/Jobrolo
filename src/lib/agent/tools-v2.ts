@@ -1318,13 +1318,19 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'list_documents',
-    description: 'List recently uploaded documents. Optional filter by fileType.',
-    schema: z.object({ fileType: z.string().optional() }),
+    description: 'List recently uploaded job/customer/company documents. Optional filter by fileType. Profile assets such as user avatars and company logos are excluded unless includeProfileAssets=true or a profile asset fileType is requested.',
+    schema: z.object({ fileType: z.string().optional(), includeProfileAssets: z.boolean().optional(), limit: z.number().int().min(1).max(50).optional() }),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
+      const profileAssetTypes = ['user_avatar', 'company_logo']
+      const includeProfileAssets = args.includeProfileAssets || (args.fileType ? profileAssetTypes.includes(args.fileType) : false)
       const docs = await db.document.findMany({
-        where: { contractorId, ...(args.fileType ? { fileType: args.fileType } : {}) },
-        orderBy: { createdAt: 'desc' }, take: 20,
+        where: {
+          contractorId,
+          ...(args.fileType ? { fileType: args.fileType } : {}),
+          ...(!args.fileType && !includeProfileAssets ? { fileType: { notIn: profileAssetTypes } } : {}),
+        },
+        orderBy: { createdAt: 'desc' }, take: args.limit ?? 20,
         select: { id: true, originalName: true, fileType: true, aiSummary: true, aiCategory: true, status: true, filePath: true, thumbnailPath: true, mimeType: true, customerId: true, projectId: true, workspaceId: true, createdAt: true },
       })
       return {
@@ -2098,14 +2104,16 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
       console.log(`[price-sheet] review requested contractorId=${contractorId} documentId=${args.documentId ?? ''} filename=${args.filename ?? ''}`)
+      const looksLikeDocumentId = (value?: string) => Boolean(value && /^c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim()))
       let doc
-      if (args.documentId) {
+      if (args.documentId && looksLikeDocumentId(args.documentId)) {
         doc = await db.document.findFirst({
           where: { id: args.documentId, contractorId },
           select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, status: true, extractionConfidence: true },
         })
-      } else {
-        const needle = String(args.filename ?? '').trim()
+      }
+      if (!doc) {
+        const needle = String(args.filename ?? args.documentId ?? '').trim()
         const docs = await db.document.findMany({
           where: { contractorId },
           orderBy: { createdAt: 'desc' },

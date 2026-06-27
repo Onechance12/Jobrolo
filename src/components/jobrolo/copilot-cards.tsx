@@ -768,10 +768,24 @@ function normalizeComparable(value: string) {
 }
 
 function ProfileRow({ label, value, icon, className }: { label: string; value: string; icon?: ReactNode; className?: string }) {
+  const normalizedUrl = /^https?:\/\//i.test(value) ? value : /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(value) ? `https://${value}` : null
+  const href = label.toLowerCase().includes('website') && normalizedUrl
+    ? normalizedUrl
+    : label.toLowerCase().includes('email')
+      ? `mailto:${value}`
+      : label.toLowerCase().includes('phone')
+        ? `tel:${value.replace(/[^\d+]/g, '')}`
+        : null
   return (
     <div className={cn('rounded-lg border bg-background/70 p-2', className)}>
       <div className="mb-0.5 flex items-center gap-1.5 font-medium text-foreground">{icon}{label}</div>
-      <div className="whitespace-pre-line break-words text-muted-foreground">{value}</div>
+      {href ? (
+        <a href={href} target={href.startsWith('http') ? '_blank' : undefined} rel={href.startsWith('http') ? 'noopener noreferrer' : undefined} className="block break-words text-muted-foreground underline-offset-2 hover:text-blue-500 hover:underline">
+          {value}
+        </a>
+      ) : (
+        <div className="whitespace-pre-line break-words text-muted-foreground">{value}</div>
+      )}
     </div>
   )
 }

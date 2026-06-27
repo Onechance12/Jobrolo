@@ -822,6 +822,7 @@ export default function Page() {
                   message={m}
                   onSpeak={autoTTS ? undefined : (text) => tts.speak(text)}
                   isSpeaking={tts.currentText === m.content && tts.isPlaying}
+                  userAvatar={userAvatar}
                 />
               ))}
               {!isInWorkspace && (isTyping || isStreaming) && <StreamingBubble text={streamingText} />}

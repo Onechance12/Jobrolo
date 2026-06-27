@@ -8,20 +8,27 @@ import { DocumentCard } from './document-card'
 import { CopilotCardFromMessage } from './copilot-cards'
 import type { ClientMessage, MessageAttachment, ActionResult, ThinkingStep } from '@/lib/types'
 
-interface Props { message: ClientMessage; isStreaming?: boolean; onSpeak?: (text: string) => void; isSpeaking?: boolean }
+interface Props { message: ClientMessage; isStreaming?: boolean; onSpeak?: (text: string) => void; isSpeaking?: boolean; userAvatar?: string | null }
 
-export function MessageBubble({ message, onSpeak, isSpeaking }: Props) {
+export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Props) {
   const isUser = message.role === 'user'
   const content = isUser ? message.content : stripJsonWrapper(message.content)
+  const cardType = String((message.contextData as any)?.cardType || (message.contextData as any)?.type || message.contextType || '').toLowerCase()
+  const preferStructuredCard = !isUser && (cardType.includes('company_profile') || cardType.includes('company_research')) && content.length > 180
+  const visibleContent = preferStructuredCard
+    ? cardType.includes('company_research')
+      ? 'I found company profile suggestions. Review the card below and tell me what to save or change.'
+      : 'Here’s the saved company profile.'
+    : content
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>
-      <div className={cn('flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center', isUser ? 'bg-muted text-muted-foreground' : 'bg-gradient-to-br from-blue-600 to-blue-800 text-white')}>
-        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+      <div className={cn('flex-shrink-0 w-8 h-8 overflow-hidden rounded-full flex items-center justify-center', isUser ? 'bg-muted text-muted-foreground' : 'bg-gradient-to-br from-blue-600 to-blue-800 text-white')}>
+        {isUser && userAvatar ? <img src={userAvatar} alt="Your profile" className="h-full w-full object-cover" /> : isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
       <div className={cn('flex-1 min-w-0 max-w-[85%] sm:max-w-[80%] overflow-hidden', isUser && 'flex flex-col items-end')}>
         {!isUser && message.thinking && message.thinking.length > 0 && <ThinkingSteps steps={message.thinking} />}
         <div className={cn('rounded-2xl px-3.5 sm:px-4 py-2.5 text-[15px] leading-relaxed max-w-full overflow-hidden break-words [overflow-wrap:anywhere]', isUser ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-card border border-border text-card-foreground rounded-tl-md')}>
-          <FormattedContent content={content} />
+          <FormattedContent content={visibleContent} />
         </div>
         {message.contextType && <CopilotCardFromMessage contextType={message.contextType} contextData={message.contextData ?? null} content={content} />}
         {message.attachments && message.attachments.length > 0 && <AttachmentGrid attachments={message.attachments} />}
@@ -29,8 +36,8 @@ export function MessageBubble({ message, onSpeak, isSpeaking }: Props) {
         {!isUser && (
           <div className="flex items-center gap-2 mt-1 px-1">
             {message.createdAt && <span className="text-[10px] text-muted-foreground/60">{formatMessageTime(message.createdAt)}</span>}
-            {onSpeak && content && (
-              <button onClick={() => onSpeak(content)} className={cn('flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full', isSpeaking ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'text-muted-foreground/60 hover:bg-muted hover:text-muted-foreground')}>
+            {onSpeak && visibleContent && (
+              <button onClick={() => onSpeak(visibleContent)} className={cn('flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full', isSpeaking ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'text-muted-foreground/60 hover:bg-muted hover:text-muted-foreground')}>
                 {isSpeaking ? <><Square className="w-2.5 h-2.5 fill-current" />Speaking…</> : <><Volume2 className="w-2.5 h-2.5" />Play</>}
               </button>
             )}
@@ -92,7 +99,12 @@ function FormattedContent({ content }: { content: string }) {
   }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (/^\s*[-]\s+/.test(line)) {
+    const table = parseMarkdownTable(lines, i)
+    if (table) {
+      flush()
+      elements.push(<MarkdownTable key={`t-${i}`} headers={table.headers} rows={table.rows} />)
+      i = table.endIndex
+    } else if (/^\s*[-]\s+/.test(line)) {
       listItems.push(line.replace(/^\s*[-]\s+/, ''))
     } else if (/^\s*\d+\.\s+/.test(line)) {
       listItems.push(line.replace(/^\s*\d+\.\s+/, ''))
@@ -110,6 +122,62 @@ function FormattedContent({ content }: { content: string }) {
   }
   flush()
   return <div className="space-y-0.5 max-w-full break-words [overflow-wrap:anywhere]">{elements}</div>
+}
+
+function splitTableRow(line: string) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+}
+
+function parseMarkdownTable(lines: string[], startIndex: number): { headers: string[]; rows: string[][]; endIndex: number } | null {
+  const header = lines[startIndex]
+  const separator = lines[startIndex + 1]
+  if (!header?.includes('|') || !separator?.includes('|')) return null
+  if (!/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) return null
+  const headers = splitTableRow(header)
+  if (headers.length < 2) return null
+  const rows: string[][] = []
+  let endIndex = startIndex + 1
+  for (let i = startIndex + 2; i < lines.length; i++) {
+    const row = lines[i]
+    if (!row.includes('|') || !row.trim()) break
+    rows.push(splitTableRow(row))
+    endIndex = i
+  }
+  return rows.length ? { headers, rows, endIndex } : null
+}
+
+function MarkdownTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  return (
+    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-border bg-background/70">
+      <div className="max-w-full overflow-x-auto">
+        <table className="min-w-[640px] border-collapse text-left text-xs">
+          <thead className="bg-muted/70 text-muted-foreground">
+            <tr>
+              {headers.map((header, index) => (
+                <th key={index} className="whitespace-nowrap border-b border-border px-2.5 py-2 font-semibold">{renderInline(header)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b border-border/60 last:border-b-0">
+                {headers.map((_, cellIndex) => (
+                  <td key={cellIndex} className="max-w-[18rem] px-2.5 py-2 align-top text-card-foreground">
+                    <span className="line-clamp-3">{renderInline(row[cellIndex] ?? '')}</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 4 ? (
+        <div className="border-t border-border bg-muted/30 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+          Swipe sideways to review columns. Ask Jobrolo for deductible pool, trade totals, or excluded items for a cleaner summary.
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function markdownImageFromLine(line: string): { alt: string; src: string } | null {
@@ -137,12 +205,16 @@ function MarkdownImage({ alt, src }: { alt: string; src: string }) {
 
 function renderInline(text: string): React.ReactNode {
   const parts: React.ReactNode[] = []
-  const regex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g
+  const regex = /(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|https?:\/\/[^\s)]+|\*\*[^*]+\*\*|\*[^*]+\*)/g
   let lastIdx = 0, match, key = 0
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index))
     const m = match[0]
-    if (m.startsWith('**')) parts.push(<strong key={key++}>{m.slice(2, -2)}</strong>)
+    if (match[2] && match[3]) {
+      parts.push(<a key={key++} href={match[3]} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-blue-500">{match[2]}</a>)
+    } else if (m.startsWith('http')) {
+      parts.push(<a key={key++} href={m} target="_blank" rel="noopener noreferrer" className="break-all underline underline-offset-2 hover:text-blue-500">{m}</a>)
+    } else if (m.startsWith('**')) parts.push(<strong key={key++}>{m.slice(2, -2)}</strong>)
     else parts.push(<em key={key++}>{m.slice(1, -1)}</em>)
     lastIdx = match.index + m.length
   }
