@@ -230,17 +230,29 @@ export function uploadAnalysisFollowupFromDocument(doc: any): { content: string;
   if (category.includes('photo') || String(doc.mimeType || '').startsWith('image/')) {
     const photoType = textValue(extracted.photoType)
     const detectedDocumentType = textValue(extracted.likelyDocumentType)
+    const summary = textValue(doc.aiSummary) || textValue(extracted.summary) || textValue(extracted.description)
+    const damageObserved = textValue(extracted.damageObserved) || textValue(extracted.damage)
+    const visibleText = textValue(extracted.visibleText)
+    const uploadContext = extracted.uploadContext && typeof extracted.uploadContext === 'object' ? extracted.uploadContext as Record<string, any> : null
+    const captureLocation = uploadContext?.captureLocation && typeof uploadContext.captureLocation === 'object' ? uploadContext.captureLocation : null
+    const hasGps = typeof captureLocation?.latitude === 'number' && typeof captureLocation?.longitude === 'number'
+    const fieldHint = hasGps ? ' I saved the GPS capture context too, so I can use nearby customer/project matching before linking it.' : ''
     if (detectedDocumentType && detectedDocumentType !== 'other' && detectedDocumentType !== 'null') {
       return {
-        content: `Saved and analyzed ${filename}. This photo looks like a document photo (${detectedDocumentType}). I need your approval before attaching it to a customer/project or treating it as a scope/estimate.`,
+        content: `Saved and analyzed ${filename}. This photo looks like a document photo (${detectedDocumentType})${summary ? `: ${summary}` : ''}. I need your approval before attaching it to a customer/project or treating it as a scope/estimate.${fieldHint}`,
         contextType: 'upload_link_prompt',
         contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], detectedDocumentType },
       }
     }
+    const followupQuestion = photoType === 'elevation'
+      ? 'Which elevation/side of the property is this?'
+      : damageObserved && damageObserved !== 'none'
+        ? 'Do you want this saved as damage evidence, and which customer/project or inspection section should it go under?'
+        : 'Tell me the customer/project or photo section, and I’ll link it.'
     return {
-      content: `Saved and analyzed ${filename}${photoType ? ` as ${photoType.replace(/_/g, ' ')}` : ''}. I did not find enough customer/job info in the image to attach it automatically. Tell me the customer/project or photo section, and I’ll link it.`,
+      content: `Saved and analyzed ${filename}${photoType ? ` as ${photoType.replace(/_/g, ' ')}` : ''}${summary ? `: ${summary}` : ''}${visibleText ? ` I also saw text in the image: “${visibleText.slice(0, 120)}.”` : ''}${damageObserved && damageObserved !== 'none' ? ` Damage/condition noted: ${damageObserved}.` : ''}${fieldHint} I did not attach it automatically. ${followupQuestion}`,
       contextType: 'upload_link_prompt',
-      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], fileTypes: ['photo'], photoType },
+      contextData: { documentIds: documentId ? [documentId] : [], filenames: [filename], fileTypes: ['photo'], photoType, damageObserved, captureLocation: hasGps ? captureLocation : undefined },
     }
   }
 

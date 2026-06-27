@@ -111,6 +111,9 @@ export async function POST(req: NextRequest) {
     const projectIdRaw = String(form.get('projectId') || '').trim()
     const customerIdRaw = String(form.get('customerId') || '').trim()
     const uploadPurpose = String(form.get('uploadPurpose') || '').trim()
+    const suggestedUploadPurpose = String(form.get('suggestedUploadPurpose') || '').trim()
+    const uploadIntentSource = String(form.get('uploadIntentSource') || '').trim()
+    const requireUploadConfirmation = String(form.get('requireUploadConfirmation') || '').trim() === 'true'
     const photoSection = String(form.get('photoSection') || '').trim()
     const photoSectionLabel = String(form.get('photoSectionLabel') || '').trim()
     const captureLocation = uploadCaptureLocation(form)
@@ -119,7 +122,7 @@ export async function POST(req: NextRequest) {
     let projectId: string | undefined
     let customerId: string | undefined
 
-    const companyLevelUpload = isCompanyLevelUpload(uploadPurpose)
+    const companyLevelUpload = isCompanyLevelUpload(uploadPurpose) || isCompanyLevelUpload(suggestedUploadPurpose)
 
     if (!companyLevelUpload && workspaceIdRaw) {
       const workspace = await requireWorkspace(ctx, workspaceIdRaw)
@@ -181,10 +184,13 @@ export async function POST(req: NextRequest) {
         data,
         storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId: documentProjectId, customerId: documentCustomerId }),
       })
-      const uploadContext = uploadPurpose || photoSection || photoSectionLabel || shouldStoreAsCompanyPricing
+      const uploadContext = uploadPurpose || suggestedUploadPurpose || uploadIntentSource || photoSection || photoSectionLabel || shouldStoreAsCompanyPricing
         ? {
             uploadContext: {
               uploadPurpose: uploadPurpose || (shouldStoreAsCompanyPricing ? 'company_pricing' : null),
+              suggestedUploadPurpose: suggestedUploadPurpose || null,
+              uploadIntentSource: uploadIntentSource || null,
+              requireUploadConfirmation,
               photoSection: photoSection || null,
               photoSectionLabel: photoSectionLabel || null,
               captureLocation,
@@ -338,7 +344,11 @@ export async function POST(req: NextRequest) {
       ...(companyLevelUpload ? {
         needsLink: false,
         deferLinkPrompt: true,
-        suggestedPrompt: uploadPurpose === 'user_avatar'
+        suggestedPrompt: requireUploadConfirmation && suggestedUploadPurpose === 'user_avatar'
+          ? 'Saved this as a profile photo candidate. Do you want me to update your account avatar with it?'
+          : requireUploadConfirmation && suggestedUploadPurpose === 'company_logo'
+            ? 'Saved this as a company logo candidate. Do you want me to update the company profile logo with it?'
+            : uploadPurpose === 'user_avatar'
           ? 'Saved your profile photo and updated your account avatar.'
           : uploadPurpose === 'company_logo'
             ? 'Saved your company logo and updated the company profile.'
@@ -348,6 +358,9 @@ export async function POST(req: NextRequest) {
           filenames: documents.map(d => d.originalName),
           fileTypes: documents.map(d => d.fileType),
           uploadPurpose,
+          suggestedUploadPurpose,
+          uploadIntentSource,
+          requireUploadConfirmation,
           avatarUrl: documents.find(d => (d as any).avatarUrl)?.avatarUrl,
         },
       } : needsLink ? {

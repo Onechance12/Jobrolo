@@ -12,6 +12,12 @@ const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review']
 
 type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: string; doc?: any }
 
+type UploadIntentResolution = {
+  fields: Record<string, string>
+  source: 'direct' | 'recent_context' | 'none'
+  suggestedPurpose?: 'company_logo' | 'user_avatar' | 'company_pricing'
+}
+
 function uploadIntentFields(text: string, attachments: File[] = []): Record<string, string> {
   const lower = `${text} ${attachments.map(f => f.name).join(' ')}`.toLowerCase()
   if (/\b(profile photo|profile picture|account photo|account picture|avatar|my photo|my picture|user photo|headshot)\b/.test(lower)) {
@@ -24,6 +30,57 @@ function uploadIntentFields(text: string, attachments: File[] = []): Record<stri
     return { uploadPurpose: 'company_pricing' }
   }
   return {}
+}
+
+function resolveUploadIntent(text: string, attachments: File[] = [], recentMessages: ClientMessage[] = []): UploadIntentResolution {
+  const direct = uploadIntentFields(text, attachments)
+  if (direct.uploadPurpose) {
+    return { fields: direct, source: 'direct', suggestedPurpose: direct.uploadPurpose as UploadIntentResolution['suggestedPurpose'] }
+  }
+
+  // File-only uploads are common on mobile. If the user just asked about a logo,
+  // avatar, or price sheet, keep that context so the file does not get buried in
+  // the wrong customer/project file.
+  const recentUserText = recentMessages
+    .filter(m => m.role === 'user')
+    .slice(-3)
+    .map(m => m.content || '')
+    .join('\n')
+  const inferred = uploadIntentFields(recentUserText, attachments)
+  const inferredPurpose = inferred.uploadPurpose as UploadIntentResolution['suggestedPurpose']
+  if (!inferredPurpose) return { fields: {}, source: 'none' }
+
+  if (inferredPurpose === 'company_pricing') {
+    return { fields: { uploadPurpose: 'company_pricing', uploadIntentSource: 'recent_context' }, source: 'recent_context', suggestedPurpose: inferredPurpose }
+  }
+
+  return {
+    fields: {
+      suggestedUploadPurpose: inferredPurpose,
+      uploadIntentSource: 'recent_context',
+      requireUploadConfirmation: 'true',
+    },
+    source: 'recent_context',
+    suggestedPurpose: inferredPurpose,
+  }
+}
+
+function uploadIntentConfirmation(intent: UploadIntentResolution, documents: Array<{ id: string; originalName: string }>) {
+  if (intent.source !== 'recent_context' || !intent.suggestedPurpose || intent.suggestedPurpose === 'company_pricing') return null
+  const first = documents[0]
+  if (!first) return null
+  const label = intent.suggestedPurpose === 'user_avatar' ? 'profile photo' : 'company logo'
+  const action = intent.suggestedPurpose === 'user_avatar' ? 'update your account profile photo' : 'set this as your company logo'
+  return {
+    content: `Saved ${first.originalName}. Since we were just talking about your ${label}, I kept it out of customer/job files. Do you want me to ${action}?`,
+    contextType: 'upload_intent_confirmation',
+    contextData: {
+      cardType: 'upload_intent_confirmation',
+      suggestedUploadPurpose: intent.suggestedPurpose,
+      documentIds: documents.map(d => d.id),
+      filenames: documents.map(d => d.originalName),
+    },
+  }
 }
 
 function isInstantProfileUpload(doc: { fileType?: string }) {
@@ -149,6 +206,8 @@ export function useChat() {
       mimeType: f.type,
       size: f.size,
     }))
+    const previousMessages = store.messages.slice(-8)
+    const uploadIntent = resolveUploadIntent(text, attachments, previousMessages)
     const userMessageId = crypto.randomUUID()
     addMessage({ id: userMessageId, role: 'user', content: visibleText, attachments: previewAttachments, createdAt: new Date().toISOString() })
 
@@ -156,7 +215,7 @@ export function useChat() {
     let serverAttachments: MessageAttachment[] = []
     if (attachments.length > 0) {
       try {
-        const data = await uploadFilesSequentially(attachments, { signal: abortControllerRef.current.signal, fields: { ...uploadIntentFields(text, attachments), ...uploadFields } })
+        const data = await uploadFilesSequentially(attachments, { signal: abortControllerRef.current.signal, fields: { ...uploadIntent.fields, ...uploadFields } })
         if (data.documents.length === 0) {
           const errMsg = data.failures.map(f => `${f.fileName}: ${f.error}`).join('\n') || 'Upload failed before the server responded'
           console.error('[use-chat] upload failed:', errMsg)
@@ -200,6 +259,17 @@ export function useChat() {
               content: data.suggestedPrompt,
               contextType: 'upload_link_prompt',
               contextData: data.uploadContext,
+              createdAt: new Date().toISOString(),
+            })
+          }
+          const confirmation = uploadIntentConfirmation(uploadIntent, data.documents)
+          if (confirmation) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: confirmation.content,
+              contextType: confirmation.contextType,
+              contextData: confirmation.contextData,
               createdAt: new Date().toISOString(),
             })
           }
