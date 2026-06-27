@@ -271,8 +271,8 @@ export default function SignupPage() {
             </div>
           ) : null}
 
-          <div className="flex items-end gap-3">
-            <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+          <div className="flex items-start gap-3">
+            <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
               <Sparkles className="h-4 w-4" />
             </div>
             <div className="max-w-[calc(100%-3.25rem)] rounded-2xl rounded-bl-md border border-white/10 bg-[#0b1220] px-4 py-3 text-[15px] leading-relaxed text-slate-100 shadow-xl shadow-black/20">
@@ -320,9 +320,9 @@ export default function SignupPage() {
           </div>
 
           {lobbyMessages.map((message, index) => (
-            <div key={`${message.role}-${index}`} className={`flex items-end gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
+            <div key={`${message.role}-${index}`} className={`flex items-start gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}>
               {message.role === 'assistant' ? (
-                <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+                <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
                   <Sparkles className="h-4 w-4" />
                 </div>
               ) : null}
@@ -339,8 +339,8 @@ export default function SignupPage() {
           ))}
 
           {lobbySending ? (
-            <div className="flex items-end gap-3">
-              <div className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
+            <div className="flex items-start gap-3">
+              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]">
                 <Sparkles className="h-4 w-4" />
               </div>
               <div className="inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-white/10 bg-[#0b1220] px-4 py-3 text-sm text-slate-300">
