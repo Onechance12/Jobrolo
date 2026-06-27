@@ -566,6 +566,35 @@ function isActionCenterRequest(text: string) {
   )
 }
 
+function testerFeedbackFromText(text: string): { content: string; source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'; area?: string; severity?: 'low' | 'normal' | 'high' | 'urgent' } | null {
+  const clean = plainMessageText(text)
+  if (!clean) return null
+  const marker = clean.match(/^\s*\(?\s*note\s+to\s+(cody|codex)\s*\)?\s*[:\-–—]?\s*/i)
+    ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(cody|codex)\s*[:\-–—]?\s*/i)
+  if (!marker) return null
+  const audience = String(marker[1] || '').toLowerCase()
+  const content = clean.slice(marker[0].length).trim()
+  if (!content) return null
+  const lower = content.toLowerCase()
+  const area = /\bupload|file|photo|document\b/.test(lower) ? 'uploads/files'
+    : /\bonboard|signup|sign in|login|workspace|invite\b/.test(lower) ? 'onboarding/auth'
+      : /\bshortcut|prompt|pill\b/.test(lower) ? 'shortcuts'
+        : /\bfield|gps|map|inspection|canvass\b/.test(lower) ? 'field'
+          : /\bcompany|profile|logo|research\b/.test(lower) ? 'company profile'
+            : undefined
+  const severity: 'low' | 'normal' | 'high' | 'urgent' = /\burgent|critical|p0|emergency\b/.test(lower)
+    ? 'urgent'
+    : /\b(broken|bug|failed|failure|stuck|crash|crashed|error|cannot|can't|wont|won't|loop|frozen|froze)\b/.test(lower)
+      ? 'high'
+      : 'normal'
+  return {
+    content,
+    source: audience === 'codex' ? 'note_to_codex' : 'note_to_cody',
+    ...(area ? { area } : {}),
+    severity,
+  }
+}
+
 function isFieldInspectionLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
@@ -844,6 +873,8 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (opts?.documentIds?.length && isCompanyLogoUploadRequest(userText)) {
     return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
   }
+  const testerFeedback = testerFeedbackFromText(userText)
+  if (testerFeedback) return { name: 'record_tester_feedback', args: testerFeedback }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
@@ -867,6 +898,16 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
+  const testerFeedback = testerFeedbackFromText(userText)
+  if (testerFeedback) {
+    return `The latest user message is tester/product feedback intended for ${testerFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}:
+"${testerFeedback.content.slice(0, 500)}"
+
+Call record_tester_feedback now with:
+${JSON.stringify(testerFeedback)}
+
+Do not save it as a normal customer/job note. Do not narrate that you will save it. Only say it was captured after the tool succeeds. Respond as JSON only.`
+  }
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
   if (isLiveFieldObservationRequest(userText)) return buildFieldObservationInstruction(userText)
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadInstruction(userText, mostRecentBrowserLocation(messages))

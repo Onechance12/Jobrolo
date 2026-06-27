@@ -34,6 +34,7 @@ import { createCommandShortcut, deleteCommandShortcut, listCommandShortcuts, upd
 import type { TenantContext } from '@/lib/security/context'
 import { normalizeRole } from '@/lib/security/permissions'
 import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
+import { createRoleNotification } from '@/lib/notifications'
 
 export interface ToolContext {
   workspaceId?: string
@@ -2063,6 +2064,80 @@ export const TOOLS: ToolDef[] = [
           guidance: unlinkedJobCandidates.length
             ? 'Some recent uploads are not linked to any customer/project/workspace yet. Do not say they are in this customer file unless a link tool succeeds.'
             : undefined,
+        },
+      }
+    },
+  },
+  {
+    name: 'record_tester_feedback',
+    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "(note to Cody)", "(note to Codex)", "note for Cody", "tell Cody", or similar feedback about bugs, confusing UX, broken workflows, logs to review, or desired fixes. This is for product/dev feedback, not normal customer/job notes.',
+    schema: z.object({
+      content: z.string().min(1).max(8000),
+      source: z.enum(['note_to_cody', 'note_to_codex', 'tester_feedback']).optional(),
+      area: z.string().max(120).optional(),
+      severity: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+      currentUrl: z.string().max(1000).optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId, ctx) => {
+      const content = args.content.trim()
+      const inferredSeverity = args.severity ?? (
+        /\b(broken|bug|failed|failure|stuck|crash|crashed|error|urgent|cannot|can't|wont|won't|loop|frozen|froze)\b/i.test(content)
+          ? 'high'
+          : 'normal'
+      )
+      const area = args.area?.trim() || (
+        /\bupload|file|photo|document\b/i.test(content) ? 'uploads/files'
+          : /\bonboard|signup|sign in|login|workspace\b/i.test(content) ? 'onboarding/auth'
+            : /\bshortcut|prompt|pill\b/i.test(content) ? 'shortcuts'
+              : /\bfield|gps|map|inspection|canvass\b/i.test(content) ? 'field'
+                : /\bcompany|profile|logo|research\b/i.test(content) ? 'company profile'
+                  : 'general'
+      )
+      const title = `${args.source === 'note_to_codex' ? 'Note to Codex' : 'Note to Cody'}: ${area}`
+      const summary = content.length > 280 ? `${content.slice(0, 277)}...` : content
+      const item = await createRoleNotification({
+        contractorId,
+        role: 'owner',
+        userId: null,
+        type: 'tester_feedback',
+        title,
+        summary,
+        priority: inferredSeverity,
+        relatedType: 'tester_feedback',
+        payload: {
+          cardType: 'tester_feedback',
+          content,
+          source: args.source ?? 'tester_feedback',
+          area,
+          severity: inferredSeverity,
+          currentUrl: args.currentUrl ?? null,
+          capturedByUserId: ctx.userId ?? null,
+          capturedByRole: ctx.userRole ?? null,
+          capturedAt: new Date().toISOString(),
+        },
+      })
+      console.log(`[tester-feedback] saved contractorId=${contractorId} inboxItemId=${item.id} area=${area} severity=${inferredSeverity}`)
+      return {
+        success: true,
+        data: {
+          saved: true,
+          inboxItem: {
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            priority: item.priority,
+            area,
+            createdAt: item.createdAt,
+          },
+          card: {
+            cardType: 'tester_feedback',
+            title: item.title,
+            summary,
+            priority: item.priority,
+            area,
+          },
+          message: 'Saved this as tester feedback for Cody/Codex in Action Needed.',
         },
       }
     },
