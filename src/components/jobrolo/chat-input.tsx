@@ -586,61 +586,42 @@ function promptGroupTone(tone: PromptTone) {
 
 function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: (shortcut: CommandShortcut) => void }) {
   const [activeIndex, setActiveIndex] = useState(0)
-  const railRef = useRef<HTMLDivElement>(null)
   if (!groups.length) return null
   const activeGroup = groups[Math.min(activeIndex, groups.length - 1)] ?? groups[0]
   const activeTone = promptGroupTone(activeGroup.tone)
 
   const scrollToGroup = (index: number) => {
-    const node = railRef.current
-    if (!node) return
-    node.scrollTo({ left: index * node.clientWidth, behavior: 'smooth' })
     setActiveIndex(index)
   }
 
   return (
     <div className="mb-2 -mx-3 border-t border-border/60 pt-2">
-      <div className="mb-1 flex items-center justify-between px-3">
+      <div className="mb-1 flex items-center justify-between gap-2 px-3">
         <button
           type="button"
           onClick={() => scrollToGroup((activeIndex + 1) % groups.length)}
-          className="min-w-0 text-left"
+          className="flex min-w-0 items-baseline gap-2 text-left"
           aria-label="Switch shortcut section"
         >
           <div className={cn('truncate text-[11px] font-semibold uppercase tracking-[0.14em]', activeTone.label)}>{activeGroup.label}</div>
-          <div className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60">{activeGroup.reason}</div>
+          <div className="hidden truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55 min-[380px]:block">{activeGroup.reason}</div>
         </button>
         <div className="shrink-0 text-[10px] font-medium text-muted-foreground/55">{activeIndex + 1}/{groups.length}</div>
       </div>
       <div
-        ref={railRef}
-        onScroll={event => {
-          const node = event.currentTarget
-          const index = Math.round(node.scrollLeft / Math.max(1, node.clientWidth))
-          if (index !== activeIndex && index >= 0 && index < groups.length) setActiveIndex(index)
-        }}
-        className="overflow-x-auto overscroll-x-contain px-3 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <div className="flex">
-          {groups.map(group => {
-            const tone = promptGroupTone(group.tone)
-            return (
-              <section key={group.id} className="w-full shrink-0 snap-start pr-3">
-                <div className="flex min-h-[36px] flex-wrap items-center gap-1.5">
-                {group.shortcuts.slice(0, 7).map(shortcut => (
-                  <button
-                    key={shortcut.id}
-                    type="button"
-                    onClick={() => onRun(shortcut)}
-                    className={cn('inline-flex min-h-[32px] max-w-[46vw] items-center rounded-full border px-3 py-1.5 text-xs font-medium leading-none transition-colors', tone.pill)}
-                  >
-                    <span className="truncate">{shortcut.label}</span>
-                  </button>
-                ))}
-              </div>
-              </section>
-            )
-          })}
+        <div className="flex min-h-[34px] w-max items-center gap-1.5 pr-3">
+          {activeGroup.shortcuts.slice(0, 8).map(shortcut => (
+            <button
+              key={shortcut.id}
+              type="button"
+              onClick={() => onRun(shortcut)}
+              className={cn('inline-flex min-h-[31px] max-w-[42vw] shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium leading-none transition-colors', activeTone.pill)}
+            >
+              <span className="truncate">{shortcut.label}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
