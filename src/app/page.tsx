@@ -911,17 +911,17 @@ function ActionNeededMenu({
   }
 
   return (
-    <div className="absolute right-0 top-10 z-30 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl">
-      <div className="flex items-start justify-between gap-3 border-b border-border p-3">
-        <div>
+    <div className="fixed inset-x-3 top-[4.75rem] z-50 max-h-[calc(100dvh-9rem)] w-auto overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-10 sm:max-h-none sm:w-[min(24rem,calc(100vw-1.5rem))]">
+      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border p-3">
+        <div className="min-w-0">
           <div className="text-sm font-semibold">Action Needed</div>
           <div className="text-xs text-muted-foreground">Approvals, review items, invites, failed work, and routed tasks.</div>
         </div>
-        <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close action needed">
+        <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close action needed">
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="max-h-[60vh] overflow-y-auto p-2">
+      <div className="max-h-[calc(100dvh-14rem)] overflow-y-auto overflow-x-hidden p-2 sm:max-h-[60vh]">
         {loading && !visible.length ? (
           <div className="flex items-center gap-2 rounded-xl px-3 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading action items…
@@ -934,7 +934,7 @@ function ActionNeededMenu({
           const payload = parseActionPayload(item)
           const canOpen = Boolean(payload.workspaceId || payload.chatUrl || item.actionRequestId)
           return (
-            <div key={item.id} className="mb-2 rounded-xl border border-border bg-card p-3">
+            <div key={item.id} className="mb-2 min-w-0 rounded-xl border border-border bg-card p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">{item.title || actionLabel(item.type)}</div>
@@ -945,7 +945,7 @@ function ActionNeededMenu({
                   </div>
                 </div>
               </div>
-              {item.summary ? <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">{item.summary}</p> : null}
+              {item.summary ? <p className="mt-2 line-clamp-3 break-words text-xs text-muted-foreground">{item.summary}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 {canOpen ? <Button size="sm" onClick={() => openItem(item)}>Open</Button> : null}
                 {!item.synthetic ? <Button size="sm" variant="outline" onClick={() => mark(item.id, 'read')}>Mark read</Button> : null}
@@ -955,7 +955,7 @@ function ActionNeededMenu({
           )
         })}
       </div>
-      <div className="flex items-center justify-between border-t border-border p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-2">
         <button onClick={() => onRefresh()} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
           Refresh
         </button>
