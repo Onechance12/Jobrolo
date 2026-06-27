@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, type ReactNode } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import { cn, getInitials, timeAgo, truncate } from '@/lib/utils'
@@ -237,16 +237,16 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
           <Plus className="w-4 h-4 text-blue-500" /> New private chat
         </button>
 
-        <div className="rounded-2xl border border-border bg-card/70 p-2">
-          <div className="flex items-center justify-between gap-2 px-1">
-            <button
+        <div className="overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-card to-blue-500/10 p-2 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <SectionToggle
+              icon={<FileText className="h-4 w-4" />}
+              label="Command shortcuts"
+              count={shortcuts.length}
+              color="violet"
+              collapsed={shortcutsCollapsed && !editingShortcuts}
               onClick={() => setShortcutsCollapsed(v => !v)}
-              className="flex min-h-[34px] min-w-0 flex-1 items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-sidebar-foreground"
-            >
-              {shortcutsCollapsed && !editingShortcuts ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              Command shortcuts
-              <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-muted-foreground">{shortcuts.length}</span>
-            </button>
+            />
             <button
               onClick={() => { setShortcutsCollapsed(false); setEditingShortcuts(v => !v) }}
               className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
@@ -292,13 +292,14 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
         {visiblePrivateChatCount > 0 && (
           <div>
-            <button
+            <SectionToggle
+              icon={<MessageCircle className="h-4 w-4" />}
+              label="My chats"
+              count={visiblePrivateChatCount}
+              color="blue"
+              collapsed={chatsCollapsed}
               onClick={() => setChatsCollapsed(v => !v)}
-              className="w-full flex items-center gap-1 px-1 mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70 hover:text-muted-foreground transition-colors"
-            >
-              {chatsCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              My chats ({visiblePrivateChatCount})
-            </button>
+            />
             {!chatsCollapsed && (Object.entries(groupedConvos) as Array<[string, ConversationInfo[]]>).map(([label, items]) => (
               items.length > 0 ? (
                 <div key={label} className="mb-1.5">
@@ -328,13 +329,14 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
         )}
 
         <div>
-          <button
+          <SectionToggle
+            icon={<Briefcase className="h-4 w-4" />}
+            label="Client / job chats"
+            count={clientChatGroups.length}
+            color="cyan"
+            collapsed={clientChatsCollapsed}
             onClick={() => setClientChatsCollapsed(v => !v)}
-            className="w-full flex items-center gap-1 px-1 mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70 hover:text-muted-foreground transition-colors"
-          >
-            {clientChatsCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            Client / job chats ({clientChatGroups.length})
-          </button>
+          />
           {!clientChatsCollapsed && clientChatGroups.map(group => {
             const clientCollapsed = clientCollapsedByKey[group.key] ?? false
             const isActiveClient = group.workspaces.some(w => w.id === currentWorkspaceId)
@@ -422,13 +424,14 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
         {otherSharedWorkspaces.length > 0 ? (
           <div>
-            <button
+            <SectionToggle
+              icon={<Users className="h-4 w-4" />}
+              label="Other shared chats"
+              count={otherSharedWorkspaces.length}
+              color="emerald"
+              collapsed={otherChatsCollapsed}
               onClick={() => setOtherChatsCollapsed(v => !v)}
-              className="w-full flex items-center gap-1 px-1 mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70 hover:text-muted-foreground transition-colors"
-            >
-              {otherChatsCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              Other shared chats ({otherSharedWorkspaces.length})
-            </button>
+            />
             {!otherChatsCollapsed && otherSharedWorkspaces.map(w => (
               <button
                 key={w.id}
@@ -476,6 +479,60 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
 function isClientLinkedWorkspace(workspace: WorkspaceInfo) {
   return Boolean(workspace.customerId || workspace.customer || workspace.projectId || workspace.project?.customer)
+}
+
+function SectionToggle({
+  icon,
+  label,
+  count,
+  color,
+  collapsed,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  count: number
+  color: 'blue' | 'cyan' | 'emerald' | 'violet'
+  collapsed: boolean
+  onClick: () => void
+}) {
+  const palette: Record<'blue' | 'cyan' | 'emerald' | 'violet', { wrap: string; icon: string; text: string }> = {
+    blue: {
+      wrap: 'border-blue-500/20 bg-gradient-to-r from-blue-500/15 to-blue-500/5 hover:from-blue-500/20',
+      icon: 'bg-blue-500/20 text-blue-600 dark:text-blue-300',
+      text: 'text-blue-700 dark:text-blue-200',
+    },
+    cyan: {
+      wrap: 'border-cyan-500/20 bg-gradient-to-r from-cyan-500/15 to-cyan-500/5 hover:from-cyan-500/20',
+      icon: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-300',
+      text: 'text-cyan-700 dark:text-cyan-200',
+    },
+    emerald: {
+      wrap: 'border-emerald-500/20 bg-gradient-to-r from-emerald-500/15 to-emerald-500/5 hover:from-emerald-500/20',
+      icon: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300',
+      text: 'text-emerald-700 dark:text-emerald-200',
+    },
+    violet: {
+      wrap: 'border-violet-500/20 bg-gradient-to-r from-violet-500/15 to-violet-500/5 hover:from-violet-500/20',
+      icon: 'bg-violet-500/20 text-violet-600 dark:text-violet-300',
+      text: 'text-violet-700 dark:text-violet-200',
+    },
+  }
+  const selected = palette[color]
+  return (
+    <button
+      onClick={onClick}
+      className={cn('mb-1 flex min-h-[46px] w-full items-center gap-2 rounded-2xl border px-2.5 py-2 text-left shadow-sm transition-colors', selected.wrap)}
+    >
+      <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl', selected.icon)}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className={cn('block truncate text-sm font-semibold', selected.text)}>{label}</span>
+        <span className="block truncate text-[10px] uppercase tracking-wide text-muted-foreground">{collapsed ? 'Tap to expand' : 'Tap to collapse'}</span>
+      </span>
+      <span className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{count}</span>
+      {collapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+    </button>
+  )
 }
 
 function workspaceClientKey(workspace: WorkspaceInfo) {

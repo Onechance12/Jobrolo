@@ -13,7 +13,7 @@ import { FieldCopilotDrawer } from '@/components/jobrolo/field-copilot-drawer'
 import { FieldEntryStrip } from '@/components/jobrolo/field-entry-strip'
 import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
-import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
@@ -921,6 +921,16 @@ function ActionNeededMenu({
     await mark(item.id, 'archived')
   }
 
+  async function deleteItem(item: ActionNeededItem) {
+    setMessage(null)
+    if (!window.confirm('Remove this item from Action Needed? This only clears the notification/card, not the underlying job file unless you approve a destructive action separately.')) return
+    if (item.synthetic || item.id.startsWith('synthetic:')) {
+      saveDismissed(new Set([...dismissedIds, item.id]))
+      return
+    }
+    await mark(item.id, 'archived')
+  }
+
   async function hideVisible() {
     setMessage(null)
     const synthetic = visible.filter(item => item.synthetic || item.id.startsWith('synthetic:')).map(item => item.id)
@@ -1064,6 +1074,9 @@ function ActionNeededMenu({
                     ) : null}
                     <Button size="sm" variant="ghost" onClick={() => openItem(item)}>Ask Jobrolo</Button>
                     <Button size="sm" variant="ghost" onClick={() => hideItem(item)}>{item.synthetic ? 'Hide' : 'Archive'}</Button>
+                    <Button size="sm" variant="ghost" className="text-rose-600 hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200" onClick={() => deleteItem(item)}>
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                    </Button>
                     {!item.synthetic && !item.id.startsWith('synthetic:') ? <Button size="sm" variant="ghost" onClick={() => mark(item.id, 'read')}>Mark read</Button> : null}
                   </div>
                 </div>

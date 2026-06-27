@@ -1,6 +1,6 @@
-import { RoofReportBuilder } from '@/components/jobrolo/roof-report-builder'
+import { redirect } from 'next/navigation'
 
 export default async function RoofReportBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  return <RoofReportBuilder reportId={id} />
+  redirect(`/api/roof-reports/${id}/print`)
 }

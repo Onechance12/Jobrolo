@@ -741,7 +741,12 @@ export function OperatorBriefingCard({ data, content }: { data?: any; content?: 
 export function RoofReportCard({ report }: { report?: RoofReportLike | null }) {
   if (!report) return null
   const id = report.reportId || report.id
-  const builderUrl = report.builderUrl || (id ? `/reports/${id}` : undefined)
+  const askJobroloToEdit = () => {
+    const prompt = id
+      ? `Help me finish this roof report in chat. Review roof report ${id}, tell me what is missing, and ask me for the next piece of information or photos.`
+      : `Help me finish this roof report in chat. Tell me what is missing and ask me for the next piece of information or photos.`
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text: prompt } }))
+  }
   return (
     <Card className="mt-2 w-full overflow-hidden border-cyan-200 bg-cyan-50/50 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20 sm:max-w-xl">
       <CardHeader className="pb-2">
@@ -759,8 +764,8 @@ export function RoofReportCard({ report }: { report?: RoofReportLike | null }) {
         ) : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        {builderUrl ? <Button size="sm" asChild><Link href={builderUrl}>Open builder</Link></Button> : null}
-        {report.printUrl ? <Button size="sm" variant="outline" asChild><Link href={report.printUrl} target="_blank">Preview</Link></Button> : null}
+        <Button size="sm" onClick={askJobroloToEdit}>Finish in chat</Button>
+        {report.printUrl ? <Button size="sm" variant="outline" asChild><Link href={report.printUrl} target="_blank">Preview report</Link></Button> : null}
         {report.shareUrl ? <Button size="sm" variant="outline" asChild><Link href={report.shareUrl} target="_blank">Share</Link></Button> : null}
         {report.pdfUrl ? <Button size="sm" variant="outline" asChild><Link href={report.pdfUrl} target="_blank">PDF</Link></Button> : null}
       </CardFooter>
