@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Bell, Loader2, LockKeyhole, LogIn, Menu, Mic, Plus, Send, UserPlus } from 'lucide-react'
+import { Bell, KeyRound, Loader2, LockKeyhole, LogIn, Menu, Mic, Plus, Send, UserPlus } from 'lucide-react'
 
-type EntryMode = 'signup' | 'login'
+type EntryMode = 'signup' | 'login' | 'join'
 type LobbyMessage = { role: 'user' | 'assistant'; content: string }
 
 function JobroloChatIcon({ size = 'md' }: { size?: 'sm' | 'md' }) {
@@ -54,6 +54,37 @@ function cleanLobbyText(value: string) {
     .replace(/^\s*[_*•-]\s*/gm, '')
     .replace(/[ \t]+$/gm, '')
     .trim()
+}
+
+function extractInviteCode(value: string) {
+  const raw = value.trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    const token = parsed.searchParams.get('token') || parsed.searchParams.get('code') || ''
+    if (token) return token.trim()
+  } catch {
+    // Not a URL; continue with natural-language extraction below.
+  }
+
+  const tokenParam = raw.match(/[?&](?:token|code)=([A-Za-z0-9_-]{10,})/)
+  if (tokenParam?.[1]) return tokenParam[1].trim()
+
+  const phrases = [
+    /(?:one[-\s]?time\s+)?(?:invite\s+)?(?:link\s+)?code\s+(?:is\s+)?([A-Za-z0-9_-]{10,})/i,
+    /(?:invite|joining|join)\s+(?:code|token)\s+(?:is\s+)?([A-Za-z0-9_-]{10,})/i,
+  ]
+  for (const pattern of phrases) {
+    const match = raw.match(pattern)
+    if (match?.[1]) return match[1].trim()
+  }
+
+  const candidates = raw.match(/\b[A-Za-z0-9_-]{20,}\b/g) || []
+  return candidates[candidates.length - 1] || ''
+}
+
+function mentionsInviteJoin(value: string) {
+  return /\b(join|joining|invite|invited|one[-\s]?time|code|token)\b/i.test(value)
 }
 
 function parseLobbyAnswer(content: string) {
@@ -126,6 +157,7 @@ function EntryActionPills({
     { label: 'Client files', prompt: 'Show me how client files work in Jobrolo, with an example from first lead to job packet.' },
     { label: 'Field + photos', prompt: 'Show me how field notes, GPS, inspection photos, and reports work together in Jobrolo.' },
     { label: 'Invites + roles', prompt: 'Explain how inviting employees, crews, subcontractors, and homeowners works, including permissions.' },
+    { label: 'Join with code', prompt: 'I have a Jobrolo invite code or link and need to join an existing company workspace.' },
   ]
   return (
     <div className="mt-3 border-t border-white/10 pt-3">
@@ -142,6 +174,14 @@ function EntryActionPills({
             {item.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => onMode('join')}
+          disabled={disabled}
+          className="rounded-full border border-emerald-300/35 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition hover:border-emerald-200/60 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Join workspace
+        </button>
         <button
           type="button"
           onClick={() => onMode('signup')}
@@ -164,6 +204,7 @@ export default function SignupPage() {
   const [lobbyInput, setLobbyInput] = useState('')
   const [lobbySending, setLobbySending] = useState(false)
   const [lobbyMessages, setLobbyMessages] = useState<LobbyMessage[]>([])
+  const [inviteCode, setInviteCode] = useState('')
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', companyName: '', website: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const scrollRef = useRef<HTMLElement | null>(null)
@@ -250,6 +291,22 @@ export default function SignupPage() {
     setLockedNotice(null)
   }
 
+  const openInvite = (codeOverride?: string) => {
+    const code = extractInviteCode(codeOverride || inviteCode)
+    setError(null)
+    if (!code) {
+      setError('Paste the Jobrolo invite link or one-time invite code first.')
+      setMode('join')
+      return
+    }
+    if (code.length < 20) {
+      setError('That invite code looks too short. Paste the full one-time code or full invite link from the text/email.')
+      setMode('join')
+      return
+    }
+    router.push(`/invite?token=${encodeURIComponent(code)}`)
+  }
+
   const showLocked = (label: string) => {
     setLockedNotice(`${label} unlocks after you sign in and finish setup. For now, I can help you sign in, create a workspace, or explain how Jobrolo works.`)
   }
@@ -261,6 +318,23 @@ export default function SignupPage() {
     if (!overrideText) setLobbyInput('')
     setLockedNotice(null)
     setLobbyMessages(prev => [...prev, { role: 'user', content: text }])
+
+    const inviteFromText = extractInviteCode(text)
+    if (inviteFromText || mentionsInviteJoin(text)) {
+      setInviteCode(inviteFromText)
+      setMode('join')
+      setLobbyMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: inviteFromText
+            ? 'Got it — that looks like a Jobrolo invite code. Use Join workspace below and I’ll take you through the secure invite flow for the right company, chat, and permissions.'
+            : 'Absolutely. If you were invited to an existing company, paste the invite link or one-time code from the text/email. That is how Jobrolo attaches you to the right workspace, chat, and permissions.',
+        },
+      ])
+      return
+    }
+
     setLobbySending(true)
     try {
       const res = await fetch('/api/public/entry-chat', {
@@ -375,6 +449,14 @@ export default function SignupPage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
+                  onClick={() => chooseMode('join')}
+                  className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'join' ? 'border-emerald-300/50 bg-emerald-500/20 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-emerald-300/35 hover:bg-emerald-500/15'}`}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Join workspace
+                </button>
+                <button
+                  type="button"
                   onClick={() => chooseMode('login')}
                   className={`inline-flex min-h-[40px] items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${mode === 'login' ? 'border-blue-300/50 bg-blue-500/25 text-white' : 'border-white/10 bg-white/[0.06] text-slate-200 hover:border-blue-300/35 hover:bg-blue-500/15'}`}
                 >
@@ -455,6 +537,60 @@ export default function SignupPage() {
                 <Button type="submit" disabled={loading} className="mt-5 w-full bg-blue-600 text-white hover:bg-blue-700">
                   {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in…</> : 'Sign in'}
                 </Button>
+              </form>
+            </div>
+          ) : null}
+
+          {mode === 'join' ? (
+            <div className="ml-0 sm:ml-14">
+              <form
+                onSubmit={e => {
+                  e.preventDefault()
+                  openInvite()
+                }}
+                className="rounded-3xl rounded-tl-md border border-emerald-400/20 bg-[#08111f] p-4 shadow-2xl shadow-black/30 sm:p-5"
+              >
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-white">Join an existing workspace.</div>
+                  <div className="mt-1 text-xs leading-relaxed text-slate-400">
+                    Paste the invite link or one-time code from the text/email. Jobrolo will use it to place you in the right company, chat, and role.
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-emerald-300/15 bg-emerald-500/10 p-3 text-xs leading-relaxed text-emerald-100">
+                  You can also type it naturally, like: “My name is Frank Thomas and I’m joining Sons Roofing. My invite code is …”
+                </div>
+                <div className="mt-4">
+                  <Label htmlFor="invite-code" className="text-slate-200">Invite link or one-time code</Label>
+                  <Input
+                    id="invite-code"
+                    type="text"
+                    value={inviteCode}
+                    onChange={e => setInviteCode(e.target.value)}
+                    disabled={loading}
+                    className="mt-1 border-white/10 bg-slate-950 text-white"
+                    placeholder="Paste invite link or code"
+                  />
+                </div>
+                {error ? <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</div> : null}
+                <Button type="submit" disabled={loading} className="mt-5 w-full bg-emerald-600 text-white hover:bg-emerald-700">
+                  Continue with invite
+                </Button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => chooseMode('login')}
+                    className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.08]"
+                  >
+                    I already have an account
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => chooseMode('signup')}
+                    className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.08]"
+                  >
+                    Create my own workspace
+                  </button>
+                </div>
               </form>
             </div>
           ) : null}
