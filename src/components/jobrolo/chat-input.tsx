@@ -107,6 +107,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [shortcuts, setShortcuts] = useState<CommandShortcut[]>(DEFAULT_COMMAND_SHORTCUTS)
+  const [shortcutSheetGroupId, setShortcutSheetGroupId] = useState<string | null>(null)
   const [inspectionPickerOpen, setInspectionPickerOpen] = useState(false)
   const [inspectionSectionId, setInspectionSectionId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
@@ -239,8 +240,6 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       }
       setText('')
       setPendingFiles([])
-      setInspectionPickerOpen(false)
-      setInspectionSectionId(null)
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Upload did not finish. I kept the file attached so you can try again.')
     } finally {
@@ -306,10 +305,38 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     }
     insertPrompt(shortcut.prompt)
   }
+  const promptShortcutEdit = (shortcut: CommandShortcut) => {
+    setShortcutSheetGroupId(null)
+    insertPrompt(`Edit shortcut "${shortcut.label}". New title: ${shortcut.label}. New prompt: ${shortcut.prompt}`)
+  }
+  const promptShortcutCreate = (group: PromptGroup) => {
+    setShortcutSheetGroupId(null)
+    insertPrompt(`Add a new ${group.label.toLowerCase()} shortcut. Title: . Prompt: .`)
+  }
+  const deleteShortcut = async (shortcut: CommandShortcut) => {
+    const isDefault = DEFAULT_COMMAND_SHORTCUTS.some(base => base.id === shortcut.id)
+    if (isDefault || shortcut.id.startsWith('custom-')) {
+      setShortcutSheetGroupId(null)
+      insertPrompt(`Delete shortcut "${shortcut.label}".`)
+      return
+    }
+    try {
+      const res = await fetch(`/api/command-shortcuts/${encodeURIComponent(shortcut.id)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Could not delete shortcut')
+      const data = await res.json()
+      const remote = parseStoredCommandShortcuts(JSON.stringify(data.shortcuts ?? []))
+      setShortcuts(remote)
+      window.localStorage.setItem(COMMAND_SHORTCUTS_KEY, JSON.stringify(remote))
+      window.dispatchEvent(new Event(COMMAND_SHORTCUTS_UPDATED_EVENT))
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Could not delete shortcut.')
+    }
+  }
 
   const startListening = () => { if (listening) { recognitionRef.current?.stop(); setListening(false); return } const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition; if (!SR) return; const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'; let ft = textRef.current; rec.onresult = (e: any) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const tr = e.results[i][0].transcript; if (e.results[i].isFinal) ft += tr; else interim += tr } setText(ft); setInterimText(interim) }; rec.onend = () => setListening(false); rec.onerror = () => setListening(false); rec.start(); recognitionRef.current = rec; setListening(true) }
   const [interimText, setInterimText] = useState('')
   const promptGroups = promptGroupsFor(mode, shortcuts)
+  const activeShortcutGroup = shortcutSheetGroupId ? promptGroups.find(group => group.id === shortcutSheetGroupId) ?? null : null
 
   return (
     <div className="border-t border-border bg-card px-3 sm:px-4 pt-2.5 pb-2.5">
@@ -324,7 +351,20 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           onClose={() => setInspectionPickerOpen(false)}
         />
       ) : null}
-      {!pendingFiles.length && !listening ? <PromptAssistantRail groups={promptGroups} onRun={runShortcut} /> : null}
+      {!pendingFiles.length && !listening ? <PromptAssistantRail groups={promptGroups} onOpenGroup={group => setShortcutSheetGroupId(group.id)} /> : null}
+      {activeShortcutGroup ? (
+        <ShortcutGroupSheet
+          group={activeShortcutGroup}
+          onRun={(shortcut) => {
+            setShortcutSheetGroupId(null)
+            runShortcut(shortcut)
+          }}
+          onEdit={promptShortcutEdit}
+          onDelete={deleteShortcut}
+          onAdd={() => promptShortcutCreate(activeShortcutGroup)}
+          onClose={() => setShortcutSheetGroupId(null)}
+        />
+      ) : null}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
       <div className="flex items-end gap-2">
         <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
@@ -432,11 +472,11 @@ function InspectionPhotoIntakeCard({
       <div className="mb-2 flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-50">Inspection photo capture</div>
-          <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Pick what these photos are, then take or upload them.</div>
+          <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Stays open while this inspection is active. Pick a section, then take or upload photos.</div>
         </div>
         <button type="button" onClick={onClose} className="inline-flex min-h-[34px] items-center gap-1 rounded-full px-2 text-xs font-medium text-emerald-950/70 hover:bg-emerald-100 dark:text-emerald-100/80 dark:hover:bg-emerald-900/40" aria-label="Close inspection photo capture">
           <X className="h-4 w-4" />
-          Close
+          Cancel
         </button>
       </div>
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
@@ -467,6 +507,9 @@ function InspectionPhotoIntakeCard({
           Upload
         </button>
       </div>
+      <button type="button" onClick={onClose} className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center rounded-xl border border-emerald-300 bg-background/80 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 dark:border-emerald-900/70 dark:text-emerald-100 dark:hover:bg-emerald-950/40">
+        Complete inspection photo set
+      </button>
       <div className="mt-2 text-[11px] text-emerald-900/75 dark:text-emerald-100/70">
         {selected ? `Selected: ${selected.label}. Photos will be tagged with this section when you send.` : 'Select a section first so Jobrolo does not have to guess what these photos are.'}
       </div>
@@ -589,61 +632,83 @@ function promptGroupTone(tone: PromptTone) {
   }
 }
 
-function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: (shortcut: CommandShortcut) => void }) {
-  const [activeIndex, setActiveIndex] = useState(0)
+function PromptAssistantRail({ groups, onOpenGroup }: { groups: PromptGroup[]; onOpenGroup: (group: PromptGroup) => void }) {
   if (!groups.length) return null
-  const activeGroup = groups[Math.min(activeIndex, groups.length - 1)] ?? groups[0]
-  const activeTone = promptGroupTone(activeGroup.tone)
-
-  const scrollToGroup = (index: number) => {
-    setActiveIndex((index + groups.length) % groups.length)
-  }
 
   return (
-    <div className="mb-1 -mx-3 pt-1">
-      <div className="mb-1 flex items-center justify-between gap-2 px-3">
-        <div className="flex min-w-0 items-baseline gap-2 py-1">
-          <div className={cn('truncate text-[11px] font-semibold uppercase tracking-[0.14em]', activeTone.label)}>{activeGroup.label}</div>
-          <div className="hidden truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55 min-[380px]:block">{activeGroup.reason}</div>
-        </div>
-        {groups.length > 1 ? (
-          <div className="flex shrink-0 items-center gap-1">
+    <div className="mb-1 -mx-3 overflow-x-auto overscroll-x-contain px-3 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex min-h-[34px] w-max items-center gap-1.5 pr-3">
+        {groups.map(group => {
+          const tone = promptGroupTone(group.tone)
+          return (
             <button
+              key={group.id}
               type="button"
-              onClick={() => scrollToGroup(activeIndex - 1)}
-              className="grid h-8 w-8 place-items-center rounded-full border border-border/70 bg-muted/40 text-base font-semibold text-muted-foreground transition-colors hover:bg-muted"
-              aria-label="Previous shortcut section"
+              onClick={() => onOpenGroup(group)}
+              className={cn('inline-flex min-h-[32px] max-w-[48vw] shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors', tone.pill)}
             >
-              ‹
+              <span className="truncate">{group.label}</span>
+              <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{group.shortcuts.length}</span>
             </button>
-            <button
-              type="button"
-              onClick={() => scrollToGroup(activeIndex + 1)}
-              className="grid h-8 w-8 place-items-center rounded-full border border-border/70 bg-muted/40 text-base font-semibold text-muted-foreground transition-colors hover:bg-muted"
-              aria-label="Next shortcut section"
-            >
-              ›
-            </button>
-          </div>
-        ) : null}
-      </div>
-      <div
-        className="overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        <div className="flex min-h-[34px] w-max items-center gap-1.5 pr-3">
-          {activeGroup.shortcuts.slice(0, 8).map(shortcut => (
-            <button
-              key={shortcut.id}
-              type="button"
-              onClick={() => onRun(shortcut)}
-              className={cn('inline-flex min-h-[31px] max-w-[42vw] shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium leading-none transition-colors', activeTone.pill)}
-            >
-              <span className="truncate">{shortcut.label}</span>
-            </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
     </div>
+  )
+}
+
+function ShortcutGroupSheet({
+  group,
+  onRun,
+  onEdit,
+  onDelete,
+  onAdd,
+  onClose,
+}: {
+  group: PromptGroup
+  onRun: (shortcut: CommandShortcut) => void
+  onEdit: (shortcut: CommandShortcut) => void
+  onDelete: (shortcut: CommandShortcut) => void
+  onAdd: () => void
+  onClose: () => void
+}) {
+  const tone = promptGroupTone(group.tone)
+  return (
+    <>
+      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} />
+      <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+84px)] z-40 mx-auto max-h-[66dvh] max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <div className={cn('text-xs font-semibold uppercase tracking-[0.16em]', tone.label)}>{group.label}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{group.reason}. Tap a shortcut to insert it into chat.</div>
+          </div>
+          <button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full hover:bg-muted" aria-label="Close shortcuts">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[46dvh] overflow-y-auto p-3">
+          <div className="space-y-2">
+            {group.shortcuts.map(shortcut => (
+              <div key={shortcut.id} className="rounded-xl border border-border bg-background/60 p-3">
+                <button type="button" onClick={() => onRun(shortcut)} className="block w-full text-left">
+                  <div className="text-sm font-semibold text-foreground">{shortcut.label}</div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{shortcut.prompt}</div>
+                </button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => onRun(shortcut)} className={cn('rounded-full border px-3 py-1.5 text-xs font-medium', tone.pill)}>Use</button>
+                  <button type="button" onClick={() => onEdit(shortcut)} className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">Edit</button>
+                  <button type="button" onClick={() => onDelete(shortcut)} className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-2 border-t border-border p-3">
+          <button type="button" onClick={onAdd} className="min-h-[40px] flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">Add shortcut</button>
+          <button type="button" onClick={onClose} className="min-h-[40px] rounded-xl border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted">Done</button>
+        </div>
+      </div>
+    </>
   )
 }
 

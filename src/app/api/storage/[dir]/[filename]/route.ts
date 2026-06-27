@@ -61,13 +61,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ dir
   if (!allowedDocument) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   try {
-    const storagePath = safeDir === 'thumbnails' ? document.thumbnailPath : document.filePath
-    const buffer = storagePath
-      ? await readStoredFile(storagePath)
-      : await readFile(safeName, safeDir)
+    const primaryPath = safeDir === 'thumbnails' ? document.thumbnailPath : document.filePath
+    let storagePath = primaryPath
+    let servingOriginalForMissingThumbnail = false
+    let buffer: Buffer
+    try {
+      buffer = storagePath
+        ? await readStoredFile(storagePath)
+        : await readFile(safeName, safeDir)
+    } catch (err) {
+      if (safeDir !== 'thumbnails' || !document.filePath) throw err
+      // Legacy local thumbnail paths from before R2 can point at files that no
+      // longer exist on Render. Fall back to the original authenticated file so
+      // old photo cards do not break with noisy ENOENT errors.
+      storagePath = document.filePath
+      buffer = await readStoredFile(storagePath)
+      servingOriginalForMissingThumbnail = true
+      console.warn(`[storage] thumbnail missing; serving original fallback documentId=${document.id} filename=${safeName}`)
+    }
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
-        'Content-Type': contentType(safeName, safeDir === 'thumbnails' ? 'image/jpeg' : document.mimeType),
+        'Content-Type': contentType(
+          servingOriginalForMissingThumbnail ? (document.originalName || safeName) : safeName,
+          servingOriginalForMissingThumbnail ? document.mimeType : safeDir === 'thumbnails' ? 'image/jpeg' : document.mimeType,
+        ),
         'Content-Length': String(buffer.length),
         'Cache-Control': 'private, max-age=300',
         'Content-Disposition': `inline; filename="${encodeURIComponent(document.originalName || safeName)}"`,

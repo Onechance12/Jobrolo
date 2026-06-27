@@ -269,6 +269,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('document_link_review')) {
     return <DocumentLinkReviewCard data={contextData as any} />
   }
+  if (cardType.includes('scope_breakdown')) {
+    return <ScopeBreakdownCard data={contextData as any} />
+  }
   if (cardType.includes('document_review')) {
     return <DocumentReviewCard data={contextData as any} />
   }
@@ -294,6 +297,94 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
     return <InboxActionCard item={contextData as InboxLike} />
   }
   return null
+}
+
+function money(value: unknown) {
+  const num = typeof value === 'number' ? value : Number(value ?? 0)
+  if (!Number.isFinite(num)) return '$0.00'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num)
+}
+
+function ScopeBreakdownCard({ data }: { data: any }) {
+  const lineItems = Array.isArray(data.lineItems) ? data.lineItems : []
+  const trades = Array.isArray(data.trades) ? data.trades : []
+  const shownItems = lineItems.slice(0, 8)
+  const customerName = textValue(data.customer?.name)
+  const projectTitle = textValue(data.project?.title)
+  const title = textValue(data.filename) || projectTitle || customerName || 'Scope breakdown'
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-sm text-emerald-950 dark:text-emerald-100">
+              <ClipboardCheck className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">Scope Breakdown</span>
+            </CardTitle>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{title}</p>
+          </div>
+          <Badge variant="secondary" className="text-[10px]">{lineItems.length} items</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <MetricTile label="Selected RCV" value={money(data.selectedRcv)} />
+          <MetricTile label="Deductible" value={money(data.deductible)} />
+          <MetricTile label="Offset pool" value={money(data.offsetPoolTotal)} />
+          <MetricTile label="Out of pocket" value={money(data.remainingOutOfPocket)} />
+        </div>
+        {trades.length ? (
+          <div className="rounded-xl border bg-background/70 p-3">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Trade breakdown</div>
+            <div className="space-y-2">
+              {trades.slice(0, 5).map((trade: any) => (
+                <div key={String(trade.trade)} className="flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-foreground">{trade.trade || 'General'}</div>
+                    <div className="text-muted-foreground">{trade.selectedCount ?? trade.itemCount ?? 0} included{trade.excludedCount ? ` · ${trade.excludedCount} excluded` : ''}</div>
+                  </div>
+                  <div className="shrink-0 font-semibold text-foreground">{money(trade.rcv)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {shownItems.length ? (
+          <div className="rounded-xl border bg-background/70 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium uppercase tracking-wide text-muted-foreground">Included line items</span>
+              {lineItems.length > shownItems.length ? <span className="text-muted-foreground">Showing {shownItems.length} of {lineItems.length}</span> : null}
+            </div>
+            <div className="space-y-2">
+              {shownItems.map((item: any, index: number) => (
+                <div key={item.id ?? `${item.lineNumber}-${index}`} className="rounded-lg border bg-background/60 p-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground">#{item.lineNumber ?? index + 1} {item.description || 'Line item'}</div>
+                      <div className="mt-0.5 text-muted-foreground">{[item.quantity, item.unit, item.trade, item.category].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    <div className="shrink-0 font-semibold text-foreground">{money(item.rcv ?? item.total)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2 text-xs text-muted-foreground">
+        Ask “exclude line 4” or “what’s my deductible pool?” and I’ll update this from saved scope data.
+      </CardFooter>
+    </Card>
+  )
+}
+
+function MetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-background/70 p-2">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-semibold text-foreground">{value}</div>
+    </div>
+  )
 }
 
 export function FieldBriefingCard({

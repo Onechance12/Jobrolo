@@ -71,13 +71,13 @@ function extractOutputText(data: any): string {
 }
 
 function addSource(out: WebSearchSource[], value: any) {
-  const url = value?.url || value?.uri || value?.link
+  const url = value?.url || value?.uri || value?.link || value?.source_website_url
   if (!url || typeof url !== 'string') return
   if (out.some(existing => existing.url === url)) return
   out.push({
-    title: value?.title || value?.name || null,
+    title: value?.title || value?.name || value?.caption || null,
     url,
-    snippet: value?.snippet || value?.text || null,
+    snippet: value?.snippet || value?.text || value?.caption || null,
     source: value?.source || value?.type || null,
   })
 }
@@ -85,6 +85,7 @@ function addSource(out: WebSearchSource[], value: any) {
 function extractSources(data: any): WebSearchSource[] {
   const out: WebSearchSource[] = []
   for (const item of Array.isArray(data?.output) ? data.output : []) {
+    for (const result of Array.isArray(item?.results) ? item.results : []) addSource(out, result)
     for (const source of Array.isArray(item?.action?.sources) ? item.action.sources : []) addSource(out, source)
     for (const content of Array.isArray(item?.content) ? item.content : []) {
       for (const annotation of Array.isArray(content?.annotations) ? content.annotations : []) addSource(out, annotation)

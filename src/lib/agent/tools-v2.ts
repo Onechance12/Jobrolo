@@ -61,7 +61,7 @@ export interface ToolDef {
   execute: (args: any, contractorId: string, ctx: ToolContext) => Promise<ToolResult>
 }
 
-const TRUSTED_DIRECT_TOOLS = new Set(['create_customer'])
+const TRUSTED_DIRECT_TOOLS = new Set(['create_customer', 'link_document_to_project'])
 const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
 const COMPANY_PROFILE_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator'])
 const PROJECT_CHAT_TYPES = [
@@ -85,10 +85,20 @@ const PROJECT_CHAT_TYPE_SCHEMA = z.enum(PROJECT_CHAT_TYPES)
 type ProjectChatType = (typeof PROJECT_CHAT_TYPES)[number]
 const CREW_LIKE_CHAT_TYPES = new Set<ProjectChatType>(['crew', 'roofing_crew', 'gutter_crew', 'window_crew', 'siding_crew', 'field_crew', 'subcontractor'])
 
-function canRunDirectWithoutApproval(name: string, ctx: ToolContext) {
+function canRunDirectWithoutApproval(name: string, ctx: ToolContext, args?: Record<string, unknown>) {
   if (!ctx.trustedDirectExecution) return false
   if (!TRUSTED_DIRECT_TOOLS.has(name)) return false
-  return TRUSTED_DIRECT_ROLES.has(normalizeRole(ctx.userRole))
+  if (!TRUSTED_DIRECT_ROLES.has(normalizeRole(ctx.userRole))) return false
+
+  if (name === 'link_document_to_project') {
+    const role = String(args?.role ?? '').toLowerCase()
+    const safeFieldRoles = new Set(['inspection_photo', 'report_photo', 'evidence'])
+    const documentId = typeof args?.documentId === 'string' ? args.documentId : ''
+    if (!safeFieldRoles.has(role)) return false
+    if (!documentId || !ctx.documentIds?.includes(documentId)) return false
+  }
+
+  return true
 }
 
 function canManageCompanyProfile(ctx: ToolContext) {
@@ -3121,9 +3131,29 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
       const { getScopeBreakdown } = await import('@/lib/scope-manager')
+      const doc = await db.document.findFirst({
+        where: { id: args.documentId, contractorId },
+        select: { id: true, originalName: true, fileType: true, aiSummary: true, customerId: true, projectId: true },
+      })
+      const [customer, project] = await Promise.all([
+        doc?.customerId ? db.customer.findFirst({ where: { id: doc.customerId, contractorId }, select: { id: true, name: true } }) : null,
+        doc?.projectId ? db.project.findFirst({ where: { id: doc.projectId, contractorId }, select: { id: true, title: true } }) : null,
+      ])
       const breakdown = await getScopeBreakdown(args.documentId, contractorId)
       if (!breakdown) return { success: false, data: null, error: 'No line items found in this document.' }
-      return { success: true, data: breakdown }
+      return {
+        success: true,
+        data: {
+          ...breakdown,
+          cardType: 'scope_breakdown',
+          documentId: args.documentId,
+          filename: doc?.originalName ?? null,
+          fileType: doc?.fileType ?? null,
+          summary: doc?.aiSummary ?? null,
+          customer,
+          project,
+        },
+      }
     },
   },
   {
@@ -4586,7 +4616,7 @@ export async function executeTool(
 
   // SECURITY: Enforce requiresApproval flag — dangerous tools must not execute autonomously.
   // Instead of dead-ending, create an approval replay request that can be approved from a chat card.
-  if (tool.requiresApproval && !ctx.approved && !canRunDirectWithoutApproval(name, ctx)) {
+  if (tool.requiresApproval && !ctx.approved && !canRunDirectWithoutApproval(name, ctx, parsed.data)) {
     console.warn(`[tools-v2] APPROVAL REQUIRED: Tool '${name}' contractorId=${contractorId}`)
     const requestedRole = approvalRoleForTool(name)
     const approvalDetails = await buildApprovalDetailsForTool(name, parsed.data, contractorId).catch(err => {
@@ -4655,7 +4685,7 @@ export async function executeTool(
   }
 
   try {
-    if (tool.requiresApproval && ctx.approved && !ctx.approvalActionRequestId && !canRunDirectWithoutApproval(name, ctx)) {
+    if (tool.requiresApproval && ctx.approved && !ctx.approvalActionRequestId && !canRunDirectWithoutApproval(name, ctx, parsed.data)) {
       return { success: false, data: null, error: 'Trusted approval context required' }
     }
     if (tool.requiresApproval && ctx.approved && ctx.approvalActionRequestId) {

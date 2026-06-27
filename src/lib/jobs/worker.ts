@@ -298,6 +298,7 @@ function deriveCardFromToolResults(iterations: Array<{ toolResults?: Array<{ dat
     'field_inspection_lead',
     'canvassing_lead',
     'roof_report',
+    'scope_breakdown',
     'document_review',
     'price_sheet_review',
     'approval_request',
