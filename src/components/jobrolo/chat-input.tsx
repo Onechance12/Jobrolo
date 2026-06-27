@@ -608,26 +608,36 @@ function promptGroupTone(tone: PromptTone) {
       return {
         label: 'text-emerald-700 dark:text-emerald-200',
         pill: 'border-emerald-400/35 bg-emerald-500/10 text-emerald-950 hover:bg-emerald-500/18 dark:text-emerald-100',
+        card: 'border-emerald-400/45 bg-emerald-500/[0.07] shadow-[0_0_22px_rgba(16,185,129,0.16)] hover:bg-emerald-500/[0.12] hover:shadow-[0_0_30px_rgba(16,185,129,0.24)]',
+        add: 'bg-emerald-600 text-white hover:bg-emerald-700',
       }
     case 'sales':
       return {
         label: 'text-blue-700 dark:text-blue-200',
         pill: 'border-blue-400/25 bg-blue-500/10 text-blue-950 hover:bg-blue-500/18 dark:text-blue-100',
+        card: 'border-blue-400/45 bg-blue-500/[0.07] shadow-[0_0_22px_rgba(59,130,246,0.16)] hover:bg-blue-500/[0.12] hover:shadow-[0_0_30px_rgba(59,130,246,0.24)]',
+        add: 'bg-blue-600 text-white hover:bg-blue-700',
       }
     case 'files':
       return {
         label: 'text-amber-700 dark:text-amber-200',
         pill: 'border-amber-400/25 bg-amber-500/10 text-amber-950 hover:bg-amber-500/18 dark:text-amber-100',
+        card: 'border-amber-400/45 bg-amber-500/[0.07] shadow-[0_0_22px_rgba(245,158,11,0.14)] hover:bg-amber-500/[0.12] hover:shadow-[0_0_30px_rgba(245,158,11,0.22)]',
+        add: 'bg-amber-500 text-black hover:bg-amber-400',
       }
     case 'company':
       return {
         label: 'text-violet-700 dark:text-violet-200',
         pill: 'border-violet-400/25 bg-violet-500/10 text-violet-950 hover:bg-violet-500/18 dark:text-violet-100',
+        card: 'border-violet-400/45 bg-violet-500/[0.07] shadow-[0_0_22px_rgba(139,92,246,0.16)] hover:bg-violet-500/[0.12] hover:shadow-[0_0_30px_rgba(139,92,246,0.24)]',
+        add: 'bg-violet-600 text-white hover:bg-violet-700',
       }
     default:
       return {
         label: 'text-slate-700 dark:text-slate-200',
         pill: 'border-slate-400/25 bg-slate-500/10 text-slate-950 hover:bg-slate-500/18 dark:text-slate-100',
+        card: 'border-slate-400/35 bg-slate-500/[0.07] shadow-[0_0_20px_rgba(148,163,184,0.12)] hover:bg-slate-500/[0.12] hover:shadow-[0_0_28px_rgba(148,163,184,0.2)]',
+        add: 'bg-slate-700 text-white hover:bg-slate-600',
       }
   }
 }
@@ -673,39 +683,50 @@ function ShortcutGroupSheet({
   onClose: () => void
 }) {
   const tone = promptGroupTone(group.tone)
+  const [editing, setEditing] = useState(false)
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} />
-      <div className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+84px)] z-40 mx-auto max-h-[66dvh] max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+      <div className="fixed inset-0 z-30 bg-black/25 backdrop-blur-[1px]" onClick={onClose} />
+      <div className="fixed inset-x-2 top-[calc(env(safe-area-inset-top)+84px)] bottom-[calc(env(safe-area-inset-bottom)+86px)] z-40 mx-auto flex max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card/98 shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <div className={cn('text-xs font-semibold uppercase tracking-[0.16em]', tone.label)}>{group.label}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">{group.reason}. Tap a shortcut to insert it into chat.</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {editing ? 'Edit this section, add prompts, or remove ones you do not use.' : `${group.reason}. Tap a prompt to use it.`}
+            </div>
           </div>
-          <button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full hover:bg-muted" aria-label="Close shortcuts">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button type="button" onClick={() => setEditing(value => !value)} className="min-h-[32px] rounded-full border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted">
+              {editing ? 'Done editing' : 'Edit'}
+            </button>
+            <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full hover:bg-muted" aria-label="Close shortcuts">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <div className="max-h-[46dvh] overflow-y-auto p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <div className="space-y-2">
             {group.shortcuts.map(shortcut => (
-              <div key={shortcut.id} className="rounded-xl border border-border bg-background/60 p-3">
-                <button type="button" onClick={() => onRun(shortcut)} className="block w-full text-left">
+              <div key={shortcut.id} className={cn('rounded-2xl border p-3 transition-all', tone.card)}>
+                <button type="button" onClick={() => !editing && onRun(shortcut)} className="block min-h-[68px] w-full text-left">
                   <div className="text-sm font-semibold text-foreground">{shortcut.label}</div>
                   <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{shortcut.prompt}</div>
                 </button>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => onRun(shortcut)} className={cn('rounded-full border px-3 py-1.5 text-xs font-medium', tone.pill)}>Use</button>
-                  <button type="button" onClick={() => onEdit(shortcut)} className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">Edit</button>
-                  <button type="button" onClick={() => onDelete(shortcut)} className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">Delete</button>
-                </div>
+                {editing ? (
+                  <div className="mt-2 flex flex-wrap gap-2 border-t border-white/10 pt-2">
+                    <button type="button" onClick={() => onEdit(shortcut)} className="rounded-full border border-border bg-background/60 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted">Edit prompt</button>
+                    <button type="button" onClick={() => onDelete(shortcut)} className="rounded-full border border-border bg-background/60 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">Delete</button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
         </div>
-        <div className="flex gap-2 border-t border-border p-3">
-          <button type="button" onClick={onAdd} className="min-h-[40px] flex-1 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">Add shortcut</button>
-          <button type="button" onClick={onClose} className="min-h-[40px] rounded-xl border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted">Done</button>
+        <div className="flex gap-2 border-t border-border bg-card/95 p-3">
+          {editing ? (
+            <button type="button" onClick={onAdd} className={cn('min-h-[40px] flex-1 rounded-xl px-3 text-sm font-semibold', tone.add)}>Add shortcut</button>
+          ) : null}
+          <button type="button" onClick={onClose} className={cn('min-h-[40px] rounded-xl border border-border px-3 text-sm font-semibold text-muted-foreground hover:bg-muted', !editing && 'flex-1')}>Done</button>
         </div>
       </div>
     </>
