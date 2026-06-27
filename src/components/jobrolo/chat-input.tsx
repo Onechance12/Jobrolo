@@ -1,7 +1,7 @@
 'use client'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square, Building2, Globe2, Users, MapPin, AlertCircle, Briefcase, UserPlus } from 'lucide-react'
+import { Paperclip, Camera, Send, X, Mic, Plus, FileText, Square } from 'lucide-react'
 import { cn, formatFileSize, isImageFile } from '@/lib/utils'
 import type { MessageAttachment } from '@/lib/types'
 import {
@@ -558,45 +558,29 @@ function promptGroupTone(tone: PromptTone) {
   switch (tone) {
     case 'field':
       return {
-        shell: 'border-emerald-400/35 bg-emerald-500/10 dark:bg-emerald-950/30',
-        icon: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
-        pill: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-950 hover:bg-emerald-500/18 dark:text-emerald-100',
+        label: 'text-emerald-700 dark:text-emerald-200',
+        pill: 'border-emerald-400/35 bg-emerald-500/10 text-emerald-950 hover:bg-emerald-500/18 dark:text-emerald-100',
       }
     case 'sales':
       return {
-        shell: 'border-blue-400/30 bg-blue-500/10 dark:bg-blue-950/25',
-        icon: 'bg-blue-500/15 text-blue-700 dark:text-blue-200',
+        label: 'text-blue-700 dark:text-blue-200',
         pill: 'border-blue-400/25 bg-blue-500/10 text-blue-950 hover:bg-blue-500/18 dark:text-blue-100',
       }
     case 'files':
       return {
-        shell: 'border-amber-400/35 bg-amber-500/10 dark:bg-amber-950/25',
-        icon: 'bg-amber-500/15 text-amber-700 dark:text-amber-200',
+        label: 'text-amber-700 dark:text-amber-200',
         pill: 'border-amber-400/25 bg-amber-500/10 text-amber-950 hover:bg-amber-500/18 dark:text-amber-100',
       }
     case 'company':
       return {
-        shell: 'border-violet-400/30 bg-violet-500/10 dark:bg-violet-950/25',
-        icon: 'bg-violet-500/15 text-violet-700 dark:text-violet-200',
+        label: 'text-violet-700 dark:text-violet-200',
         pill: 'border-violet-400/25 bg-violet-500/10 text-violet-950 hover:bg-violet-500/18 dark:text-violet-100',
       }
     default:
       return {
-        shell: 'border-slate-400/25 bg-slate-500/10 dark:bg-slate-900/35',
-        icon: 'bg-slate-500/15 text-slate-700 dark:text-slate-200',
+        label: 'text-slate-700 dark:text-slate-200',
         pill: 'border-slate-400/25 bg-slate-500/10 text-slate-950 hover:bg-slate-500/18 dark:text-slate-100',
       }
-  }
-}
-
-function promptGroupIcon(tone: PromptTone) {
-  const cls = 'h-4 w-4'
-  switch (tone) {
-    case 'field': return <MapPin className={cls} />
-    case 'sales': return <Users className={cls} />
-    case 'files': return <FileText className={cls} />
-    case 'company': return <Building2 className={cls} />
-    default: return <Briefcase className={cls} />
   }
 }
 
@@ -615,31 +599,18 @@ function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: 
   }
 
   return (
-    <div className="mb-2">
-      <div className="mb-1.5 flex items-center justify-between px-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full', activeTone.icon)}>
-            {promptGroupIcon(activeGroup.tone)}
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-xs font-semibold leading-tight text-foreground">{activeGroup.label}</div>
-            <div className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">{activeGroup.reason}</div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1" aria-label={`${groups.length} prompt sections`}>
-          {groups.map((group, index) => (
-            <button
-              key={group.id}
-              type="button"
-              onClick={() => scrollToGroup(index)}
-              aria-label={`Show ${group.label} prompts`}
-              className={cn(
-                'h-1.5 rounded-full transition-all',
-                index === activeIndex ? 'w-4 bg-foreground/70' : 'w-1.5 bg-muted-foreground/30',
-              )}
-            />
-          ))}
-        </div>
+    <div className="mb-2 -mx-3 border-t border-border/60 pt-2">
+      <div className="mb-1 flex items-center justify-between px-3">
+        <button
+          type="button"
+          onClick={() => scrollToGroup((activeIndex + 1) % groups.length)}
+          className="min-w-0 text-left"
+          aria-label="Switch shortcut section"
+        >
+          <div className={cn('truncate text-[11px] font-semibold uppercase tracking-[0.14em]', activeTone.label)}>{activeGroup.label}</div>
+          <div className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60">{activeGroup.reason}</div>
+        </button>
+        <div className="shrink-0 text-[10px] font-medium text-muted-foreground/55">{activeIndex + 1}/{groups.length}</div>
       </div>
       <div
         ref={railRef}
@@ -648,25 +619,25 @@ function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: 
           const index = Math.round(node.scrollLeft / Math.max(1, node.clientWidth))
           if (index !== activeIndex && index >= 0 && index < groups.length) setActiveIndex(index)
         }}
-        className="-mx-3 overflow-x-auto px-3 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="overflow-x-auto overscroll-x-contain px-3 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <div className="flex gap-3">
+        <div className="flex">
           {groups.map(group => {
             const tone = promptGroupTone(group.tone)
             return (
-              <section key={group.id} className={cn('w-full shrink-0 snap-start rounded-2xl border px-2 py-2 shadow-sm backdrop-blur', tone.shell)}>
-                <div className="flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {group.shortcuts.slice(0, 7).map(shortcut => (
-                    <button
-                      key={shortcut.id}
-                      type="button"
-                      onClick={() => onRun(shortcut)}
-                      className={cn('inline-flex min-h-[34px] shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors', tone.pill)}
-                    >
-                      <span className="truncate">{shortcut.label}</span>
-                    </button>
-                  ))}
-                </div>
+              <section key={group.id} className="w-full shrink-0 snap-start pr-3">
+                <div className="flex min-h-[36px] flex-wrap items-center gap-1.5">
+                {group.shortcuts.slice(0, 7).map(shortcut => (
+                  <button
+                    key={shortcut.id}
+                    type="button"
+                    onClick={() => onRun(shortcut)}
+                    className={cn('inline-flex min-h-[32px] max-w-[46vw] items-center rounded-full border px-3 py-1.5 text-xs font-medium leading-none transition-colors', tone.pill)}
+                  >
+                    <span className="truncate">{shortcut.label}</span>
+                  </button>
+                ))}
+              </div>
               </section>
             )
           })}
@@ -674,24 +645,6 @@ function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: 
       </div>
     </div>
   )
-}
-
-function shortcutIcon(cmd: CommandShortcut) {
-  const cls = 'w-5 h-5'
-  switch (cmd.icon) {
-    case 'attention': return <AlertCircle className={cn(cls, 'text-amber-600 dark:text-amber-300')} />
-    case 'building': return <Building2 className={cn(cls, 'text-blue-600 dark:text-blue-300')} />
-    case 'globe': return <Globe2 className={cn(cls, 'text-emerald-600 dark:text-emerald-300')} />
-    case 'field': return <MapPin className={cn(cls, 'text-emerald-600 dark:text-emerald-300')} />
-    case 'client': return <Users className={cn(cls, 'text-blue-600 dark:text-blue-300')} />
-    case 'job': return <Briefcase className={cn(cls, 'text-cyan-600 dark:text-cyan-300')} />
-    case 'crew': return <Users className={cn(cls, 'text-violet-600 dark:text-violet-300')} />
-    case 'customer': return <Users className={cn(cls, 'text-pink-600 dark:text-pink-300')} />
-    case 'invite': return <UserPlus className={cn(cls, 'text-violet-600 dark:text-violet-300')} />
-    case 'template': return <FileText className={cn(cls, 'text-violet-600 dark:text-violet-300')} />
-    case 'roof': return <FileText className={cn(cls, 'text-cyan-600 dark:text-cyan-300')} />
-    default: return <FileText className={cn(cls, 'text-blue-600 dark:text-blue-300')} />
-  }
 }
 
 function PendingFileChip({ file, onRemove }: { file: File; onRemove: () => void }) {
