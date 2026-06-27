@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { db } from '@/lib/db'
 import { requireContext } from '@/lib/security/context'
 import { checkBodySize } from '@/lib/security/body-size'
 import { createRoleNotification, listNotifications } from '@/lib/notifications'
+import { hasCompanyWideAccess } from '@/lib/security/ownership'
 
 const CreateNotificationSchema = z.object({
   role: z.string().min(1).max(80),
@@ -28,7 +30,12 @@ export async function GET(req: NextRequest) {
     projectId: sp.get('projectId'),
     limit: sp.get('limit') ? Number(sp.get('limit')) : undefined,
   })
-  return NextResponse.json(notifications)
+  const syntheticItems = hasCompanyWideAccess(ctx) ? await buildSyntheticActionItems(ctx.contractorId, ctx.user?.role ?? 'owner') : []
+  return NextResponse.json({
+    ...notifications,
+    count: notifications.items.length + syntheticItems.length,
+    items: [...syntheticItems, ...notifications.items],
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -40,4 +47,82 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   const item = await createRoleNotification({ contractorId: ctx.contractorId, ...parsed.data })
   return NextResponse.json({ notification: item }, { status: 201 })
+}
+
+async function buildSyntheticActionItems(contractorId: string, role: string) {
+  const [actionRequests, reviewDocs] = await Promise.all([
+    db.actionRequest.findMany({
+      where: { contractorId, status: { in: ['pending', 'needs_approval', 'approved'] } },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+      take: 15,
+      select: { id: true, type: true, title: true, summary: true, priority: true, requestedRole: true, projectId: true, customerId: true, status: true, createdAt: true },
+    }),
+    db.document.findMany({
+      where: {
+        contractorId,
+        OR: [
+          { status: { in: ['pending_review', 'needs_review', 'needs_ocr', 'failed', 'processing'] } },
+          { fileType: 'price_sheet', status: { not: 'reviewed' } },
+          { conflictFlags: { not: null } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 20,
+      select: {
+        id: true,
+        originalName: true,
+        fileType: true,
+        status: true,
+        aiSummary: true,
+        extractionConfidence: true,
+        conflictFlags: true,
+        projectId: true,
+        customerId: true,
+        createdAt: true,
+      },
+    }),
+  ])
+
+  const actionItems = actionRequests.map(item => ({
+    id: `synthetic:action:${item.id}`,
+    type: 'pending_action',
+    title: item.title,
+    summary: item.summary,
+    priority: item.priority,
+    status: item.status,
+    role: item.requestedRole,
+    projectId: item.projectId,
+    customerId: item.customerId,
+    actionRequestId: item.id,
+    relatedType: 'action_request',
+    relatedId: item.id,
+    payloadJson: JSON.stringify({ actionRequestId: item.id, cardType: 'action_request', synthetic: true }),
+    createdAt: item.createdAt,
+    synthetic: true,
+  }))
+
+  const docItems = reviewDocs.map(doc => ({
+    id: `synthetic:document:${doc.id}`,
+    type: doc.fileType === 'price_sheet' ? 'price_sheet_review' : doc.conflictFlags ? 'document_conflict' : 'document_review',
+    title: doc.fileType === 'price_sheet' ? `Review price sheet: ${doc.originalName}` : `Review document: ${doc.originalName}`,
+    summary: doc.aiSummary || `Status: ${doc.status}${typeof doc.extractionConfidence === 'number' ? ` · confidence ${Math.round(doc.extractionConfidence)}%` : ''}`,
+    priority: doc.status === 'failed' || doc.conflictFlags ? 'high' : 'normal',
+    status: 'unread',
+    role,
+    projectId: doc.projectId,
+    customerId: doc.customerId,
+    relatedType: 'document',
+    relatedId: doc.id,
+    payloadJson: JSON.stringify({
+      documentId: doc.id,
+      fileType: doc.fileType,
+      status: doc.status,
+      cardType: doc.fileType === 'price_sheet' ? 'price_sheet_review' : 'document_review',
+      synthetic: true,
+    }),
+    createdAt: doc.createdAt,
+    synthetic: true,
+  }))
+
+  return [...actionItems, ...docItems]
 }

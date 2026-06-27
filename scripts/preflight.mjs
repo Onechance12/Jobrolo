@@ -20,6 +20,23 @@ if (env === 'production') {
   const migrationRoot = 'prisma/migrations'
   const hasSqlMigration = fs.existsSync(migrationRoot) && fs.readdirSync(migrationRoot).some(dir => fs.existsSync(`${migrationRoot}/${dir}/migration.sql`))
   if (!hasSqlMigration) warnings.push('No Prisma migration.sql found. Generate and commit a Postgres baseline migration before production deploy.')
+  if (fs.existsSync(migrationRoot)) {
+    const creates = new Map()
+    for (const dir of fs.readdirSync(migrationRoot)) {
+      const file = `${migrationRoot}/${dir}/migration.sql`
+      if (!fs.existsSync(file)) continue
+      const sql = fs.readFileSync(file, 'utf8')
+      for (const match of sql.matchAll(/CREATE\s+TABLE\s+"([^"]+)"/gi)) {
+        const table = match[1]
+        const seen = creates.get(table) || []
+        seen.push(dir)
+        creates.set(table, seen)
+      }
+    }
+    for (const [table, dirs] of creates.entries()) {
+      if (dirs.length > 1) errors.push(`Duplicate CREATE TABLE "${table}" appears in migrations: ${dirs.join(', ')}`)
+    }
+  }
 }
 
 if ((process.env.STORAGE_PROVIDER || 'local') === 's3') {

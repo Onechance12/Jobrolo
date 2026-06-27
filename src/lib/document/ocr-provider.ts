@@ -23,8 +23,8 @@
 // =============================================================================
 
 import { readStoredFile } from '@/lib/storage'
-import { promises as fs } from 'node:fs'
 import { analyzeImage } from '@/lib/ai'
+import { pageToDataUrl, renderPdfPages } from '@/lib/document/pdf-to-images'
 
 export interface OcrResult {
   text: string
@@ -79,8 +79,52 @@ export class OpenAiVisionOcrProvider implements DocumentOcrProvider {
   }
 
   async extractFromPdf(filePath: string): Promise<OcrResult | null> {
-    console.warn(`[doc-worker] vision OCR PDF skipped for ${filePath}: PDF page rendering dependencies are not installed. Embedded PDF text extraction still runs before this fallback.`)
-    return null
+    const maxPages = Math.min(Math.max(Number(process.env.OPENAI_VISION_OCR_MAX_PAGES || 8), 1), 20)
+    console.log(`[doc-worker] using vision OCR for PDF pages (maxPages=${maxPages})`)
+    let pages
+    try {
+      pages = await renderPdfPages(filePath, { maxPages, scale: 1.6 })
+    } catch (err) {
+      console.error('[doc-worker] vision OCR PDF render failed:', err)
+      return null
+    }
+    if (!pages.length) {
+      console.warn('[doc-worker] vision OCR PDF skipped: no pages rendered')
+      return null
+    }
+
+    const chunks: string[] = []
+    for (const page of pages) {
+      try {
+        const text = await analyzeImage(
+          pageToDataUrl(page),
+          `You are an OCR engine for construction, roofing, insurance, and supplier documents.
+
+Extract all visible text from PDF page ${page.pageNumber}. Preserve line breaks, numbers, dates, addresses, claim numbers, quantities, units, prices, totals, table rows, and labels as accurately as possible.
+
+Return extracted text only. Do not summarize. Do not add markdown fences. If a portion is illegible, write [illegible].`,
+          { purpose: 'document_extraction', detail: 'high', maxTokens: 2500 },
+        )
+        const cleaned = text.trim()
+        if (cleaned && !/^no (visible |useful )?text/i.test(cleaned)) {
+          chunks.push(`--- PAGE ${page.pageNumber} OCR ---\n${cleaned}`)
+        }
+      } catch (err) {
+        console.error(`[doc-worker] vision OCR PDF page ${page.pageNumber} failed:`, err)
+      }
+    }
+
+    const text = chunks.join('\n\n').trim()
+    if (!text) {
+      console.warn('[doc-worker] vision OCR PDF returned no useful text')
+      return null
+    }
+    return {
+      provider: this.name,
+      text,
+      pageCount: pages.length,
+      confidence: text.length > 1000 ? 72 : text.length > 250 ? 58 : 42,
+    }
   }
 
   async extractFromImage(filePath: string): Promise<OcrResult | null> {

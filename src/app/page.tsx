@@ -17,6 +17,24 @@ import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, C
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
+type ActionNeededItem = {
+  id: string
+  type?: string
+  title?: string
+  summary?: string | null
+  priority?: string | null
+  status?: string | null
+  role?: string | null
+  projectId?: string | null
+  customerId?: string | null
+  actionRequestId?: string | null
+  relatedType?: string | null
+  relatedId?: string | null
+  payloadJson?: string | null
+  createdAt?: string
+  synthetic?: boolean
+}
+
 function isOpenMapRequest(text: string) {
   const firstLine = text.split('\n')[0]?.toLowerCase().replace(/[’']/g, "'").replace(/[?.!]/g, '').trim() || ''
   return /^(open|show|pull up|bring up|launch)\s+(the\s+)?(field\s+|job\s+|current\s+)?map\b/.test(firstLine)
@@ -28,7 +46,6 @@ function isInspectionPhotoWorkflowRequest(text: string) {
   if (!firstLine) return false
   return (
     /\b(start|open|launch|begin|show|get|give me)\b.{0,80}\b(inspection photo workflow|inspection photos|photo checklist|inspection checklist|roof photo capture|roof photos)\b/.test(firstLine) ||
-    /\b(i landed|just landed|walking up|walk up|arrived|i'm here|i am here)\b.{0,80}\binspection\b/.test(firstLine) ||
     /\binspection\b.{0,80}\b(photo workflow|photo checklist|photo capture|photos first|capture first)\b/.test(firstLine)
   )
 }
@@ -40,6 +57,9 @@ export default function Page() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [startMenuOpen, setStartMenuOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [actionCenterOpen, setActionCenterOpen] = useState(false)
+  const [actionItems, setActionItems] = useState<ActionNeededItem[]>([])
+  const [actionItemsLoading, setActionItemsLoading] = useState(false)
   const [fieldCopilotOpen, setFieldCopilotOpen] = useState(false)
   const proactiveRunKey = useRef<string | null>(null)
   const [userName, setUserName] = useState('')
@@ -75,9 +95,24 @@ export default function Page() {
   const { sendWorkspaceMessage, stopWorkspaceMessage } = useWorkspaceChat()
   const tts = useTTS({ autoPlay: true })
 
+  const loadActionItems = useCallback(async () => {
+    setActionItemsLoading(true)
+    try {
+      const res = await fetch('/api/notifications?limit=50')
+      if (!res.ok) return
+      const data = await res.json().catch(() => ({}))
+      setActionItems(Array.isArray(data.items) ? data.items : [])
+    } catch (err) {
+      console.warn('[page] action needed load failed:', err)
+    } finally {
+      setActionItemsLoading(false)
+    }
+  }, [])
+
   const isInWorkspace = !!currentWorkspaceId && !!currentChatId
   const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId)
   const currentChat = currentWorkspace?.chats.find(c => c.id === currentChatId) ?? null
+  const actionNeededCount = actionItems.filter(item => !['actioned', 'archived'].includes(String(item.status ?? ''))).length
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevMsgCount = useRef(0)
 
@@ -165,6 +200,13 @@ export default function Page() {
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (initialLoading) return
+    void loadActionItems()
+    const timer = window.setInterval(() => { void loadActionItems() }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [initialLoading, loadActionItems])
 
   useEffect(() => {
     if (!conversationId || initialLoading) return
@@ -623,6 +665,33 @@ export default function Page() {
                 <Volume2 className="w-5 h-5" />
               </button>
 
+              <div className="relative">
+                <button
+                  onClick={() => setActionCenterOpen(v => !v)}
+                  className={cn(
+                    'relative p-2 rounded-md transition-colors',
+                    actionCenterOpen ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'hover:bg-muted text-muted-foreground',
+                  )}
+                  aria-label="Action needed"
+                  aria-expanded={actionCenterOpen}
+                >
+                  <Bell className="w-5 h-5" />
+                  {actionNeededCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">
+                      {actionNeededCount > 9 ? '9+' : actionNeededCount}
+                    </span>
+                  ) : null}
+                </button>
+                {actionCenterOpen ? (
+                  <ActionNeededMenu
+                    items={actionItems}
+                    loading={actionItemsLoading}
+                    onRefresh={loadActionItems}
+                    onClose={() => setActionCenterOpen(false)}
+                  />
+                ) : null}
+              </div>
+
               {!isInWorkspace && (
                 <div className="relative">
                   <button
@@ -781,6 +850,121 @@ export default function Page() {
 
 function hasCompanyWideUiRole(role?: string | null) {
   return ['owner', 'admin', 'manager', 'project_manager'].includes(String(role ?? '').toLowerCase())
+}
+
+function parseActionPayload(item: ActionNeededItem): Record<string, any> {
+  if (!item.payloadJson) return {}
+  try {
+    const parsed = JSON.parse(item.payloadJson)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function actionLabel(value?: string | null) {
+  return String(value || 'item').replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function ActionNeededMenu({
+  items,
+  loading,
+  onRefresh,
+  onClose,
+}: {
+  items: ActionNeededItem[]
+  loading: boolean
+  onRefresh: () => void | Promise<void>
+  onClose: () => void
+}) {
+  const visible = items.filter(item => !['actioned', 'archived'].includes(String(item.status ?? ''))).slice(0, 12)
+
+  async function mark(id: string, status: 'read' | 'actioned' | 'archived') {
+    await fetch(`/api/notifications/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch(() => null)
+    await onRefresh()
+  }
+
+  function openItem(item: ActionNeededItem) {
+    const payload = parseActionPayload(item)
+    if (payload.workspaceId) {
+      window.dispatchEvent(new CustomEvent('jobrolo:open-workspace-chat', {
+        detail: { workspaceId: String(payload.workspaceId), chatId: payload.chatId ? String(payload.chatId) : undefined },
+      }))
+      onClose()
+      return
+    }
+    if (typeof payload.chatUrl === 'string' && payload.chatUrl) {
+      window.location.assign(payload.chatUrl)
+      return
+    }
+    const prompt = payload.documentId
+      ? `Review document ${payload.documentId}. Tell me what is saved, what needs review, and what actions are available.`
+      : item.actionRequestId
+      ? `Show me the pending approval/action request ${item.actionRequestId} and tell me exactly what will happen before I approve it.`
+      : `Show me this Action Needed item and what I should do next: ${item.title || item.type || item.id}`
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text: prompt } }))
+    onClose()
+  }
+
+  return (
+    <div className="absolute right-0 top-10 z-30 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl">
+      <div className="flex items-start justify-between gap-3 border-b border-border p-3">
+        <div>
+          <div className="text-sm font-semibold">Action Needed</div>
+          <div className="text-xs text-muted-foreground">Approvals, review items, invites, failed work, and routed tasks.</div>
+        </div>
+        <button onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close action needed">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto p-2">
+        {loading && !visible.length ? (
+          <div className="flex items-center gap-2 rounded-xl px-3 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading action items…
+          </div>
+        ) : null}
+        {!loading && !visible.length ? (
+          <div className="rounded-xl px-3 py-4 text-sm text-muted-foreground">Nothing needs your attention right now.</div>
+        ) : null}
+        {visible.map(item => {
+          const payload = parseActionPayload(item)
+          const canOpen = Boolean(payload.workspaceId || payload.chatUrl || item.actionRequestId)
+          return (
+            <div key={item.id} className="mb-2 rounded-xl border border-border bg-card p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">{item.title || actionLabel(item.type)}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.type)}</span>
+                    {item.priority ? <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.priority)}</span> : null}
+                    {item.role ? <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.role)}</span> : null}
+                  </div>
+                </div>
+              </div>
+              {item.summary ? <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">{item.summary}</p> : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {canOpen ? <Button size="sm" onClick={() => openItem(item)}>Open</Button> : null}
+                {!item.synthetic ? <Button size="sm" variant="outline" onClick={() => mark(item.id, 'read')}>Mark read</Button> : null}
+                {!item.synthetic ? <Button size="sm" variant="ghost" onClick={() => mark(item.id, 'archived')}>Archive</Button> : null}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between border-t border-border p-2">
+        <button onClick={() => onRefresh()} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+          Refresh
+        </button>
+        <button onClick={() => window.location.assign('/settings/notifications')} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+          Notification settings
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function StartCreateMenu({

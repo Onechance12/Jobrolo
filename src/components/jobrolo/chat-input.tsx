@@ -267,7 +267,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           {(mode === 'field' ? FIELD_QUICK_PROMPTS : shortcuts.slice(0, 6)).map(s => (
             <button
               key={s.id}
-              onClick={() => mode === 'field' ? runFieldQuickPrompt(s, openInspectionIntake) : setText(s.prompt)}
+              onClick={() => mode === 'field' ? runFieldQuickPrompt(s, openInspectionIntake, setText) : setText(s.prompt)}
               className={cn(
                 'inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors',
                 mode === 'field'
@@ -359,10 +359,14 @@ function fieldShortcutSectionId(label: string) {
   return null
 }
 
-function runFieldQuickPrompt(shortcut: CommandShortcut, openInspectionIntake: (sectionId?: string | null) => void) {
+function runFieldQuickPrompt(shortcut: CommandShortcut, openInspectionIntake: (sectionId?: string | null) => void, setPromptText: (value: string) => void) {
   const label = shortcut.label.toLowerCase()
   if (shortcut.id === 'field-open-map' || label.includes('map')) {
     window.dispatchEvent(new Event('jobrolo:open-field-map'))
+    return
+  }
+  if (label.includes('start inspection') || label.includes('photo checklist')) {
+    setPromptText(shortcut.prompt)
     return
   }
   openInspectionIntake(fieldShortcutSectionId(shortcut.label))

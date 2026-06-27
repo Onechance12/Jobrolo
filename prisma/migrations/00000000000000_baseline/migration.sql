@@ -621,30 +621,6 @@ CREATE TABLE "UsageRecord" (
 );
 
 -- CreateTable
-CREATE TABLE "AIUsageLog" (
-    "id" TEXT NOT NULL,
-    "contractorId" TEXT NOT NULL,
-    "userId" TEXT,
-    "customerId" TEXT,
-    "projectId" TEXT,
-    "documentId" TEXT,
-    "purpose" TEXT NOT NULL,
-    "provider" TEXT NOT NULL,
-    "model" TEXT NOT NULL,
-    "inputTokens" INTEGER,
-    "outputTokens" INTEGER,
-    "totalTokens" INTEGER,
-    "imageCount" INTEGER NOT NULL DEFAULT 0,
-    "webSearchCalls" INTEGER NOT NULL DEFAULT 0,
-    "estimatedCost" DOUBLE PRECISION,
-    "success" BOOLEAN NOT NULL DEFAULT true,
-    "error" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "AIUsageLog_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "OnboardingSession" (
     "id" TEXT NOT NULL,
     "contractorId" TEXT NOT NULL,
@@ -1828,15 +1804,6 @@ CREATE INDEX "UsageRecord_contractorId_metric_bucket_idx" ON "UsageRecord"("cont
 CREATE UNIQUE INDEX "UsageRecord_contractorId_metric_bucket_key" ON "UsageRecord"("contractorId", "metric", "bucket");
 
 -- CreateIndex
-CREATE INDEX "AIUsageLog_contractorId_createdAt_idx" ON "AIUsageLog"("contractorId", "createdAt");
-
--- CreateIndex
-CREATE INDEX "AIUsageLog_contractorId_purpose_createdAt_idx" ON "AIUsageLog"("contractorId", "purpose", "createdAt");
-
--- CreateIndex
-CREATE INDEX "AIUsageLog_documentId_idx" ON "AIUsageLog"("documentId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "OnboardingSession_contractorId_key" ON "OnboardingSession"("contractorId");
 
 -- CreateIndex
@@ -2396,4 +2363,3 @@ ALTER TABLE "SignatureRequest" ADD CONSTRAINT "SignatureRequest_generatedDocumen
 
 -- AddForeignKey
 ALTER TABLE "SignatureEvent" ADD CONSTRAINT "SignatureEvent_signatureRequestId_fkey" FOREIGN KEY ("signatureRequestId") REFERENCES "SignatureRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
