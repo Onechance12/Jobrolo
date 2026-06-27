@@ -101,6 +101,57 @@ type CompanyProfileLike = {
   profile?: Record<string, unknown> | null
 } & Record<string, unknown>
 
+type ReportPhotoCandidateLike = {
+  documentId?: string
+  reportPhotoId?: string | null
+  originalName?: string
+  thumbnailUrl?: string | null
+  url?: string | null
+  summary?: string | null
+  suggestedCategory?: string
+  suggestedCategoryLabel?: string
+  suggestedCondition?: string
+  suggestedSeverity?: string
+  caption?: string | null
+  alreadyAttached?: boolean
+  isIncluded?: boolean
+  defaultSelected?: boolean
+}
+
+type ReportPhotoPickerLike = {
+  reportId?: string | null
+  projectId?: string | null
+  customerId?: string | null
+  title?: string
+  query?: string | null
+  totalFound?: number
+  shownCount?: number
+  selectedCount?: number
+  alreadyAttachedCount?: number
+  guidance?: string
+  photos?: ReportPhotoCandidateLike[]
+}
+
+type ReportShareLike = {
+  reportId?: string
+  title?: string
+  audience?: string
+  audienceLabel?: string
+  shareUrl?: string | null
+  projectId?: string | null
+  projectTitle?: string | null
+  customer?: { name?: string | null; email?: string | null; phone?: string | null; customerNumber?: string | null; clientNumber?: string | null } | null
+  propertyAddress?: string | null
+  recommendedChatType?: string | null
+  workspaceId?: string | null
+  chatId?: string | null
+  chatUrl?: string | null
+  recipientName?: string | null
+  recipientEmail?: string | null
+  recipientPhone?: string | null
+  note?: string | null
+}
+
 function insertJobroloPrompt(text: string) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
@@ -139,7 +190,6 @@ type RoofReportLike = {
   photoCount?: number
   readyScore?: number
   warnings?: string[]
-  builderUrl?: string
   printUrl?: string
   shareUrl?: string | null
   pdfUrl?: string | null
@@ -173,6 +223,12 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('location')) {
     return <LocationConfirmationCard location={contextData as LocationLike} />
+  }
+  if (cardType.includes('report_photo_picker')) {
+    return <ReportPhotoPickerCard data={contextData as ReportPhotoPickerLike} />
+  }
+  if (cardType.includes('report_share')) {
+    return <ReportShareCard data={contextData as ReportShareLike} />
   }
   if (cardType.includes('roof_report')) {
     return <RoofReportCard report={contextData as RoofReportLike} />
@@ -737,6 +793,200 @@ export function OperatorBriefingCard({ data, content }: { data?: any; content?: 
   )
 }
 
+function absoluteHref(value?: string | null) {
+  if (!value) return null
+  if (value.startsWith('http')) return value
+  if (typeof window === 'undefined') return value
+  return `${window.location.origin}${value.startsWith('/') ? value : `/${value}`}`
+}
+
+export function ReportPhotoPickerCard({ data }: { data?: ReportPhotoPickerLike | null }) {
+  const photos = data?.photos || []
+  const initialSelected = useMemo(() => new Set(photos.filter(p => p.defaultSelected || (p.alreadyAttached && p.isIncluded !== false)).map(p => String(p.documentId || p.reportPhotoId)).filter(Boolean)), [photos])
+  const [selected, setSelected] = useState<Set<string>>(initialSelected)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const reportId = data?.reportId || null
+
+  function keyFor(photo: ReportPhotoCandidateLike) {
+    return String(photo.documentId || photo.reportPhotoId || '')
+  }
+
+  function toggle(photo: ReportPhotoCandidateLike) {
+    const key = keyFor(photo)
+    if (!key) return
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  async function saveSelection() {
+    if (!reportId) {
+      insertJobroloPrompt('Create or choose a roof report first, then help me add these selected photos to it.')
+      return
+    }
+    setSaving(true)
+    setMessage(null)
+    try {
+      const toAdd = photos.filter(p => p.documentId && selected.has(keyFor(p)) && !p.reportPhotoId)
+      if (toAdd.length) {
+        const res = await fetch(`/api/roof-reports/${encodeURIComponent(reportId)}/photos/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            photos: toAdd.map((p, i) => ({
+              documentId: p.documentId,
+              category: p.suggestedCategory || 'other',
+              condition: p.suggestedCondition || 'other',
+              severity: p.suggestedSeverity || 'informational',
+              caption: p.caption || p.summary || p.originalName,
+              sortOrder: i,
+            })),
+          }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      }
+      const toggles = photos.filter(p => p.reportPhotoId && p.documentId && selected.has(keyFor(p)) !== (p.isIncluded !== false))
+      await Promise.all(toggles.map(async p => {
+        const res = await fetch(`/api/roof-reports/${encodeURIComponent(reportId)}/photos/${encodeURIComponent(String(p.reportPhotoId))}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isIncluded: selected.has(keyFor(p)) }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      }))
+      setMessage('Saved this report photo selection. Removed photos stay in the job file; they are just excluded from this report.')
+    } catch (error: any) {
+      setMessage(error?.message ? `Could not save selection: ${String(error.message).slice(0, 180)}` : 'Could not save selection.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectedCount = photos.filter(p => selected.has(keyFor(p))).length
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm"><Camera className="h-4 w-4" /> {data?.title || 'Choose report photos'}</CardTitle>
+          <Badge variant="secondary" className="text-[10px]">{selectedCount} selected</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-muted-foreground">{data?.guidance || 'Select the photos that belong in this report. Removing one here does not delete the original file.'}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {typeof data?.totalFound === 'number' ? <Badge variant="outline" className="text-[10px]">{data.totalFound} saved photos found</Badge> : null}
+          {typeof data?.alreadyAttachedCount === 'number' ? <Badge variant="outline" className="text-[10px]">{data.alreadyAttachedCount} already attached</Badge> : null}
+          {data?.query ? <Badge variant="secondary" className="text-[10px]">matching: {data.query}</Badge> : null}
+        </div>
+        {photos.length ? (
+          <div className="grid max-h-96 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+            {photos.map(photo => {
+              const key = keyFor(photo)
+              const isSelected = selected.has(key)
+              const thumb = absoluteHref(photo.thumbnailUrl || photo.url)
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggle(photo)}
+                  className={cn(
+                    'overflow-hidden rounded-xl border bg-background text-left transition',
+                    isSelected ? 'border-emerald-400 ring-2 ring-emerald-400/40' : 'border-border hover:border-emerald-300',
+                  )}
+                >
+                  <div className="relative aspect-[4/3] bg-muted">
+                    {thumb ? <img src={thumb} alt={photo.originalName || 'Report photo'} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-muted-foreground"><Camera className="h-6 w-6" /></div>}
+                    <span className={cn('absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold', isSelected ? 'bg-emerald-500 text-white' : 'bg-background/90 text-muted-foreground')}>
+                      {isSelected ? 'Included' : 'Excluded'}
+                    </span>
+                  </div>
+                  <div className="space-y-1 p-2">
+                    <div className="line-clamp-1 text-xs font-semibold">{photo.originalName || 'Saved photo'}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {photo.suggestedCategoryLabel ? <Badge variant="secondary" className="text-[9px]">{photo.suggestedCategoryLabel}</Badge> : null}
+                      {photo.suggestedCondition ? <Badge variant="outline" className="text-[9px]">{humanize(photo.suggestedCondition)}</Badge> : null}
+                    </div>
+                    {photo.summary ? <p className="line-clamp-2 text-[10px] text-muted-foreground">{photo.summary}</p> : null}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed bg-background/70 p-4 text-center text-xs text-muted-foreground">
+            No saved photos matched yet. Upload roof/gutter/interior photos in this job thread, then ask me to review report photos again.
+          </div>
+        )}
+        {message ? <div className="rounded-lg border bg-background/80 p-2 text-xs text-muted-foreground">{message}</div> : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" onClick={saveSelection} disabled={saving || !photos.length}>{saving ? 'Saving…' : 'Save selection'}</Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`${reportId ? `For roof report ${reportId}, ` : ''}help me choose the best report photos. I want roof/gutter/hail/wind markings and only strong customer-facing photos.`)}>Ask Jobrolo</Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`${reportId ? `Share roof report ${reportId}. ` : 'Share this roof report. '}Ask who it should go to: homeowner, crew/subcontractor, referral partner/realtor, insurance agent/adjuster, or internal team.`)}>Route/share</Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+export function ReportShareCard({ data }: { data?: ReportShareLike | null }) {
+  const [copied, setCopied] = useState(false)
+  const shareUrl = absoluteHref(data?.shareUrl)
+  const chatUrl = absoluteHref(data?.chatUrl)
+
+  async function copyShare() {
+    if (!shareUrl) return
+    await navigator.clipboard?.writeText(shareUrl).catch(() => null)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1800)
+  }
+
+  function openChat() {
+    if (data?.workspaceId) {
+      window.dispatchEvent(new CustomEvent('jobrolo:open-workspace-chat', {
+        detail: { workspaceId: data.workspaceId, chatId: data.chatId, href: chatUrl },
+      }))
+      return
+    }
+    if (chatUrl) window.location.assign(chatUrl)
+  }
+
+  const target = data?.audienceLabel || humanize(String(data?.audience || 'recipient'))
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm"><MessageCircle className="h-4 w-4" /> Share report</CardTitle>
+          <Badge variant="secondary" className="text-[10px]">{target}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="font-semibold">{data?.title || 'Roof report'}</div>
+        <div className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
+          {data?.projectTitle ? <div><span className="font-medium text-foreground">Job:</span> {data.projectTitle}</div> : null}
+          {data?.customer?.name ? <div><span className="font-medium text-foreground">Client:</span> {data.customer.name}</div> : null}
+          {data?.propertyAddress ? <div className="sm:col-span-2"><span className="font-medium text-foreground">Address:</span> {data.propertyAddress}</div> : null}
+          {data?.recommendedChatType ? <div><span className="font-medium text-foreground">Best chat:</span> {humanize(data.recommendedChatType)}</div> : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Use this to route the report to the right person. For outside people, create/invite them to the right shared chat so they only see the chat/report they are meant to see.
+        </p>
+        {shareUrl ? <div className="truncate rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">{shareUrl}</div> : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        {shareUrl ? <Button size="sm" onClick={copyShare}>{copied ? <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}{copied ? 'Copied' : 'Copy link'}</Button> : null}
+        {chatUrl ? <Button size="sm" variant="outline" onClick={openChat}>Open chat</Button> : (
+          <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Create or open the ${humanize(String(data?.recommendedChatType || 'shared'))} chat for this report, then share the report link there.`)}>Create chat</Button>
+        )}
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Invite someone to view this report in the right shared chat. Ask for their name, email, phone, and whether they are a homeowner, crew/subcontractor, referral partner, insurance agent, adjuster, or employee.`)}>Invite person</Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
 
 export function RoofReportCard({ report }: { report?: RoofReportLike | null }) {
   if (!report) return null
@@ -746,6 +996,16 @@ export function RoofReportCard({ report }: { report?: RoofReportLike | null }) {
       ? `Help me finish this roof report in chat. Review roof report ${id}, tell me what is missing, and ask me for the next piece of information or photos.`
       : `Help me finish this roof report in chat. Tell me what is missing and ask me for the next piece of information or photos.`
     window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text: prompt } }))
+  }
+  const reviewPhotos = () => {
+    insertJobroloPrompt(id
+      ? `Review photos for roof report ${id}. Let me select which roof, gutter, hail, wind, interior, or overview photos to include or remove from the report.`
+      : 'Review photos for this roof report and let me select which photos to include or remove.')
+  }
+  const routeReport = () => {
+    insertJobroloPrompt(id
+      ? `Share roof report ${id}. Ask who it should go to: homeowner, crew/subcontractor, referral partner/realtor, insurance agent/adjuster, or internal team.`
+      : 'Share this roof report. Ask who it should go to: homeowner, crew/subcontractor, referral partner/realtor, insurance agent/adjuster, or internal team.')
   }
   return (
     <Card className="mt-2 w-full overflow-hidden border-cyan-200 bg-cyan-50/50 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20 sm:max-w-xl">
@@ -765,8 +1025,10 @@ export function RoofReportCard({ report }: { report?: RoofReportLike | null }) {
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
         <Button size="sm" onClick={askJobroloToEdit}>Finish in chat</Button>
+        <Button size="sm" variant="outline" onClick={reviewPhotos}>Review photos</Button>
+        <Button size="sm" variant="outline" onClick={routeReport}>Route/share</Button>
         {report.printUrl ? <Button size="sm" variant="outline" asChild><Link href={report.printUrl} target="_blank">Preview report</Link></Button> : null}
-        {report.shareUrl ? <Button size="sm" variant="outline" asChild><Link href={report.shareUrl} target="_blank">Share</Link></Button> : null}
+        {report.shareUrl ? <Button size="sm" variant="outline" asChild><Link href={report.shareUrl} target="_blank">Open share</Link></Button> : null}
         {report.pdfUrl ? <Button size="sm" variant="outline" asChild><Link href={report.pdfUrl} target="_blank">PDF</Link></Button> : null}
       </CardFooter>
     </Card>

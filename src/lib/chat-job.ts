@@ -62,6 +62,21 @@ function collectImageAttachmentsFromToolData(value: unknown): Array<{ type: stri
   }).slice(0, 20)
 }
 
+function deriveCardFromToolResults(iterations: Array<{ toolResults?: Array<{ data: unknown }> }>) {
+  for (const iter of iterations) {
+    for (const result of iter.toolResults ?? []) {
+      const data = result.data as Record<string, unknown> | null
+      const nested = data?.card
+      if (nested && typeof nested === 'object' && (nested as Record<string, unknown>).cardType) {
+        const card = nested as Record<string, unknown>
+        return { contextType: String(card.cardType), contextData: card }
+      }
+      if (data?.cardType) return { contextType: String(data.cardType), contextData: data }
+    }
+  }
+  return null
+}
+
 export function createJob(): string {
   const id = crypto.randomUUID()
   jobs.set(id, { id, status: 'processing', thinking: [], heartbeat: 'Starting...', createdAt: Date.now() })
@@ -128,8 +143,9 @@ export async function processJob(jobId: string, opts: {
     clearInterval(hb)
 
     const finalText = sanitizeGeneratedStorageUrls(loopResult.final.text || '(no response)')
-    const finalContextType = loopResult.final.contextType ?? null
-    const finalContextData = loopResult.final.contextData ?? null
+    const toolCard = deriveCardFromToolResults(loopResult.iterations)
+    const finalContextType = loopResult.final.contextType ?? toolCard?.contextType ?? null
+    const finalContextData = loopResult.final.contextData ?? toolCard?.contextData ?? null
     const finalActions = (loopResult.final.actions ?? []) as AiAction[]
     let finalAttachments = loopResult.final.attachments ?? []
     finalAttachments = finalAttachments.map((a: any) => ({

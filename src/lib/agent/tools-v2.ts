@@ -23,7 +23,7 @@ import { buildProjectMergeData, getOrCreateContractorProfile, mergeTemplateVaria
 import { createTemplateUploadFromDocument, analyzeTemplateUpload, getTemplateReview, approveDocumentTemplate, generateDocumentFromTemplate, TEMPLATE_VARIABLES } from '@/lib/template-intake'
 import { getFieldBriefing, executeFieldAction, resolveFieldEntity, listCopilotInbox, decideActionRequest } from '@/lib/field-copilot'
 import { createUnsignedDocumentPdf, getSignedDocumentArtifacts } from '@/lib/final-documents'
-import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, createRoofReportPdf } from '@/lib/roof-reports'
+import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, createRoofReportPdf, reviewRoofReportCandidatePhotos, updateRoofReportPhotoSelection, bulkAddPhotosToRoofReport, shareRoofReport } from '@/lib/roof-reports'
 import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, convertCanvassingLead } from '@/lib/canvassing'
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
@@ -3322,6 +3322,206 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'review_roof_report_photos',
+    description: 'Find saved job/customer photos that could belong in a roof report and return a chat-native selection card. Use when the user says which report photos they want, e.g. gutter photos, roof hail/wind markings, overview photos, interior, attic, or photos to remove from a report.',
+    schema: z.object({
+      reportId: z.string().optional(),
+      projectId: z.string().optional(),
+      customerId: z.string().optional(),
+      query: z.string().max(500).optional(),
+      categories: z.array(z.string()).optional(),
+      conditions: z.array(z.string()).optional(),
+      limit: z.number().int().min(1).max(80).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'customer', 'crew', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const card = await reviewRoofReportCandidatePhotos(
+        { contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any,
+        args,
+      )
+      return {
+        success: true,
+        data: {
+          ...card,
+          message: card.reportId
+            ? `Found ${card.shownCount} candidate photo${card.shownCount === 1 ? '' : 's'} for this report. Review the card and save the selection.`
+            : `Found ${card.shownCount} candidate photo${card.shownCount === 1 ? '' : 's'}, but choose or create a roof report before saving a report photo set.`,
+          card,
+        },
+      }
+    },
+  },
+  {
+    name: 'add_photos_to_roof_report',
+    description: 'Attach selected saved documents/photos to a roof report. This is reversible and does not delete source files. Use only after the user clearly selects photos to include.',
+    schema: z.object({
+      reportId: z.string(),
+      documentIds: z.array(z.string()).min(1).max(100),
+      category: z.string().optional(),
+      condition: z.string().optional(),
+      severity: z.string().optional(),
+      captionPrefix: z.string().optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'customer', 'crew', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const docs = await db.document.findMany({
+        where: { contractorId, id: { in: args.documentIds } },
+        select: { id: true, originalName: true, filePath: true, aiSummary: true, fileType: true, mimeType: true },
+      })
+      if (!docs.length) return { success: false, data: null, error: 'No matching saved photos found' }
+      const photos = docs.map((doc, index) => ({
+        documentId: doc.id,
+        category: args.category || 'other',
+        condition: args.condition || 'other',
+        severity: args.severity || 'informational',
+        caption: args.captionPrefix ? `${args.captionPrefix}: ${doc.originalName}` : doc.aiSummary || doc.originalName,
+        sortOrder: index,
+      }))
+      const added = await bulkAddPhotosToRoofReport(
+        { contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any,
+        args.reportId,
+        photos,
+      )
+      const card = await reviewRoofReportCandidatePhotos(
+        { contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any,
+        { reportId: args.reportId, limit: 50 },
+      )
+      return {
+        success: true,
+        data: {
+          reportId: args.reportId,
+          addedCount: added.length,
+          documentIds: docs.map(d => d.id),
+          message: `Saved ${added.length} photo${added.length === 1 ? '' : 's'} to the roof report. The original files remain in the job file.`,
+          card,
+        },
+      }
+    },
+  },
+  {
+    name: 'update_roof_report_photo_selection',
+    description: 'Include or remove photos from a roof report without deleting the original uploaded files. Use when the user selects/removes photos from the report photo card.',
+    schema: z.object({
+      reportId: z.string(),
+      includeDocumentIds: z.array(z.string()).optional(),
+      excludeDocumentIds: z.array(z.string()).optional(),
+      includeReportPhotoIds: z.array(z.string()).optional(),
+      excludeReportPhotoIds: z.array(z.string()).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'customer', 'crew', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const result = await updateRoofReportPhotoSelection(
+        { contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any,
+        args.reportId,
+        args,
+      )
+      const card = await reviewRoofReportCandidatePhotos(
+        { contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any,
+        { reportId: args.reportId, limit: 50 },
+      )
+      return {
+        success: true,
+        data: {
+          ...result,
+          card,
+          message: `Updated the report photo selection. Included ${result.included}, removed ${result.excluded} from the report, and added ${result.added} new saved photo${result.added === 1 ? '' : 's'}. Source files were not deleted.`,
+        },
+      }
+    },
+  },
+  {
+    name: 'share_roof_report_to_audience',
+    description: 'Prepare a roof report share route for a homeowner/customer, crew/subcontractor, referral partner/realtor, insurance agent/adjuster, or internal team. Creates/returns a report share link and a chat-native routing card. Requires approval because it can expose a report link.',
+    schema: z.object({
+      reportId: z.string(),
+      audience: z.enum(['homeowner', 'customer', 'crew', 'subcontractor', 'realtor', 'referral_partner', 'insurance_agent', 'adjuster', 'internal']).default('homeowner'),
+      recipientName: z.string().max(160).optional(),
+      recipientEmail: z.string().email().optional(),
+      recipientPhone: z.string().max(60).optional(),
+      note: z.string().max(1000).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'management'],
+    requiresApproval: true,
+    execute: async (args, contractorId, ctx) => {
+      const shared = await shareRoofReport({ contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any, args.reportId)
+      const report = await db.roofReport.findFirst({
+        where: { id: args.reportId, contractorId },
+        select: {
+          id: true,
+          title: true,
+          projectId: true,
+          customerId: true,
+          propertyAddress: true,
+          clientName: true,
+          status: true,
+        },
+      })
+      const project = report?.projectId
+        ? await db.project.findFirst({
+            where: { id: report.projectId, contractorId },
+            select: { id: true, title: true, address: true, customer: { select: { id: true, name: true, email: true, phone: true } }, workspace: { select: { id: true } } },
+          })
+        : null
+      const audienceLabels: Record<string, string> = {
+        homeowner: 'Homeowner/customer',
+        customer: 'Homeowner/customer',
+        crew: 'Crew/subcontractor',
+        subcontractor: 'Crew/subcontractor',
+        realtor: 'Referral partner/realtor',
+        referral_partner: 'Referral partner/realtor',
+        insurance_agent: 'Insurance agent',
+        adjuster: 'Adjuster',
+        internal: 'Internal team',
+      }
+      const recommendedChatType: Record<string, string> = {
+        homeowner: 'customer',
+        customer: 'customer',
+        crew: 'crew',
+        subcontractor: 'subcontractor',
+        realtor: 'sales',
+        referral_partner: 'sales',
+        insurance_agent: 'insurance',
+        adjuster: 'insurance',
+        internal: 'main',
+      }
+      const workspaceId = project?.workspace?.id ?? null
+      const chat = workspaceId
+        ? await db.workspaceChat.findFirst({ where: { workspaceId, chatType: recommendedChatType[args.audience] }, select: { id: true, title: true, chatType: true } }).catch(() => null)
+        : null
+      const shareUrl = `${appBaseUrl()}${shared.shareUrl}`
+      const chatUrl = workspaceChatUrl(workspaceId, chat?.id)
+      const card = {
+        cardType: 'report_share',
+        reportId: args.reportId,
+        title: report?.title || 'Roof report',
+        status: report?.status || 'shared',
+        audience: args.audience,
+        audienceLabel: audienceLabels[args.audience],
+        shareUrl,
+        projectId: report?.projectId || null,
+        projectTitle: project?.title || null,
+        customer: project?.customer ? withCustomerNumber(project.customer) : null,
+        propertyAddress: report?.propertyAddress || project?.address || null,
+        recommendedChatType: recommendedChatType[args.audience],
+        workspaceId,
+        chatId: chat?.id || null,
+        chatUrl,
+        recipientName: args.recipientName || null,
+        recipientEmail: args.recipientEmail || null,
+        recipientPhone: args.recipientPhone || null,
+        note: args.note || null,
+      }
+      return {
+        success: true,
+        data: {
+          ...card,
+          card,
+          message: `Prepared a ${audienceLabels[args.audience]} share route for ${card.title}. Use the card to copy the link, open/create the right shared chat, or invite a person.`,
+        },
+      }
+    },
+  },
+  {
     name: 'generate_roof_report_summary',
     description: 'Draft or refresh the roof report summary, observed conditions, recommendations, and conclusion from the report photos. Requires approval because it updates the report.',
     schema: z.object({ reportId: z.string() }),
@@ -3329,7 +3529,7 @@ export const TOOLS: ToolDef[] = [
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const report = await generateRoofReportSummary({ contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any, args.reportId)
-      return { success: true, data: { report, builderUrl: `/reports/${report.id}`, printUrl: `/api/roof-reports/${report.id}/print` } }
+      return { success: true, data: { report, printUrl: `/api/roof-reports/${report.id}/print` } }
     },
   },
   {
@@ -3340,7 +3540,7 @@ export const TOOLS: ToolDef[] = [
     requiresApproval: true,
     execute: async (args, contractorId, ctx) => {
       const report = await finalizeRoofReport({ contractorId, user: ctx.userId ? { id: ctx.userId } as any : undefined } as any, args.reportId)
-      return { success: true, data: { report, builderUrl: `/reports/${report.id}`, printUrl: `/api/roof-reports/${report.id}/print` } }
+      return { success: true, data: { report, printUrl: `/api/roof-reports/${report.id}/print` } }
     },
   },
   {

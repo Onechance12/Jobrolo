@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import type { TenantContext } from '@/lib/security/context'
 import { getContractorProfile } from '@/lib/contractor-profile'
 import { defaultRoofReportDisclaimer, logProjectActivity, makeShareToken, renderRoofReportHtml } from '@/lib/field-ops'
-import { toFileUrl } from '@/lib/file-url'
+import { toFileUrl, toThumbnailUrl } from '@/lib/file-url'
 import { saveFile } from '@/lib/storage'
 import { createSimplePdfBuffer, htmlToPlainText } from '@/lib/final-documents'
 import { createProjectTimelineEvent, linkDocumentToJobPacket } from '@/lib/project-context'
@@ -160,6 +160,318 @@ export function generateNarrativeFromReport(report: any) {
   return { summary, observed, recommendations, conclusion }
 }
 
+const REPORT_PHOTO_KEYWORDS: Record<string, string[]> = {
+  front_elevation: ['front elevation', 'front of house', 'front exterior', 'street view'],
+  roof_overview: ['roof overview', 'roof surface', 'roof plane', 'roof slope', 'facet', 'shingles', 'roof covering'],
+  shingle_closeup: ['shingle close', 'close-up', 'closeup', 'test square', 'granule', 'matting', 'bruise', 'hail mark', 'wind mark', 'chalk'],
+  ridge: ['ridge', 'hip', 'cap shingle', 'ridge cap'],
+  valley: ['valley'],
+  pipe_jack: ['pipe jack', 'pipe boot', 'flashing', 'vent pipe'],
+  vent: ['vent', 'turtle vent', 'box vent'],
+  gutter: ['gutter', 'downspout'],
+  soft_metal: ['soft metal', 'fascia', 'metal', 'flashing', 'vent', 'gutter'],
+  interior_leak: ['interior leak', 'water stain', 'leak', 'moisture', 'staining'],
+  attic: ['attic', 'rafter', 'decking'],
+  ceiling: ['ceiling', 'drywall', 'sheetrock'],
+  collateral: ['fence', 'screen', 'window screen', 'collateral', 'garage door'],
+}
+
+const REPORT_CONDITION_KEYWORDS: Record<string, string[]> = {
+  hail_indicator: ['hail', 'impact', 'bruise', 'marking', 'mark', 'chalk', 'dent'],
+  wind_indicator: ['wind', 'lifted', 'creased', 'folded', 'missing shingle', 'blown off'],
+  missing_shingle: ['missing shingle', 'missing tab', 'blown off'],
+  creased_shingle: ['creased', 'crease'],
+  granule_loss: ['granule', 'loss', 'matting'],
+  dented_gutter: ['dented gutter', 'gutter dent', 'downspout dent', 'soft metal dent'],
+  active_water_entry: ['leak', 'water entry', 'water stain', 'moisture', 'staining'],
+  no_issue_observed: ['no visible damage', 'good condition', 'no issue'],
+}
+
+function normalizedWords(values?: unknown): string[] {
+  if (Array.isArray(values)) return values.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)
+  if (typeof values === 'string') return values.toLowerCase().split(/[,\n]/).map(v => v.trim()).filter(Boolean)
+  return []
+}
+
+function documentSearchText(doc: any) {
+  const extracted = safeJson<Record<string, unknown>>(doc.extractedData, {})
+  return [
+    doc.originalName,
+    doc.fileType,
+    doc.aiCategory,
+    doc.aiSummary,
+    doc.ocrText,
+    extracted?.summary,
+    extracted?.description,
+    extracted?.documentType,
+    Array.isArray(extracted?.tags) ? extracted.tags.join(' ') : '',
+  ].filter(Boolean).join(' ').toLowerCase()
+}
+
+function keywordScore(text: string, keywords: string[]) {
+  let score = 0
+  for (const keyword of keywords) {
+    if (text.includes(keyword)) score += keyword.includes(' ') ? 3 : 1
+  }
+  return score
+}
+
+function inferPhotoCategory(text: string, requestedCategories: string[]) {
+  for (const requested of requestedCategories) {
+    if ((CATEGORY_LABELS as Map<string, string>).has(requested)) return requested
+    const match = ROOF_REPORT_CATEGORIES.find(c => c.label.toLowerCase() === requested || c.label.toLowerCase().includes(requested))
+    if (match) return match.key
+  }
+  let best = { key: 'other', score: 0 }
+  for (const [key, words] of Object.entries(REPORT_PHOTO_KEYWORDS)) {
+    const score = keywordScore(text, words)
+    if (score > best.score) best = { key, score }
+  }
+  return best.key
+}
+
+function inferPhotoCondition(text: string, requestedConditions: string[]) {
+  for (const requested of requestedConditions) {
+    if ((ROOF_REPORT_CONDITIONS as readonly string[]).includes(requested)) return requested
+  }
+  let best = { key: 'other', score: 0 }
+  for (const [key, words] of Object.entries(REPORT_CONDITION_KEYWORDS)) {
+    const score = keywordScore(text, words)
+    if (score > best.score) best = { key, score }
+  }
+  return best.score ? best.key : 'other'
+}
+
+function inferPhotoSeverity(condition: string, text: string) {
+  if (condition === 'active_water_entry') return 'significant_concern'
+  if (['hail_indicator', 'wind_indicator', 'missing_shingle', 'creased_shingle', 'dented_gutter'].includes(condition)) return 'repair_recommended'
+  if (text.includes('severe') || text.includes('immediate')) return 'significant_concern'
+  if (condition === 'no_issue_observed') return 'informational'
+  return 'monitor'
+}
+
+function photoCandidateCaption(doc: any, category: string, condition: string) {
+  const summary = String(doc.aiSummary || '').trim()
+  if (summary) return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary
+  return generatePhotoCaption({ category, condition, severity: inferPhotoSeverity(condition, '') })
+}
+
+export async function reviewRoofReportCandidatePhotos(ctx: TenantContext, input: {
+  reportId?: string
+  projectId?: string
+  customerId?: string
+  query?: string
+  categories?: string[]
+  conditions?: string[]
+  limit?: number
+}) {
+  const limit = Math.max(1, Math.min(Number(input.limit || 30), 80))
+  let report: any = null
+  if (input.reportId) {
+    report = await db.roofReport.findFirst({ where: { id: input.reportId, contractorId: ctx.contractorId } })
+    if (!report) throw new Error('Roof report not found')
+  } else if (input.projectId || input.customerId) {
+    report = await db.roofReport.findFirst({
+      where: {
+        contractorId: ctx.contractorId,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.customerId && !input.projectId ? { customerId: input.customerId } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+  }
+
+  const projectId = input.projectId || report?.projectId || undefined
+  const customerId = input.customerId || report?.customerId || undefined
+  const workspace = projectId
+    ? await db.workspace.findFirst({ where: { contractorId: ctx.contractorId, projectId }, select: { id: true } }).catch(() => null)
+    : null
+  const typeFilter = [{ fileType: 'photo' }, { mimeType: { startsWith: 'image/' } }]
+  const where: any = {
+    contractorId: ctx.contractorId,
+    OR: typeFilter,
+  }
+  const associationFilter = [
+    projectId ? { projectId } : null,
+    customerId ? { customerId } : null,
+    workspace?.id ? { workspaceId: workspace.id } : null,
+  ].filter(Boolean)
+  if (associationFilter.length) {
+    delete where.OR
+    where.AND = [{ OR: typeFilter }, { OR: associationFilter }]
+  }
+
+  const docs = await db.document.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }],
+    take: Math.min(160, Math.max(limit * 3, 30)),
+    select: {
+      id: true,
+      originalName: true,
+      mimeType: true,
+      size: true,
+      filePath: true,
+      thumbnailPath: true,
+      fileType: true,
+      aiCategory: true,
+      aiSummary: true,
+      extractedData: true,
+      ocrText: true,
+      status: true,
+      customerId: true,
+      projectId: true,
+      workspaceId: true,
+      createdAt: true,
+    },
+  })
+
+  const attached = report?.id
+    ? await db.roofReportPhoto.findMany({ where: { contractorId: ctx.contractorId, reportId: report.id } })
+    : []
+  const attachedByDocument = new Map(attached.filter((p: any) => p.documentId).map((p: any) => [p.documentId, p]))
+  const requestedCategories = normalizedWords(input.categories)
+  const requestedConditions = normalizedWords(input.conditions)
+  const queryWords = normalizedWords(input.query)
+  const query = String(input.query || '').toLowerCase()
+
+  const photos = docs.map((doc: any) => {
+    const text = documentSearchText(doc)
+    const attachedPhoto = attachedByDocument.get(doc.id) as any | undefined
+    const suggestedCategory = attachedPhoto?.category || inferPhotoCategory(`${query} ${text}`, requestedCategories)
+    const suggestedCondition = attachedPhoto?.condition || inferPhotoCondition(`${query} ${text}`, requestedConditions)
+    const suggestedSeverity = attachedPhoto?.severity || inferPhotoSeverity(suggestedCondition, text)
+    const directQueryScore = queryWords.length ? queryWords.reduce((sum, word) => sum + (text.includes(word) ? 2 : 0), 0) : 0
+    const categoryScore = suggestedCategory !== 'other' ? keywordScore(text, REPORT_PHOTO_KEYWORDS[suggestedCategory] || []) : 0
+    const conditionScore = suggestedCondition !== 'other' ? keywordScore(text, REPORT_CONDITION_KEYWORDS[suggestedCondition] || []) : 0
+    const matchScore = directQueryScore + categoryScore + conditionScore + (attachedPhoto?.isIncluded !== false ? 4 : 0)
+    const alreadyAttached = Boolean(attachedPhoto)
+    const defaultSelected = alreadyAttached ? attachedPhoto?.isIncluded !== false : Boolean(queryWords.length ? matchScore > 0 : false)
+    const url = toFileUrl(doc.filePath)
+    const thumbnailUrl = doc.thumbnailPath ? toThumbnailUrl(doc.thumbnailPath) : url
+    return {
+      documentId: doc.id,
+      reportPhotoId: attachedPhoto?.id ?? null,
+      originalName: doc.originalName,
+      fileType: doc.fileType,
+      mimeType: doc.mimeType,
+      size: doc.size,
+      status: doc.status,
+      url,
+      thumbnailUrl,
+      summary: doc.aiSummary || null,
+      suggestedCategory,
+      suggestedCategoryLabel: CATEGORY_LABELS.get(suggestedCategory as any) || humanize(suggestedCategory),
+      suggestedCondition,
+      suggestedSeverity,
+      caption: attachedPhoto?.caption || photoCandidateCaption(doc, suggestedCategory, suggestedCondition),
+      alreadyAttached,
+      isIncluded: attachedPhoto?.isIncluded !== false,
+      defaultSelected,
+      matchScore,
+      createdAt: doc.createdAt,
+    }
+  }).sort((a, b) => Number(b.defaultSelected) - Number(a.defaultSelected) || b.matchScore - a.matchScore || new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime()).slice(0, limit)
+
+  const selectedCount = photos.filter(p => p.defaultSelected).length
+  const alreadyAttachedCount = photos.filter(p => p.alreadyAttached).length
+  return {
+    cardType: 'report_photo_picker',
+    reportId: report?.id ?? input.reportId ?? null,
+    projectId: projectId ?? null,
+    customerId: customerId ?? null,
+    title: report?.title || 'Roof report photos',
+    query: input.query || null,
+    totalFound: docs.length,
+    shownCount: photos.length,
+    selectedCount,
+    alreadyAttachedCount,
+    guidance: report?.id
+      ? 'Select the photos that belong in this report. Removing a photo here only removes it from the report; it does not delete the saved file.'
+      : 'Select report photos after creating or choosing a roof report.',
+    photos,
+  }
+}
+
+export async function updateRoofReportPhotoSelection(ctx: TenantContext, reportId: string, input: {
+  includeDocumentIds?: string[]
+  excludeDocumentIds?: string[]
+  includeReportPhotoIds?: string[]
+  excludeReportPhotoIds?: string[]
+}) {
+  const report = await db.roofReport.findFirst({ where: { id: reportId, contractorId: ctx.contractorId } })
+  if (!report) throw new Error('Roof report not found')
+  let added = 0
+  let included = 0
+  let excluded = 0
+  const includeDocumentIds = Array.from(new Set((input.includeDocumentIds || []).filter(Boolean)))
+  if (includeDocumentIds.length) {
+    const existing = await db.roofReportPhoto.findMany({
+      where: { contractorId: ctx.contractorId, reportId, documentId: { in: includeDocumentIds } },
+      select: { documentId: true },
+    })
+    const existingIds = new Set(existing.map(p => p.documentId).filter(Boolean) as string[])
+    const missing = includeDocumentIds.filter(id => !existingIds.has(id))
+    if (missing.length) {
+      const docs = await db.document.findMany({ where: { contractorId: ctx.contractorId, id: { in: missing } } })
+      const candidates = docs.map((doc: any, i) => {
+        const text = documentSearchText(doc)
+        const category = inferPhotoCategory(text, [])
+        const condition = inferPhotoCondition(text, [])
+        return {
+          documentId: doc.id,
+          category,
+          condition,
+          severity: inferPhotoSeverity(condition, text),
+          caption: photoCandidateCaption(doc, category, condition),
+          sortOrder: i,
+        }
+      })
+      const created = await bulkAddPhotosToRoofReport(ctx, reportId, candidates)
+      added += created.length
+    }
+    const result = await db.roofReportPhoto.updateMany({
+      where: { contractorId: ctx.contractorId, reportId, documentId: { in: includeDocumentIds } },
+      data: { isIncluded: true },
+    })
+    included += result.count
+  }
+
+  const includeReportPhotoIds = Array.from(new Set((input.includeReportPhotoIds || []).filter(Boolean)))
+  if (includeReportPhotoIds.length) {
+    const result = await db.roofReportPhoto.updateMany({
+      where: { contractorId: ctx.contractorId, reportId, id: { in: includeReportPhotoIds } },
+      data: { isIncluded: true },
+    })
+    included += result.count
+  }
+
+  const excludeDocumentIds = Array.from(new Set((input.excludeDocumentIds || []).filter(Boolean)))
+  if (excludeDocumentIds.length) {
+    const result = await db.roofReportPhoto.updateMany({
+      where: { contractorId: ctx.contractorId, reportId, documentId: { in: excludeDocumentIds } },
+      data: { isIncluded: false },
+    })
+    excluded += result.count
+  }
+
+  const excludeReportPhotoIds = Array.from(new Set((input.excludeReportPhotoIds || []).filter(Boolean)))
+  if (excludeReportPhotoIds.length) {
+    const result = await db.roofReportPhoto.updateMany({
+      where: { contractorId: ctx.contractorId, reportId, id: { in: excludeReportPhotoIds } },
+      data: { isIncluded: false },
+    })
+    excluded += result.count
+  }
+
+  await updateRoofReportChecklist(ctx.contractorId, reportId)
+  return {
+    added,
+    included,
+    excluded,
+    workspace: await getRoofReportWorkspace(ctx, reportId),
+  }
+}
+
 export async function getRoofReportWorkspace(ctx: TenantContext, reportId: string) {
   const report = await db.roofReport.findFirst({
     where: { id: reportId, contractorId: ctx.contractorId },
@@ -215,10 +527,12 @@ export async function bulkAddPhotosToRoofReport(ctx: TenantContext, reportId: st
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i]
     let imageUrl = p.imageUrl
+    let existingPhoto: any = null
     if (p.documentId) {
       const doc = await db.document.findFirst({ where: { id: p.documentId, contractorId: ctx.contractorId } })
       if (!doc) continue
       imageUrl = toFileUrl(doc.filePath)
+      existingPhoto = await db.roofReportPhoto.findFirst({ where: { contractorId: ctx.contractorId, reportId, documentId: doc.id } })
       await linkDocumentToJobPacket({
         contractorId: ctx.contractorId,
         documentId: doc.id,
@@ -231,6 +545,27 @@ export async function bulkAddPhotosToRoofReport(ctx: TenantContext, reportId: st
         source: 'system',
         metadata: { reportId, category: p.category || 'other' },
       })
+    }
+    if (existingPhoto) {
+      const updated = await db.roofReportPhoto.update({
+        where: { id: existingPhoto.id },
+        data: {
+          imageUrl: imageUrl || existingPhoto.imageUrl,
+          category: p.category || existingPhoto.category || 'other',
+          area: p.area ?? existingPhoto.area,
+          condition: p.condition ?? existingPhoto.condition,
+          severity: p.severity || existingPhoto.severity || 'informational',
+          caption: p.caption || existingPhoto.caption || generatePhotoCaption(p),
+          notes: p.notes ?? existingPhoto.notes,
+          tagsJson: Array.isArray(p.tags) ? JSON.stringify(p.tags) : p.tagsJson ?? existingPhoto.tagsJson,
+          isIncluded: p.isIncluded ?? true,
+          isCoverPhoto: p.isCoverPhoto ?? existingPhoto.isCoverPhoto,
+          takenAt: p.takenAt ? new Date(p.takenAt) : existingPhoto.takenAt,
+          sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : existingPhoto.sortOrder,
+        },
+      })
+      created.push(updated)
+      continue
     }
     const photo = await db.roofReportPhoto.create({
       data: {
@@ -413,7 +748,6 @@ async function postRoofReportCardToThread(input: { contractorId: string; report:
         customerId: input.report.customerId,
         photoCount: Array.isArray(input.report.photos) ? input.report.photos.length : undefined,
         printUrl: `/api/roof-reports/${input.report.id}/print`,
-        builderUrl: `/reports/${input.report.id}`,
         shareUrl: input.report.shareToken ? `/reports/share/${input.report.shareToken}` : null,
         pdfUrl: input.report.reportPdfDocumentId ? `/api/storage/docs/${path.basename(input.report.reportPdfPath || '')}` : null,
       }),

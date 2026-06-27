@@ -326,7 +326,6 @@ export async function collectProactiveCards(ctx: TenantContext, target: Proactiv
         projectId: report.projectId,
         customerId: report.customerId,
         photoCount,
-        builderUrl: `/reports/${report.id}`,
         printUrl: `/api/roof-reports/${report.id}/print`,
         shareUrl: report.shareToken ? `/reports/share/${report.shareToken}` : null,
       },
