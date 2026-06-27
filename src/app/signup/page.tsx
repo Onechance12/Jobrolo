@@ -10,6 +10,79 @@ import { Bell, Loader2, LockKeyhole, LogIn, Menu, Mic, Plus, Send, Sparkles, Use
 type EntryMode = 'signup' | 'login'
 type LobbyMessage = { role: 'user' | 'assistant'; content: string }
 
+const FEATURE_PREVIEWS = [
+  { label: 'Client files', tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100' },
+  { label: 'Field notes', tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100' },
+  { label: 'Shared chats', tone: 'border-cyan-300/20 bg-cyan-500/10 text-cyan-100' },
+  { label: 'Reports', tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100' },
+  { label: 'Approvals', tone: 'border-violet-300/20 bg-violet-500/10 text-violet-100' },
+]
+
+function cleanLobbyText(value: string) {
+  return value
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/^\s*[_*•-]\s*/gm, '')
+    .replace(/[ \t]+$/gm, '')
+    .trim()
+}
+
+function parseLobbyAnswer(content: string) {
+  const lines = content.split(/\r?\n/).map(line => cleanLobbyText(line)).filter(Boolean)
+  const intro: string[] = []
+  const featureRows: { title: string; body: string }[] = []
+  const outro: string[] = []
+
+  let sawFeature = false
+  for (const line of lines) {
+    const match = line.match(/^([A-Z][A-Za-z /&+-]{2,40}):\s+(.+)$/)
+    if (match && !line.toLowerCase().startsWith('to access')) {
+      sawFeature = true
+      featureRows.push({ title: match[1].trim(), body: match[2].trim() })
+      continue
+    }
+
+    if (sawFeature) outro.push(line)
+    else intro.push(line)
+  }
+
+  return { intro, featureRows, outro }
+}
+
+function LobbyAnswer({ content }: { content: string }) {
+  const { intro, featureRows, outro } = parseLobbyAnswer(content)
+
+  return (
+    <div className="space-y-3">
+      {intro.map((line, index) => (
+        <p key={`intro-${index}`} className="text-[15px] leading-relaxed text-slate-100">
+          {line}
+        </p>
+      ))}
+
+      {featureRows.length ? (
+        <div className="grid gap-2">
+          {featureRows.slice(0, 7).map((feature, index) => (
+            <div
+              key={`${feature.title}-${index}`}
+              className="rounded-2xl border border-blue-300/15 bg-gradient-to-br from-blue-500/10 via-cyan-500/5 to-transparent p-3 shadow-[0_0_20px_rgba(37,99,235,0.08)]"
+            >
+              <div className="text-sm font-semibold text-white">{feature.title}</div>
+              <div className="mt-1 text-sm leading-relaxed text-slate-300">{feature.body}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {outro.map((line, index) => (
+        <p key={`outro-${index}`} className="text-[15px] leading-relaxed text-slate-300">
+          {line}
+        </p>
+      ))}
+    </div>
+  )
+}
+
 export default function SignupPage() {
   const router = useRouter()
   const [mode, setMode] = useState<EntryMode | null>(null)
@@ -188,6 +261,13 @@ export default function SignupPage() {
               <div className="mt-2 text-sm text-slate-300">
                 You can also ask me questions here before creating an account. I can explain what Jobrolo does, how invites work, and how setup flows — real company tools unlock after sign-in.
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {FEATURE_PREVIEWS.map(feature => (
+                  <span key={feature.label} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${feature.tone}`}>
+                    {feature.label}
+                  </span>
+                ))}
+              </div>
               <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-100">
                 If someone texted or emailed you an invite, use that invite link instead. That attaches you to the right company, chat, and permissions.
               </div>
@@ -220,13 +300,13 @@ export default function SignupPage() {
                 </div>
               ) : null}
               <div
-                className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-xl shadow-black/20 ${
+                className={`max-w-[88%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-xl shadow-black/20 ${
                   message.role === 'user'
-                    ? 'rounded-br-md bg-blue-600 text-white'
+                    ? 'whitespace-pre-wrap rounded-br-md bg-blue-600 text-white'
                     : 'rounded-bl-md border border-white/10 bg-[#0b1220] text-slate-100'
                 }`}
               >
-                {message.content}
+                {message.role === 'assistant' ? <LobbyAnswer content={message.content} /> : message.content}
               </div>
             </div>
           ))}
@@ -340,7 +420,7 @@ export default function SignupPage() {
             }}
             rows={1}
             disabled={lobbySending}
-            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-xl border border-white/10 bg-[#0b1220] px-3 py-2.5 text-[15px] leading-6 text-white outline-none placeholder:text-slate-500 focus:border-blue-400/70 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-xl border border-white/10 bg-[#0b1220] px-3 py-2.5 text-base leading-6 text-white outline-none placeholder:text-slate-500 focus:border-blue-400/70 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
             placeholder="Ask Jobrolo how it works…"
           />
           <button
