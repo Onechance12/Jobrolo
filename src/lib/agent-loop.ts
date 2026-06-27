@@ -486,6 +486,45 @@ function isPriceSheetReviewRequest(text: string) {
   return /\b(review|show|list|tell me|first|rows|items|unit|price|pending|imported|saved)\b/.test(lower)
 }
 
+function browserLocationFromText(text: string) {
+  const latitude = text.match(/\blatitude:\s*(-?\d+(?:\.\d+)?)/i)?.[1]
+  const longitude = text.match(/\blongitude:\s*(-?\d+(?:\.\d+)?)/i)?.[1]
+  if (!latitude || !longitude) return null
+  const accuracy = text.match(/\baccuracyMeters:\s*(\d+(?:\.\d+)?)/i)?.[1]
+  const source = text.match(/\bsource:\s*([^\n]+)/i)?.[1]?.trim()
+  return {
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    accuracyMeters: accuracy ? Number(accuracy) : undefined,
+    source: source || 'browser_gps',
+  }
+}
+
+function isFieldInspectionLeadRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  if (/\b(open|show|pull up|display)\b.{0,40}\bmap\b/.test(lower)) return false
+  const hasLocation = lower.includes('[browser_location]') || /\b(where i am|where i'm at|current location|here|this house)\b/.test(lower)
+  const hasInspectionIntent = /\b(landed|got|set|start|walking up|arrived|outside|mowing|inspection|inspect|appointment|field check|property lookup|search customer info|search property)\b/.test(lower)
+  return hasLocation && hasInspectionIntent && /\binspection|inspect|property|customer info|current house|this house\b/.test(lower)
+}
+
+function buildFieldInspectionLeadInstruction(userText: string) {
+  const location = browserLocationFromText(userText)
+  const locationArgs = location
+    ? `, "location": ${JSON.stringify(location)}`
+    : ''
+  return `The latest user request is a field inspection/current-property workflow:
+"${userText.slice(0, 500)}"
+
+Do not ask for homeowner name, phone number, appointment title, start time, or end time before saving the field lead.
+Do not start a canvassing run and do not open a map.
+
+Call start_field_inspection_lead now with {"searchPropertyInfo": true${locationArgs}, "notes": ${JSON.stringify(userText.slice(0, 800))}}.
+
+After the tool returns, ask the user to confirm any property/homeowner match and offer the inspection photo workflow/sections. Respond as JSON only.`
+}
+
 function documentHintFromPriceSheetText(text: string) {
   const clean = plainMessageText(text)
   const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
@@ -500,6 +539,7 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
   const latestUser = lastMessageByRole(messages, 'user')
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
+  if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
   if (isPriceSheetReviewRequest(userText)) {
     const filename = documentHintFromPriceSheetText(userText)
     return `The latest user request is a read-only supplier/material price sheet review request:

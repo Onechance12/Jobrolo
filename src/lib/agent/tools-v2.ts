@@ -2173,9 +2173,18 @@ export const TOOLS: ToolDef[] = [
       })
 
       let seededMessage: { id: string; content: string } | null = null
-      if (args.initialMessage?.trim()) {
-        seededMessage = await db.workspaceMessage.create({
-          data: { chatId: chat.id, role: 'assistant', content: args.initialMessage.trim(), createdById: ctx.userId },
+      const starterNote = args.initialMessage?.trim()
+      if (starterNote) {
+        const existingStarter = await db.workspaceMessage.findFirst({
+          where: {
+            chatId: chat.id,
+            content: starterNote,
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, content: true },
+        })
+        seededMessage = existingStarter ?? await db.workspaceMessage.create({
+          data: { chatId: chat.id, role: 'assistant', content: starterNote, createdById: ctx.userId },
           select: { id: true, content: true },
         })
       }
