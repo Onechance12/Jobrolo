@@ -1,5 +1,5 @@
 // =============================================================================
-// Company Research — website enrichment
+// Company Research — website + web-presence enrichment
 // =============================================================================
 // Given a website URL or company name, attempts to extract:
 //   - company description (from meta tags / homepage text)
@@ -7,17 +7,34 @@
 //   - location / service areas
 //   - social profiles
 //   - team size indicators
+//   - broader public web-presence signals when OpenAI web search is configured
 //
 // Strategy:
 //   1. Fetch the website HTML
 //   2. Extract title, meta description, Open Graph tags, visible text
 //   3. Pass to AI for structured extraction
 //
-// No external website-search API dependency — uses fetch plus the configured
-// Jobrolo AI provider for structured extraction.
+// Uses direct website fetch first. If OpenAI web search is configured, enriches
+// with public web-presence signals such as directories, reviews, BBB, blogs,
+// backlinks/mentions, and social profiles.
 // =============================================================================
 
 import { chatComplete } from '@/lib/ai'
+import { isOpenAIWebSearchConfigured, openAIWebSearch, type WebSearchSource } from '@/lib/openai-web-search'
+
+export interface CompanyWebPresence {
+  enabled: boolean
+  provider?: string
+  summary?: string
+  reviews?: Array<{ source?: string; rating?: string; reviewCount?: string; url?: string; notes?: string }>
+  directoryListings?: Array<{ source?: string; url?: string; notes?: string }>
+  mentions?: Array<{ title?: string; url?: string; notes?: string }>
+  backlinksOrBlogs?: Array<{ title?: string; url?: string; notes?: string }>
+  bbb?: { found?: boolean; rating?: string; url?: string; notes?: string }
+  warnings?: string[]
+  sources: WebSearchSource[]
+  error?: string
+}
 
 export interface CompanyResearch {
   website?: string
@@ -33,6 +50,7 @@ export interface CompanyResearch {
   businessType?: string  // roofing, restoration, public_adjuster, general_contractor, hvac, plumbing, other
   confidence: number     // 0-100
   source: 'website' | 'ai_inference' | 'none'
+  webPresence?: CompanyWebPresence
   rawSnippet?: string    // first 2000 chars of extracted text
 }
 
@@ -134,11 +152,95 @@ function extractEmail(text: string): string | undefined {
   return m?.[0]
 }
 
+function cleanCompanyNameCandidate(value?: string | null): string | undefined {
+  const base = value
+    ?.replace(/\s+/g, ' ')
+    .replace(/\s+\|\s+.*$/, '')
+    .replace(/\s+–\s+.*$/, '')
+    .replace(/\s+-\s+.*$/, '')
+    .replace(/\s+—\s+.*$/, '')
+    .trim()
+  return base || undefined
+}
+
+function parseJsonObject(raw: string): any | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1]?.trim()
+  const candidate = fenced || trimmed
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) return null
+  try { return JSON.parse(candidate.slice(start, end + 1)) } catch { return null }
+}
+
+async function researchCompanyWebPresence(input: { companyName?: string; website?: string; location?: string }): Promise<CompanyWebPresence> {
+  if (!isOpenAIWebSearchConfigured()) {
+    return {
+      enabled: false,
+      sources: [],
+      error: 'OpenAI web search is not configured. Set LLM_PROVIDER=openai-compatible, LLM_BASE_URL=https://api.openai.com/v1, and LLM_API_KEY.',
+    }
+  }
+
+  const company = input.companyName || input.website || 'the company'
+  const prompt = `Research the public web presence for this contractor/company.
+
+Company: ${company}
+Website: ${input.website || 'unknown'}
+Likely location/service area: ${input.location || 'unknown'}
+
+Find public information from the broader web, not only the company homepage. Look for:
+- official website confirmation
+- Google/Yelp/Facebook/Angi/HomeAdvisor/other review signals when available
+- BBB profile or BBB rating when available
+- social profiles
+- directory listings
+- blogs/articles/news/backlinks/mentions about the company
+- service areas and services
+
+Do not invent ratings, review counts, BBB status, or mentions. If unavailable, say unavailable.
+Return JSON only:
+{
+  "summary": "short practical summary",
+  "reviews": [{"source":"...", "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."}],
+  "directoryListings": [{"source":"...", "url":"...", "notes":"..."}],
+  "mentions": [{"title":"...", "url":"...", "notes":"..."}],
+  "backlinksOrBlogs": [{"title":"...", "url":"...", "notes":"..."}],
+  "bbb": {"found": true, "rating":"...", "url":"...", "notes":"..."},
+  "warnings": ["anything uncertain, conflicting, or requiring human review"]
+}`
+
+  const result = await openAIWebSearch(prompt, {
+    searchContextSize: 'high',
+    maxOutputTokens: 2200,
+    forceSearch: true,
+  })
+
+  if (!result.ok) {
+    return { enabled: true, provider: result.provider, sources: [], error: result.error || 'OpenAI web search failed.' }
+  }
+
+  const parsed = parseJsonObject(result.text) || {}
+  return {
+    enabled: true,
+    provider: `${result.provider}:${result.model}`,
+    summary: typeof parsed.summary === 'string' ? parsed.summary : result.text.slice(0, 800),
+    reviews: Array.isArray(parsed.reviews) ? parsed.reviews.slice(0, 10) : [],
+    directoryListings: Array.isArray(parsed.directoryListings) ? parsed.directoryListings.slice(0, 10) : [],
+    mentions: Array.isArray(parsed.mentions) ? parsed.mentions.slice(0, 10) : [],
+    backlinksOrBlogs: Array.isArray(parsed.backlinksOrBlogs) ? parsed.backlinksOrBlogs.slice(0, 10) : [],
+    bbb: parsed.bbb && typeof parsed.bbb === 'object' ? parsed.bbb : undefined,
+    warnings: Array.isArray(parsed.warnings) ? parsed.warnings.filter((x: unknown) => typeof x === 'string').slice(0, 10) : [],
+    sources: result.sources,
+  }
+}
+
 /**
  * Research a company by website URL.
  * Returns structured findings or null if the website couldn't be fetched.
  */
-export async function researchCompanyByUrl(url: string): Promise<CompanyResearch | null> {
+export async function researchCompanyByUrl(url: string, opts: { preferredCompanyName?: string; includeWebPresence?: boolean } = {}): Promise<CompanyResearch | null> {
   const normalized = normalizeUrl(url)
   console.log(`[onboarding/research] fetching ${normalized}...`)
   const fetched = await fetchWebsite(normalized)
@@ -152,7 +254,7 @@ export async function researchCompanyByUrl(url: string): Promise<CompanyResearch
   const social = extractSocialLinks(fetched.html)
   const phone = extractPhone(visibleText)
   const email = extractEmail(visibleText)
-  const companyName = meta.ogSiteName || meta.ogTitle || meta.title
+  const companyName = opts.preferredCompanyName || cleanCompanyNameCandidate(meta.ogSiteName || meta.ogTitle || meta.title)
   const description = meta.ogDescription || meta.description
 
   console.log(`[onboarding/research] fetched ${visibleText.length} chars from ${fetched.finalUrl}`)
@@ -193,7 +295,7 @@ Only include fields you can confidently identify from the text. Omit fields you 
     }
   }
 
-  return {
+  const result: CompanyResearch = {
     website: fetched.finalUrl,
     companyName,
     description,
@@ -209,13 +311,25 @@ Only include fields you can confidently identify from the text. Omit fields you 
     source: 'website',
     rawSnippet: visibleText.slice(0, 2000),
   }
+  if (opts.includeWebPresence !== false) {
+    result.webPresence = await researchCompanyWebPresence({
+      companyName: opts.preferredCompanyName || companyName,
+      website: fetched.finalUrl,
+      location: aiExtract.location,
+    }).catch(err => ({
+      enabled: true,
+      sources: [],
+      error: err instanceof Error ? err.message : String(err),
+    }))
+  }
+  return result
 }
 
 /**
  * Research a company by name only (no website). Uses AI to make educated guesses
  * based on the name — much lower confidence than website research.
  */
-export async function researchCompanyByName(name: string): Promise<CompanyResearch | null> {
+export async function researchCompanyByName(name: string, opts: { includeWebPresence?: boolean } = {}): Promise<CompanyResearch | null> {
   if (!name || name.trim().length < 2) return null
   console.log(`[onboarding/research] inferring business type from name: "${name}"`)
 
@@ -237,7 +351,7 @@ This is a best-guess inference from the name only — keep confidence modest.`,
     let c = aiResponse.trim()
     if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim()
     const parsed = JSON.parse(c)
-    return {
+    const result: CompanyResearch = {
       companyName: name,
       services: parsed.likelyServices ?? [],
       serviceAreas: [],
@@ -246,6 +360,14 @@ This is a best-guess inference from the name only — keep confidence modest.`,
       confidence: Math.min(50, parsed.confidence ?? 30),
       source: 'ai_inference',
     }
+    if (opts.includeWebPresence !== false) {
+      result.webPresence = await researchCompanyWebPresence({ companyName: name }).catch(err => ({
+        enabled: true,
+        sources: [],
+        error: err instanceof Error ? err.message : String(err),
+      }))
+    }
+    return result
   } catch (err) {
     console.warn(`[onboarding/research] name inference failed:`, err)
     return null
@@ -255,13 +377,14 @@ This is a best-guess inference from the name only — keep confidence modest.`,
 /**
  * Main entry: try website research first, fall back to name inference.
  */
-export async function researchCompany(args: { website?: string; companyName?: string }): Promise<CompanyResearch | null> {
+export async function researchCompany(args: { website?: string; companyName?: string; preferredCompanyName?: string; includeWebPresence?: boolean }): Promise<CompanyResearch | null> {
+  const preferredCompanyName = args.preferredCompanyName || args.companyName
   if (args.website) {
-    const result = await researchCompanyByUrl(args.website)
+    const result = await researchCompanyByUrl(args.website, { preferredCompanyName, includeWebPresence: args.includeWebPresence })
     if (result) return result
   }
   if (args.companyName) {
-    return await researchCompanyByName(args.companyName)
+    return await researchCompanyByName(args.companyName, { includeWebPresence: args.includeWebPresence })
   }
   return null
 }

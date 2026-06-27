@@ -869,7 +869,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'research_contractor_website',
-    description: 'Research the contractor company website or company name from the command center using the configured AI provider. Use when the owner gives their website, asks Jobrolo to search/research the business, or wants suggested company profile fields. This is read-only; call update_contractor_profile only if the user asks to save/update the profile.',
+    description: 'Research the contractor company website and broader public web presence from the command center using the configured AI provider. Uses the saved/corrected company name as canonical, then looks for homepage details, reviews, BBB, social profiles, directory listings, backlinks, blogs, and mentions when OpenAI web search is configured. Use when the owner gives their website, asks Jobrolo to search/research the business, or wants suggested company profile fields. This is read-only; call update_contractor_profile only if the user asks to save/update the profile.',
     schema: z.object({
       website: z.string().max(500).optional(),
       companyName: z.string().max(200).optional(),
@@ -880,7 +880,15 @@ export const TOOLS: ToolDef[] = [
         return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can research/update the company profile from chat.' }
       }
       console.log(`[tools-v2] research_contractor_website requested contractorId=${contractorId} website=${args.website ? 'provided' : 'none'} companyName=${args.companyName ? 'provided' : 'none'}`)
-      const research = await researchCompany({ website: args.website, companyName: args.companyName })
+      const existingProfile = await getOrCreateContractorProfile(contractorId).catch(() => null)
+      const savedCompanyName = existingProfile?.companyName || existingProfile?.displayName || existingProfile?.legalName || undefined
+      const preferredCompanyName = args.companyName || savedCompanyName
+      const research = await researchCompany({
+        website: args.website || existingProfile?.website || undefined,
+        companyName: args.companyName || savedCompanyName || undefined,
+        preferredCompanyName,
+        includeWebPresence: true,
+      })
       if (!research) {
         return {
           success: true,
@@ -893,8 +901,8 @@ export const TOOLS: ToolDef[] = [
         }
       }
       const suggestedProfileUpdate = {
-        companyName: research.companyName || args.companyName || undefined,
-        displayName: research.companyName || args.companyName || undefined,
+        companyName: preferredCompanyName || research.companyName || undefined,
+        displayName: preferredCompanyName || research.companyName || undefined,
         phone: research.phone || undefined,
         email: research.email || undefined,
         website: research.website || args.website || undefined,
@@ -909,6 +917,7 @@ export const TOOLS: ToolDef[] = [
             socialProfiles: research.socialProfiles,
             confidence: research.confidence,
             source: research.source,
+            webPresence: research.webPresence ?? null,
             researchedAt: new Date().toISOString(),
           },
         },
