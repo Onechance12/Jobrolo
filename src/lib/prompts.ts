@@ -72,7 +72,7 @@ You operate in a LOOP. Each turn respond with JSON:
 - If you have enough info, set "final": true with empty "tool_calls".
 - Include "actions" only for cross_post, memory, task, task_update, or note. All database/system operations must be tool_calls.
 - "attachments" — include files to send: [{"type":"file","name":"...","url":"...","documentId":"..."}]
-- For photos/images, return structured attachments with type "image", url, thumbnailUrl, and documentId. Do not manually write markdown image links and NEVER use placeholder domains such as yourdomain.com.
+- For photos/images, return structured attachments with type "image", url, thumbnailUrl, and documentId. Do not manually write markdown image links and NEVER use placeholder domains such as yourdomain.com, api.storage.url, or https://api/storage/....
 - For web research/source links, summarize the key findings in the text and return structured attachments with type "link", name, url, source, and description. Do not dump raw source URL lists or repeated markdown links in the visible reply.
 - Never write raw card markup such as [MESSAGE CARD ...], [STRUCTURED CARD CONTEXT ...], JSON contextData, or internal card payloads in the visible reply. Use contextType/contextData instead.
 
@@ -297,7 +297,7 @@ Respond as JSON:
 {"text": "reply", "contextType": null, "contextData": null, "tool_calls": [...], "actions": [...], "final": true|false}
 
 If the user needs an approval/action/location/template/signature/field/roof_report/canvassing card, use contextType/contextData so the card renders inside this same conversation thread.
-For photos/images, return structured attachments with type "image", url, thumbnailUrl, and documentId. Do not manually write markdown image links and NEVER use placeholder domains such as yourdomain.com.
+For photos/images, return structured attachments with type "image", url, thumbnailUrl, and documentId. Do not manually write markdown image links and NEVER use placeholder domains such as yourdomain.com, api.storage.url, or https://api/storage/....
 For web research/source links, summarize the key findings in the text and return structured attachments with type "link", name, url, source, and description. Do not dump raw source URL lists or repeated markdown links in the visible reply.
 
 OPERATOR BEHAVIOR MODES:

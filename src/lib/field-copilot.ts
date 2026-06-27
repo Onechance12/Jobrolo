@@ -680,10 +680,11 @@ export async function executeFieldAction(ctx: TenantContext, input: FieldActionI
 
 export async function listCopilotInbox(ctx: TenantContext, options: { role?: string | null; projectId?: string | null; status?: string | null; limit?: number } = {}) {
   const role = options.role ?? ctx.user?.role ?? undefined
+  const restrictToRole = role && !(ctx.user?.role === 'owner' && !options.role)
   const items = await db.inboxItem.findMany({
     where: {
       contractorId: ctx.contractorId,
-      ...(role ? { OR: [{ role }, { userId: ctx.user?.id ?? '__none__' }] } : {}),
+      ...(restrictToRole ? { OR: [{ role }, { userId: ctx.user?.id ?? '__none__' }] } : {}),
       ...(options.projectId ? { projectId: options.projectId } : {}),
       ...(options.status ? { status: options.status } : { status: { in: ['unread', 'read'] } }),
     },

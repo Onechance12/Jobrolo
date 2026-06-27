@@ -46,6 +46,10 @@ function storageKeyPrefix(input: { contractorId: string; documentId: string; pro
   return `${base}/documents/${input.documentId}`
 }
 
+function isCompanyLevelUpload(uploadPurpose: string) {
+  return ['company_logo', 'company_pricing', 'company_document', 'company_profile'].includes(uploadPurpose)
+}
+
 export async function POST(req: NextRequest) {
   const requestId = uuidv4().slice(0, 8)
   console.log(`[upload] received requestId=${requestId} contentLength=${req.headers.get('content-length') || 'unknown'}`)
@@ -85,20 +89,22 @@ export async function POST(req: NextRequest) {
     let projectId: string | undefined
     let customerId: string | undefined
 
-    if (workspaceIdRaw) {
+    const companyLevelUpload = isCompanyLevelUpload(uploadPurpose)
+
+    if (!companyLevelUpload && workspaceIdRaw) {
       const workspace = await requireWorkspace(ctx, workspaceIdRaw)
       if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
       workspaceId = workspace.id
       projectId = workspace.projectId ?? undefined
       customerId = workspace.customerId ?? undefined
     }
-    if (projectIdRaw) {
+    if (!companyLevelUpload && projectIdRaw) {
       const project = await requireProject(ctx, projectIdRaw)
       if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
       projectId = project.id
       customerId = customerId ?? project.customerId ?? undefined
     }
-    if (customerIdRaw) {
+    if (!companyLevelUpload && customerIdRaw) {
       const customer = await requireCustomer(ctx, customerIdRaw)
       if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
       customerId = customer.id
@@ -130,7 +136,12 @@ export async function POST(req: NextRequest) {
         data,
         storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId, customerId }),
       })
-      const fileType = fileTypeFor(originalName, mimeType)
+      const detectedFileType = fileTypeFor(originalName, mimeType)
+      const fileType = uploadPurpose === 'company_logo'
+        ? 'company_logo'
+        : uploadPurpose === 'company_pricing'
+          ? 'price_sheet'
+          : detectedFileType
       const uploadContext = uploadPurpose || photoSection || photoSectionLabel
         ? {
             uploadContext: {
@@ -189,15 +200,27 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const needsLink = !customerId && !projectId && !workspaceId
+    const needsLink = !companyLevelUpload && !customerId && !projectId && !workspaceId
     return NextResponse.json({
       documents,
-      ...(needsLink ? {
+      ...(companyLevelUpload ? {
+        needsLink: false,
+        deferLinkPrompt: true,
+        suggestedPrompt: uploadPurpose === 'company_logo'
+          ? 'Saved the logo upload. I’ll attach it to the company profile instead of a customer file.'
+          : 'Saved the company-level upload. I’ll keep it out of customer files unless you ask me to attach it.',
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+          uploadPurpose,
+        },
+      } : needsLink ? {
         needsLink: true,
         deferLinkPrompt: true,
         suggestedPrompt: documents.length === 1
-          ? 'Saved the upload. I’m analyzing it now so I can recommend whether it belongs to a customer, project, company pricing, or review queue.'
-          : `Saved ${documents.length} uploads. I’m analyzing them now so I can recommend where each one belongs.`,
+          ? 'Saved the upload. I’ll review the saved analysis and ask before attaching it to a customer, project, pricing, or review queue.'
+          : `Saved ${documents.length} uploads. I’ll review the saved analysis and ask before attaching them anywhere.`,
         uploadContext: {
           documentIds: documents.map(d => d.id),
           filenames: documents.map(d => d.originalName),

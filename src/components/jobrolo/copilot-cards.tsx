@@ -284,6 +284,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('company_profile')) {
     return <CompanyProfileCard data={contextData as CompanyProfileLike} />
   }
+  if (cardType.includes('action_center')) {
+    return <ActionCenterCard data={contextData as any} />
+  }
   if (cardType.includes('created_chat')) {
     return <CreatedChatCard data={contextData as CreatedChatLike} />
   }
@@ -530,6 +533,7 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
 
   const research = data?.research ?? {}
   const suggested = data?.suggestedProfileUpdate ?? {}
+  const existingProfile = data?.existingProfile ?? data?.profile ?? {}
   const webPresence = research?.webPresence ?? suggested?.metadata?.websiteResearch?.webPresence ?? {}
   const name = textValue(suggested.displayName) || textValue(suggested.companyName) || textValue(research.companyName) || 'Company research'
   const website = textValue(suggested.website) || textValue(research.website)
@@ -542,12 +546,13 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
   const reviews = Array.isArray(webPresence.reviews) ? webPresence.reviews : []
   const googleReviews = webPresence.googleReviews || reviews.find((r: any) => /google/i.test(String(r?.source || r?.url || r?.notes || '')))
   const bbb = webPresence.bbb
-  const sources = [
+  const sources = dedupeResearchSources([
     ...(Array.isArray(webPresence.sources) ? webPresence.sources : []),
     ...(Array.isArray(webPresence.mentions) ? webPresence.mentions : []),
     ...(Array.isArray(webPresence.directoryListings) ? webPresence.directoryListings : []),
     ...(Array.isArray(webPresence.backlinksOrBlogs) ? webPresence.backlinksOrBlogs : []),
-  ].filter(Boolean)
+  ].filter(Boolean))
+  const changes = companyResearchChanges(existingProfile, { name, phone, email, website, location: textValue(research.location), logoUrl })
 
   async function save() {
     setStatus('saving')
@@ -587,6 +592,20 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
           <div className="font-semibold text-foreground">{name}</div>
           {description ? <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
         </div>
+        {changes.length ? (
+          <div className="rounded-lg border border-blue-200 bg-background/70 p-2 text-xs dark:border-blue-900/60">
+            <div className="mb-1 font-medium text-foreground">Suggested changes</div>
+            <div className="space-y-1">
+              {changes.map(change => (
+                <div key={change.label} className="flex gap-2">
+                  <span className="w-16 shrink-0 text-muted-foreground">{change.label}</span>
+                  <span className="min-w-0 flex-1 text-foreground">{change.next}</span>
+                  {change.previous ? <span className="hidden max-w-[120px] truncate text-muted-foreground sm:block">was {change.previous}</span> : <Badge variant="secondary" className="text-[10px]">new</Badge>}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="grid gap-2 text-xs sm:grid-cols-2">
           {phone ? <ProfileRow icon={<Phone className="h-3.5 w-3.5" />} label="Phone" value={phone} /> : null}
           {email ? <ProfileRow icon={<Mail className="h-3.5 w-3.5" />} label="Email" value={email} /> : null}
@@ -656,9 +675,9 @@ function TagBox({ title, items }: { title: string; items: unknown[] }) {
 
 function sourceLabel(source: any) {
   const title = textValue(source?.title)
-  if (title && !/^url$/i.test(title)) return title
+  if (title && !/^(url|saved file)$/i.test(title)) return title
   const sourceName = textValue(source?.source)
-  if (sourceName && !/^url$/i.test(sourceName)) return sourceName
+  if (sourceName && !/^(url|saved file)$/i.test(sourceName)) return sourceName
   const url = textValue(source?.url)
   if (url) {
     try { return new URL(url).hostname.replace(/^www\./, '') } catch {}
@@ -667,13 +686,7 @@ function sourceLabel(source: any) {
 }
 
 function ResearchSourceList({ sources }: { sources: any[] }) {
-  const seen = new Set<string>()
-  const items = sources.filter(source => {
-    const key = textValue(source?.url) || `${sourceLabel(source)}:${textValue(source?.notes) || textValue(source?.snippet)}`
-    if (!key || seen.has(key)) return false
-    seen.add(key)
-    return true
-  }).slice(0, 6)
+  const items = dedupeResearchSources(sources).slice(0, 6)
   if (!items.length) return null
   return (
     <div className="space-y-1.5 text-xs">
@@ -695,6 +708,52 @@ function ResearchSourceList({ sources }: { sources: any[] }) {
       })}
     </div>
   )
+}
+
+function dedupeResearchSources(sources: any[]) {
+  const seen = new Set<string>()
+  return sources.filter(source => {
+    const key = canonicalSourceKey(source)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function canonicalSourceKey(source: any) {
+  const url = textValue(source?.url)
+  if (url) {
+    try {
+      const parsed = new URL(url)
+      for (const key of Array.from(parsed.searchParams.keys())) {
+        if (/^(utm_|fbclid|gclid|msclkid)/i.test(key)) parsed.searchParams.delete(key)
+      }
+      parsed.hash = ''
+      parsed.pathname = parsed.pathname.replace(/\/$/, '') || '/'
+      return parsed.toString().toLowerCase()
+    } catch {
+      return url.replace(/[?#].*$/, '').replace(/\/$/, '').toLowerCase()
+    }
+  }
+  return `${sourceLabel(source)}:${textValue(source?.notes) || textValue(source?.snippet)}`.toLowerCase()
+}
+
+function companyResearchChanges(existing: any, next: Record<string, string>) {
+  const rows = [
+    { label: 'Name', previous: textValue(existing?.displayName) || textValue(existing?.companyName), next: next.name },
+    { label: 'Phone', previous: textValue(existing?.phone), next: next.phone },
+    { label: 'Email', previous: textValue(existing?.email), next: next.email },
+    { label: 'Website', previous: textValue(existing?.website), next: next.website },
+    { label: 'Address', previous: [textValue(existing?.city), textValue(existing?.state)].filter(Boolean).join(', '), next: next.location },
+    { label: 'Logo', previous: textValue(existing?.logoUrl), next: next.logoUrl },
+  ]
+  return rows
+    .filter(row => row.next && normalizeComparable(row.previous) !== normalizeComparable(row.next))
+    .slice(0, 6)
+}
+
+function normalizeComparable(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
 function ProfileRow({ label, value, icon, className }: { label: string; value: string; icon?: ReactNode; className?: string }) {
@@ -1590,6 +1649,59 @@ export function StreetGamePlanCard({ data }: { data?: any }) {
         <Button size="sm" onClick={() => insertJobroloPrompt(`Start this street/field plan in chat${data?.streetRunId ? ` (street run ID: ${data.streetRunId})` : ''}. Give me the first action and let me log each door or inspection.`)}>Start in chat</Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Adjust this street field plan. Ask me what kind of run I want and update the focus without opening a separate map page.')}>Adjust focus</Button>
       </CardFooter>
+    </Card>
+  )
+}
+
+export function ActionCenterCard({ data }: { data?: any }) {
+  const items = Array.isArray(data?.items) ? data.items.slice(0, 8) : []
+  const count = Number(data?.count ?? items.length)
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/50 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
+            <ClipboardCheck className="h-4 w-4" />
+            Action needed
+          </CardTitle>
+          <Badge variant="secondary" className="text-[10px]">{count}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {!items.length ? (
+          <p className="text-muted-foreground">Nothing urgent is routed to you right now.</p>
+        ) : (
+          items.map((item: InboxLike, i: number) => {
+            const payload = parsePayload(item)
+            const title = item.title || humanize(String(item.type || 'Action'))
+            const id = item.id || item.actionRequestId || payload?.actionRequestId
+            return (
+              <div key={`${String(id || title)}-${i}`} className="rounded-xl border bg-background/70 p-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-foreground">{title}</div>
+                    {item.summary ? <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.summary}</div> : null}
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    {item.priority ? <Badge variant={item.priority === 'urgent' || item.priority === 'high' ? 'destructive' : 'secondary'} className="text-[10px]">{humanize(item.priority)}</Badge> : null}
+                    {item.role ? <Badge variant="outline" className="text-[10px]">{humanize(item.role)}</Badge> : null}
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Review this action item and show me what I need to decide: ${title}${id ? ` (${id})` : ''}`)}>
+                    Review
+                  </Button>
+                  {item.actionRequestId ? (
+                    <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Show approval request ${item.actionRequestId}. Tell me exactly what will happen if I approve it.`)}>
+                      Approval details
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })
+        )}
+      </CardContent>
     </Card>
   )
 }

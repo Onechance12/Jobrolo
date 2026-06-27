@@ -134,6 +134,17 @@ export async function upsertContractorProfile(contractorId: string, input: Contr
     const logoDoc = await db.document.findFirst({ where: { id: logoDocumentId, contractorId }, select: { filePath: true } })
     if (!logoDoc) throw new Error('Logo document not found')
     logoUrl = toFileUrl(logoDoc.filePath) ?? undefined
+    await db.document.update({
+      where: { id: logoDocumentId },
+      data: {
+        fileType: 'company_logo',
+        status: 'reviewed',
+        customerId: null,
+        projectId: null,
+        workspaceId: null,
+      },
+    }).catch(() => null)
+    await db.documentLink.deleteMany({ where: { contractorId, documentId: logoDocumentId } }).catch(() => null)
   }
 
   const data = {

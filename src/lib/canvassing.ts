@@ -64,6 +64,16 @@ function activitySummary(type: string, summary?: string | null) {
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
+function cleanFieldText(value?: string | null) {
+  const cleaned = value
+    ?.trim()
+    .replace(/\b(speech|period|comma|dot)\b/gi, '')
+    .replace(/^[\s.:-]+|[\s.:-]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+  if (/You said "|MUST call|Common recovery examples|Respond as JSON only|Tool results:|narrated operational work|correct tool or include the correct action/i.test(cleaned ?? '')) return undefined
+  return cleaned && cleaned !== '.' ? cleaned : undefined
+}
+
 function sessionMetadata(input: StartCanvassingSessionInput) {
   const loc = normalizeLocation(input.location)
   return JSON.stringify({
@@ -156,10 +166,10 @@ export async function createCanvassingLead(ctx: TenantContext, input: CreateCanv
       contractorId: ctx.contractorId,
       sessionId: input.sessionId ?? undefined,
       createdById: ctx.user?.id,
-      address: input.address?.trim() || undefined,
-      homeownerName: input.homeownerName?.trim() || undefined,
-      phone: input.phone?.trim() || undefined,
-      notes: input.notes?.trim() || undefined,
+      address: cleanFieldText(input.address),
+      homeownerName: cleanFieldText(input.homeownerName),
+      phone: cleanFieldText(input.phone),
+      notes: cleanFieldText(input.notes),
       status: input.status ?? 'new',
       source: input.source ?? (isFieldLead ? 'field_chat' : 'canvassing_map'),
       latitude: loc?.lat,
@@ -239,10 +249,10 @@ export async function updateCanvassingLead(ctx: TenantContext, leadId: string, i
     where: { id: existing.id },
     data: {
       sessionId: input.sessionId ?? undefined,
-      address: input.address ?? undefined,
-      homeownerName: input.homeownerName ?? undefined,
-      phone: input.phone ?? undefined,
-      notes: input.notes ?? undefined,
+      address: input.address === undefined ? undefined : cleanFieldText(input.address),
+      homeownerName: input.homeownerName === undefined ? undefined : cleanFieldText(input.homeownerName),
+      phone: input.phone === undefined ? undefined : cleanFieldText(input.phone),
+      notes: input.notes === undefined ? undefined : cleanFieldText(input.notes),
       status: input.status ?? undefined,
       latitude: loc?.lat,
       longitude: loc?.lng,
@@ -424,18 +434,42 @@ function computeBounds(points: Array<{ lat: number; lng: number }>) {
 
 async function createGlobalCanvassingInbox(ctx: TenantContext, input: { type: string; title: string; summary?: string | null; payload?: Record<string, unknown> }) {
   const roles = ['sales', 'project_manager', 'owner']
-  await Promise.all(roles.map(role => db.inboxItem.create({
-    data: {
-      contractorId: ctx.contractorId,
-      userId: role === ctx.user?.role ? ctx.user?.id : undefined,
-      role,
-      type: input.type,
-      title: input.title,
-      summary: input.summary ?? undefined,
-      priority: input.type === 'canvassing_lead' ? 'normal' : 'low',
-      payloadJson: input.payload ? JSON.stringify(input.payload) : undefined,
-    },
-  }).catch(() => null)))
+  const relatedId = typeof input.payload?.leadId === 'string'
+    ? input.payload.leadId
+    : typeof input.payload?.sessionId === 'string'
+      ? input.payload.sessionId
+      : undefined
+
+  await Promise.all(roles.map(async role => {
+    if (relatedId) {
+      const existing = await db.inboxItem.findFirst({
+        where: {
+          contractorId: ctx.contractorId,
+          role,
+          type: input.type,
+          relatedId,
+          status: { in: ['unread', 'read'] },
+        },
+        select: { id: true },
+      }).catch(() => null)
+      if (existing) return
+    }
+
+    await db.inboxItem.create({
+      data: {
+        contractorId: ctx.contractorId,
+        userId: role === ctx.user?.role ? ctx.user?.id : undefined,
+        role,
+        type: input.type,
+        title: input.title,
+        summary: input.summary ?? undefined,
+        priority: input.type === 'canvassing_lead' || input.type === 'field_inspection_lead' ? 'normal' : 'low',
+        relatedType: relatedId ? input.type : undefined,
+        relatedId,
+        payloadJson: input.payload ? JSON.stringify(input.payload) : undefined,
+      },
+    }).catch(() => null)
+  }))
 }
 
 async function ensureProjectWorkspace(ctx: TenantContext, projectId: string, projectTitle: string, customerId?: string | null) {

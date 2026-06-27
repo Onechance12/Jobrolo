@@ -82,14 +82,19 @@ function safeToolResultSummary(result: { name: string; success: boolean; data: u
   return 'Done'
 }
 
-function isPlaceholderUrl(value: string) {
-  return /(?:yourdomain\.com|api\.storage\.url)/i.test(value)
+function normalizeGeneratedUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed || /(?:yourdomain\.com|api\.storage\.url)/i.test(trimmed)) return null
+  const badApiStorage = trimmed.match(/^https?:\/\/api(\/storage\/.+)$/i)
+  if (badApiStorage) return `/api${badApiStorage[1]}`
+  return trimmed
 }
 
 function isUsableFileUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  if (!value.trim() || isPlaceholderUrl(value)) return false
-  return value.startsWith('/api/') || value.startsWith('http://') || value.startsWith('https://')
+  const normalized = normalizeGeneratedUrl(value)
+  if (!normalized) return false
+  return normalized.startsWith('/api/') || normalized.startsWith('http://') || normalized.startsWith('https://')
 }
 
 function hostnameLabel(url: string) {
@@ -137,7 +142,7 @@ function cleanSourceName(value: unknown, fallback?: string) {
 }
 
 function attachmentFromToolObject(obj: Record<string, any>): MessageAttachment | null {
-  const url = obj.url ?? obj.fileUrl
+  const url = normalizeGeneratedUrl(obj.url ?? obj.fileUrl)
   if (!isUsableFileUrl(url)) return null
   const documentId = String(obj.documentId ?? obj.id ?? '').trim() || undefined
   if (isWebSourceObject(obj, url, documentId)) {
@@ -157,7 +162,7 @@ function attachmentFromToolObject(obj: Record<string, any>): MessageAttachment |
   const name = String(obj.name ?? obj.originalName ?? obj.filename ?? 'Saved file')
   const mimeType = String(obj.mimeType ?? '')
   const fileType = String(obj.fileType ?? obj.documentType ?? '')
-  const thumbnailUrl = isUsableFileUrl(obj.thumbnailUrl) ? obj.thumbnailUrl : undefined
+  const thumbnailUrl = isUsableFileUrl(obj.thumbnailUrl) ? normalizeGeneratedUrl(obj.thumbnailUrl) ?? undefined : undefined
   const isImage = fileType === 'photo' || mimeType.startsWith('image/') || Boolean(thumbnailUrl)
   const status = String(obj.status ?? obj.documentStatus ?? '')
   return {
@@ -198,7 +203,8 @@ function deriveAttachmentsFromToolResults(iterations: Array<{ toolResults?: Arra
 function normalizeModelAttachment(value: unknown): MessageAttachment | null {
   if (!value || typeof value !== 'object') return null
   const obj = value as Record<string, any>
-  if (!isUsableFileUrl(obj.url)) return null
+  const url = normalizeGeneratedUrl(obj.url)
+  if (!isUsableFileUrl(url)) return null
   const type = obj.type === 'image' || obj.type === 'file' || obj.type === 'link'
     ? obj.type
     : (String(obj.mimeType ?? '').startsWith('image/') || obj.thumbnailUrl ? 'image' : 'file')
@@ -206,8 +212,8 @@ function normalizeModelAttachment(value: unknown): MessageAttachment | null {
   return {
     type,
     name: String(obj.name ?? obj.title ?? obj.originalName ?? obj.filename ?? (type === 'link' ? hostnameLabel(String(obj.url)) ?? 'Web source' : 'Saved file')),
-    url: obj.url,
-    thumbnailUrl: isUsableFileUrl(obj.thumbnailUrl) ? obj.thumbnailUrl : undefined,
+    url,
+    thumbnailUrl: isUsableFileUrl(obj.thumbnailUrl) ? normalizeGeneratedUrl(obj.thumbnailUrl) ?? undefined : undefined,
     mimeType: String(obj.mimeType ?? (type === 'image' ? 'image/jpeg' : type === 'link' ? 'text/html' : 'application/octet-stream')),
     size: typeof obj.size === 'number' ? obj.size : undefined,
     documentId: obj.documentId ? String(obj.documentId) : undefined,
@@ -263,26 +269,45 @@ function deriveApprovalCardFromToolResults(iterations: Array<{ toolResults?: Arr
 }
 
 function deriveCardFromToolResults(iterations: Array<{ toolResults?: Array<{ data: unknown }> }>) {
+  const candidates: Array<{ contextType: string; contextData: Record<string, unknown> }> = []
   for (const iter of iterations) {
     for (const result of iter.toolResults ?? []) {
       const data = result.data as Record<string, unknown> | null
       const nested = data?.card
       if (nested && typeof nested === 'object' && (nested as Record<string, unknown>).cardType) {
         const card = nested as Record<string, unknown>
-        return {
+        candidates.push({
           contextType: String(card.cardType),
           contextData: card,
-        }
+        })
       }
       if (data?.cardType) {
-        return {
+        candidates.push({
           contextType: String(data.cardType),
           contextData: data,
-        }
+        })
       }
     }
   }
-  return null
+  if (!candidates.length) return null
+  const priority = [
+    'created_chat',
+    'company_research_review',
+    'company_profile',
+    'action_center',
+    'field_inspection_lead',
+    'canvassing_lead',
+    'roof_report',
+    'document_review',
+    'price_sheet_review',
+    'approval_request',
+  ]
+  candidates.sort((a, b) => {
+    const ai = priority.indexOf(a.contextType)
+    const bi = priority.indexOf(b.contextType)
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+  })
+  return candidates[0]
 }
 
 export async function processAgentJob(job: AgentJobRow) {

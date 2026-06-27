@@ -557,6 +557,15 @@ function isCompanyLogoUploadRequest(text: string) {
   return /\b(company|profile|estimate|estimates|invoice|invoices|report|reports|contract|contracts|signature|signatures|branding|brand)\b/.test(lower)
 }
 
+function isActionCenterRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  return (
+    /\b(what|show|list|pull|open|check)\b[\s\S]{0,90}\b(needs? attention|action needed|pending approvals?|review items?|failed work|routed tasks?|invites?|notifications?)\b/.test(lower) ||
+    /\b(needs? attention|action needed|what needs my approval|what do i need to approve|pending approvals?)\b/.test(lower)
+  )
+}
+
 function isFieldInspectionLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
@@ -584,12 +593,20 @@ function extractPotentialLeadArgs(text: string) {
   const beforePhone = phone && phoneIndex >= 0 ? afterLead.slice(0, phoneIndex).trim() : afterLead
   const afterPhone = phone && phoneIndex >= 0 ? afterLead.slice(phoneIndex + phone.length).trim() : ''
   const nameWords = beforePhone.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}/)?.[0]
-  const addressFromAfterPhone = afterPhone.replace(/\b(speech|period|comma|please)$/i, '').trim()
-  const addressFromBeforePhone = beforePhone.replace(nameWords ?? '', '').trim()
+  const cleanupAddress = (value: string) => value
+    .replace(nameWords ?? '', '')
+    .replace(/^\s*(?:at|address is|address|for|on)\s+/i, '')
+    .replace(/\b(?:phone|cell|mobile|number|tel|telephone)\b.*$/i, '')
+    .replace(/\b(speech|period|comma|please|thanks|thank you)\b\.?$/i, '')
+    .replace(/^[\s:,. -]+|[\s:,. -]+$/g, '')
+    .trim()
+  const addressFromBeforePhone = cleanupAddress(beforePhone)
+  const addressFromAfterPhone = cleanupAddress(afterPhone)
+  const address = addressFromBeforePhone || addressFromAfterPhone || undefined
   return {
     homeownerName: nameWords,
     phone,
-    address: addressFromAfterPhone || addressFromBeforePhone || undefined,
+    address,
     notes: clean.slice(0, 800),
     status: 'new',
   }
@@ -734,6 +751,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (opts?.documentIds?.length && isCompanyLogoUploadRequest(userText)) {
     return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
   }
+  if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadToolCall(userText, mostRecentBrowserLocation(messages))

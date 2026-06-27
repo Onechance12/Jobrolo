@@ -270,6 +270,30 @@ export async function processDocumentJob(job: AgentJobRow) {
       return
     }
 
+    if (current.fileType === 'company_logo') {
+      await db.document.update({
+        where: { id: documentId },
+        data: {
+          status: 'reviewed',
+          aiCategory: 'company_logo',
+          aiSummary: 'Company logo saved for company profile use.',
+          extractionMethod: 'metadata',
+        },
+      })
+      console.log(`[doc-worker] doc=${documentId} | company logo saved — AI document analysis skipped`)
+      await completeJob(job.id, {
+        documentId,
+        status: 'reviewed',
+        category: 'company_logo',
+        summary: 'Company logo saved for company profile use.',
+        extractionMethod: 'metadata',
+        confidence: 100,
+        conflicts: 0,
+        missingFields: 0,
+      })
+      return
+    }
+
     // ----- Route by file type -----
     const isImage = current.mimeType.startsWith('image/')
     if (isImage) {

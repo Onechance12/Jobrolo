@@ -934,6 +934,7 @@ export const TOOLS: ToolDef[] = [
             status: 'review',
             research,
             suggestedProfileUpdate,
+            existingProfile: existingProfile ? publicContractorProfile(existingProfile) : null,
             guidance: 'Review these suggested company profile updates. If anything is wrong, tell Jobrolo in chat and it will update the profile from your correction.',
           },
           message: 'Website research completed. If the user wants this saved, call update_contractor_profile with suggestedProfileUpdate fields.',
@@ -3871,7 +3872,18 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
       const inbox = await listCopilotInbox(await buildTrustedToolTenantContext(contractorId, ctx), args)
-      return { success: true, data: inbox }
+      return {
+        success: true,
+        data: {
+          ...inbox,
+          card: {
+            cardType: 'action_center',
+            title: 'Action Needed',
+            items: Array.isArray((inbox as any).items) ? (inbox as any).items.slice(0, 12) : [],
+            count: (inbox as any).count ?? (Array.isArray((inbox as any).items) ? (inbox as any).items.length : 0),
+          },
+        },
+      }
     },
   },
   {

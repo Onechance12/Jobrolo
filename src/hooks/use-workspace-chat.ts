@@ -11,6 +11,17 @@ const DOC_BACKGROUND_STATES = new Set(['queued', 'processing', 'pending_review']
 
 type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: string; doc?: any }
 
+function uploadIntentFields(text: string, attachments: File[] = []): Record<string, string> {
+  const lower = `${text} ${attachments.map(f => f.name).join(' ')}`.toLowerCase()
+  if (/\blogo\b/.test(lower) && /\b(company|profile|brand|branding|estimate|invoice|report|contract|signature)\b/.test(lower)) {
+    return { uploadPurpose: 'company_logo' }
+  }
+  if (/\b(price\s*sheet|pricing|material price|supplier price|materials database|material database)\b/.test(lower)) {
+    return { uploadPurpose: 'company_pricing' }
+  }
+  return {}
+}
+
 async function pollDoc(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 18, signal?: AbortSignal): Promise<DocumentPollResult> {
   for (let i = 0; i < maxAttempts; i++) { // default 18 * 2s = 36s max wait before the UI moves on
     if (signal?.aborted) return { reviewed: false, terminal: false, status: 'stopped' }
@@ -120,11 +131,14 @@ export function useWorkspaceChat() {
     if (attachments.length > 0) {
       try {
         const ws = store.getCurrentWorkspace()
+        const intentFields = uploadIntentFields(text, attachments)
+        const isCompanyLevelUpload = intentFields.uploadPurpose === 'company_logo' || intentFields.uploadPurpose === 'company_pricing'
         const data = await uploadFilesSequentially(attachments, {
           signal: abortControllerRef.current.signal,
           fields: {
-            workspaceId,
-            ...(ws?.projectId ? { projectId: ws.projectId } : {}),
+            ...(isCompanyLevelUpload ? {} : { workspaceId }),
+            ...(isCompanyLevelUpload ? {} : ws?.projectId ? { projectId: ws.projectId } : {}),
+            ...intentFields,
             ...uploadFields,
           },
         })
@@ -186,7 +200,7 @@ export function useWorkspaceChat() {
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 content: text.trim()
-                  ? `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’m finishing the analysis before I answer so I don’t guess from a half-processed file.`
+                  ? `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’m checking the saved analysis now. If it is still processing, I’ll tell you instead of guessing.`
                   : data.deferLinkPrompt && data.suggestedPrompt
                     ? data.suggestedPrompt
                     : `Saved ${docs.length === 1 ? 'the upload' : `${docs.length} uploads`}. I’ll analyze ${docs.length === 1 ? 'it' : 'them'} in the background, so you can keep working.`,

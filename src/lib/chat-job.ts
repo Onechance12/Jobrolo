@@ -25,7 +25,9 @@ const jobs = new Map<string, ChatJob>()
 setInterval(() => { const now = Date.now(); for (const [id, job] of jobs) if (now - job.createdAt > 600000) jobs.delete(id) }, 60000)
 
 function sanitizeGeneratedStorageUrls(text: string) {
-  return text.replace(/https?:\/\/yourdomain\.com(\/api\/storage\/[^\s)\]}]+)/gi, '$1')
+  return text
+    .replace(/https?:\/\/yourdomain\.com(\/api\/storage\/[^\s)\]}]+)/gi, '$1')
+    .replace(/https?:\/\/api(\/storage\/[^\s)\]}]+)/gi, '/api$1')
 }
 
 function safeThinkingText(text: string, toolNames: string[] = []) {

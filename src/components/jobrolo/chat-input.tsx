@@ -68,7 +68,7 @@ Use this location for the user's "where I am / here / near me" request. Do not a
 }
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mode = 'command' }: Props) {
-  const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
+  const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [showShortcutMenu, setShowShortcutMenu] = useState(false); const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -124,6 +124,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       setInspectionSectionId(match?.id ?? null)
       setInspectionPickerOpen(true)
       setShowAttachMenu(false)
+      setShowShortcutMenu(false)
       setLocalError(null)
     }
     window.addEventListener('jobrolo:open-file-picker', openFilePicker)
@@ -199,8 +200,11 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     setPendingFiles(p => [...p, ...selected])
     if (selectedInspectionSection && !textRef.current.trim()) {
       setText(inspectionPromptForSection(selectedInspectionSection))
+    } else if (selectedInspectionSection && isGeneratedInspectionPrompt(textRef.current)) {
+      setText(inspectionPromptForSection(selectedInspectionSection))
     }
     setShowAttachMenu(false)
+    setShowShortcutMenu(false)
     window.setTimeout(() => {
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (cameraInputRef.current) cameraInputRef.current.value = ''
@@ -210,25 +214,27 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     setInspectionSectionId(sectionId ?? null)
     setInspectionPickerOpen(true)
     setShowAttachMenu(false)
+    setShowShortcutMenu(false)
     setLocalError(null)
   }
   const chooseInspectionSection = (sectionId: string) => {
     const section = INSPECTION_PHOTO_SECTIONS.find(s => s.id === sectionId)
     setInspectionSectionId(sectionId)
-    if (section && !textRef.current.trim()) setText(inspectionPromptForSection(section))
+    if (section && (!textRef.current.trim() || isGeneratedInspectionPrompt(textRef.current))) setText(inspectionPromptForSection(section))
   }
   const openInspectionPicker = (source: 'camera' | 'file') => {
     if (!selectedInspectionSection) {
       setLocalError('Pick the photo section first, then take or upload the photos.')
       return
     }
-    if (!textRef.current.trim()) setText(inspectionPromptForSection(selectedInspectionSection))
+    if (!textRef.current.trim() || isGeneratedInspectionPrompt(textRef.current)) setText(inspectionPromptForSection(selectedInspectionSection))
     if (source === 'camera') cameraInputRef.current?.click()
     else fileInputRef.current?.click()
   }
   const insertPrompt = (prompt: string) => {
     setText(prompt)
     setShowAttachMenu(false)
+    setShowShortcutMenu(false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
   const saveCurrentPromptAsShortcut = () => {
@@ -242,6 +248,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       window.dispatchEvent(new Event(COMMAND_SHORTCUTS_UPDATED_EVENT))
     } catch {}
     setShowAttachMenu(false)
+    setShowShortcutMenu(false)
     setLocalError('Saved this prompt as a shortcut on this device.')
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
@@ -283,11 +290,35 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       )}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
       <div className="flex items-end gap-2">
-        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center"><Plus className="w-5 h-5" /></button>
+        <div className="relative flex-shrink-0"><button onClick={() => { setShowAttachMenu(v => !v); setShowShortcutMenu(false) }} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[260px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
             {mode === 'field' ? <MenuButton icon={<Camera className="w-5 h-5 text-emerald-600 dark:text-emerald-300" />} label="Inspection photos" hint="Choose roof/interior/attic section" onClick={() => openInspectionIntake(null)} /> : null}
-            <MenuButton icon={<Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" />} label="Take photo" hint="Save field photos" onClick={() => cameraInputRef.current?.click()} />
-            <MenuButton icon={<Paperclip className="w-5 h-5 text-muted-foreground" />} label="Attach file" hint="PDFs, docs, images" onClick={() => fileInputRef.current?.click()} />
+            <MenuButton icon={<Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" />} label="Take photo" hint="Save field photos" onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click() }} />
+            <MenuButton icon={<Paperclip className="w-5 h-5 text-muted-foreground" />} label="Attach file" hint="PDFs, docs, images" onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click() }} />
+          </div></>)}
+        </div>
+        <div className="relative flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => { setShowShortcutMenu(v => !v); setShowAttachMenu(false) }}
+            disabled={disabled || submitting}
+            className="hidden min-h-[44px] items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50 min-[420px]:inline-flex"
+            aria-label="Open command shortcuts"
+          >
+            <FileText className="h-4 w-4" />
+            Shortcuts
+          </button>
+          <button
+            type="button"
+            onClick={() => { setShowShortcutMenu(v => !v); setShowAttachMenu(false) }}
+            disabled={disabled || submitting}
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:opacity-50 min-[420px]:hidden"
+            aria-label="Open command shortcuts"
+          >
+            <FileText className="h-4 w-4" />
+          </button>
+          {showShortcutMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowShortcutMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[280px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
+            <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Command shortcuts</div>
             <div className="my-1 border-t border-border" />
             {shortcuts.slice(0, 16).map((cmd) => (
               <MenuButton
@@ -401,14 +432,15 @@ function InspectionPhotoIntakeCard({
 }) {
   const selected = selectedSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === selectedSectionId) : null
   return (
-    <div className="mb-2 rounded-2xl border border-emerald-300/60 bg-emerald-50 p-3 shadow-sm dark:border-emerald-900/70 dark:bg-emerald-950/25">
+    <div className="mb-2 max-h-[58dvh] overflow-y-auto rounded-2xl border border-emerald-300/60 bg-emerald-50 p-3 shadow-sm dark:border-emerald-900/70 dark:bg-emerald-950/25">
       <div className="mb-2 flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-50">Inspection photo capture</div>
           <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Pick what these photos are, then take or upload them.</div>
         </div>
-        <button type="button" onClick={onClose} className="rounded-full p-1 text-emerald-950/60 hover:bg-emerald-100 dark:text-emerald-100/70 dark:hover:bg-emerald-900/40">
+        <button type="button" onClick={onClose} className="inline-flex min-h-[34px] items-center gap-1 rounded-full px-2 text-xs font-medium text-emerald-950/70 hover:bg-emerald-100 dark:text-emerald-100/80 dark:hover:bg-emerald-900/40" aria-label="Close inspection photo capture">
           <X className="h-4 w-4" />
+          Close
         </button>
       </div>
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
