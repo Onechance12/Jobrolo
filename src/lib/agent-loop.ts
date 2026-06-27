@@ -543,6 +543,20 @@ function browserLocationFromText(text: string) {
   }
 }
 
+function mostRecentBrowserLocation(messages: ChatMessage[]) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const location = browserLocationFromText(plainMessageText(messages[i]?.content ?? ''))
+    if (location) return location
+  }
+  return null
+}
+
+function isCompanyLogoUploadRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!/\blogo\b/.test(lower)) return false
+  return /\b(company|profile|estimate|estimates|invoice|invoices|report|reports|contract|contracts|signature|signatures|branding|brand)\b/.test(lower)
+}
+
 function isFieldInspectionLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
@@ -566,8 +580,27 @@ function isFieldLocationResolveRequest(messages: ChatMessage[]) {
     || /\b(inspection|appointment|jobsite|job site|field visit|current house|this house|this property)\b/.test(recent)
 }
 
-function buildFieldInspectionLeadInstruction(userText: string) {
-  const location = browserLocationFromText(userText)
+function isFieldResearchContinuationRequest(messages: ChatMessage[]) {
+  const latestUser = lastExternalUserMessage(messages)
+  if (!latestUser) return false
+  const latest = plainMessageText(latestUser.message.content).toLowerCase()
+  if (!/\b(research|search|look\s*up|lookup|find|check)\b.{0,60}\b(it|this|property|house|home|address|owner|homeowner)\b/.test(latest)) return false
+  const recent = recentPlainMessages(messages, 10).toLowerCase()
+  return /\b(field|inspection|current location|browser_location|where i am|where i'm at|this house|this property|canvassing lead|inspection lead|property research)\b/.test(recent)
+}
+
+function isAffirmativeFieldInspectionContinuation(messages: ChatMessage[]) {
+  const latestUser = lastExternalUserMessage(messages)
+  if (!latestUser) return false
+  const latest = plainMessageText(latestUser.message.content).trim().toLowerCase()
+  if (!/^(yes|yea|yep|yeah|sure|ok|okay|proceed|do it|start it|use it)$/.test(latest)) return false
+  const recent = recentPlainMessages(messages, 8).toLowerCase()
+  return /\b(start a new inspection lead|proceed with this canvassing lead|inspection lead|field inspection|current location)\b/.test(recent)
+    && /\b(inspection|current location|where i am|where i'm at|browser_location|near your current location)\b/.test(recent)
+}
+
+function buildFieldInspectionLeadInstruction(userText: string, fallbackLocation?: ReturnType<typeof browserLocationFromText>) {
+  const location = browserLocationFromText(userText) ?? fallbackLocation ?? null
   const locationArgs = location
     ? `, "location": ${JSON.stringify(location)}`
     : ''
@@ -580,6 +613,23 @@ Do not start a canvassing run and do not open a map.
 Call start_field_inspection_lead now with {"searchPropertyInfo": true${locationArgs}, "notes": ${JSON.stringify(userText.slice(0, 800))}}.
 
 After the tool returns, ask the user to confirm any property/homeowner match and offer the inspection photo workflow/sections. Respond as JSON only.`
+}
+
+function buildFieldResearchContinuationInstruction(messages: ChatMessage[]) {
+  const latestUser = lastExternalUserMessage(messages)
+  const userText = latestUser ? plainMessageText(latestUser.message.content) : ''
+  const location = mostRecentBrowserLocation(messages)
+  const locationArgs = location
+    ? `, "location": ${JSON.stringify(location)}`
+    : ''
+  return `The user is continuing a field/current-property workflow and asked to research the property:
+"${userText.slice(0, 500)}"
+
+Do not ask for homeowner name or phone number before researching.
+Do not create a customer/project yet.
+Call research_property_now now with {"mode":"approaching_house","query":"current GPS location","allowProviderLookup":true${locationArgs}, "notes": ${JSON.stringify(userText.slice(0, 500))}}.
+
+After the tool returns, show possible property/owner/address matches and ask the user to confirm before saving, converting, or updating records. If public property research is not configured, say exactly what provider/API is missing. Respond as JSON only.`
 }
 
 function buildFieldLocationResolveInstruction(userText: string) {
@@ -596,14 +646,30 @@ Call resolve_field_location now with {${locationArgs}"mode":"inspection_check"}.
 After the tool returns, tell the user whether a saved inspection/project/customer/lead appears to match this location. If nothing matches, say that honestly and offer to start a new field inspection lead. Respond as JSON only.`
 }
 
-function buildFieldInspectionLeadToolCall(userText: string): ToolCall {
-  const location = browserLocationFromText(userText)
+function buildFieldInspectionLeadToolCall(userText: string, fallbackLocation?: ReturnType<typeof browserLocationFromText>): ToolCall {
+  const location = browserLocationFromText(userText) ?? fallbackLocation ?? null
   return {
     name: 'start_field_inspection_lead',
     args: {
       searchPropertyInfo: true,
       ...(location ? { location } : {}),
       notes: userText.slice(0, 800),
+    },
+  }
+}
+
+function buildFieldResearchContinuationToolCall(messages: ChatMessage[]): ToolCall {
+  const latestUser = lastExternalUserMessage(messages)
+  const userText = latestUser ? plainMessageText(latestUser.message.content) : ''
+  const location = mostRecentBrowserLocation(messages)
+  return {
+    name: 'research_property_now',
+    args: {
+      mode: 'approaching_house',
+      query: 'current GPS location',
+      allowProviderLookup: true,
+      ...(location ? { location } : {}),
+      notes: userText.slice(0, 500),
     },
   }
 }
@@ -620,11 +686,16 @@ function buildFieldLocationResolveToolCall(userText: string): ToolCall | null {
   }
 }
 
-function buildDeterministicToolCall(messages: ChatMessage[]): ToolCall | null {
+function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'documentIds'>): ToolCall | null {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
+  if (opts?.documentIds?.length && isCompanyLogoUploadRequest(userText)) {
+    return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
+  }
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
+  if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadToolCall(userText, mostRecentBrowserLocation(messages))
+  if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationToolCall(messages)
   if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveToolCall(userText)
   return null
 }
@@ -644,6 +715,8 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
+  if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadInstruction(userText, mostRecentBrowserLocation(messages))
+  if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationInstruction(messages)
   if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveInstruction(userText)
   if (isPriceSheetReviewRequest(userText)) {
     const filename = documentHintFromPriceSheetText(userText)
@@ -687,8 +760,10 @@ Common recovery examples:
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
 - To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
+- If the user uploaded a logo and asked to add it to the company profile, call update_contractor_profile with logoDocumentId from the current uploaded document. Do not wait for logo/image analysis.
 - To create a named/address potential lead before an inspection is set, call create_canvassing_lead_at_location with homeownerName/address/phone/status="new".
 - To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is clearly an inspection/appointment at a new property with browser GPS.
+- If the user asks to research "it/this property/this house" during a field inspection flow, call research_property_now with the latest browser GPS/location context. Do not ask for homeowner name or phone first.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.
@@ -765,7 +840,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const parsedToolCallCount = (parsed.tool_calls?.length ?? 0) + normalizedWork.convertedToolCalls.length
     const parsedActionCount = normalizedWork.executableActions.length
     const deterministicToolCall = parsedToolCallCount === 0 && parsedActionCount === 0
-      ? buildDeterministicToolCall(messages)
+      ? buildDeterministicToolCall(messages, opts)
       : null
     if (deterministicToolCall) {
       console.warn(`[agent-loop] injected deterministic tool call '${deterministicToolCall.name}' iteration=${i} contractorId=${opts.contractorId}`)
