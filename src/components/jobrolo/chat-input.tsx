@@ -472,6 +472,13 @@ type PromptGroup = {
 }
 
 function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]): PromptGroup[] {
+  const commandShortcuts: PromptGroup = {
+    id: 'shortcuts',
+    label: 'Shortcuts',
+    reason: 'your prompts',
+    tone: 'personal',
+    shortcuts: shortcuts.slice(0, 7),
+  }
   const field: PromptGroup = {
     id: 'field',
     label: 'Field',
@@ -522,9 +529,9 @@ function promptGroupsFor(mode: 'command' | 'field', shortcuts: CommandShortcut[]
     .slice(0, 7)
 
   return [
-    ...(mode === 'field' ? [field, sales, files, company] : [sales, files, field, company]),
+    ...(mode === 'field' ? [field, commandShortcuts, sales, files, company] : [commandShortcuts, sales, files, field, company]),
     ...(custom.length ? [{ id: 'personal', label: 'My shortcuts', reason: 'your saved prompts', tone: 'personal' as const, shortcuts: custom }] : []),
-  ]
+  ].filter(group => group.shortcuts.length)
 }
 
 function promptGroupTone(tone: PromptTone) {
@@ -574,41 +581,76 @@ function promptGroupIcon(tone: PromptTone) {
 }
 
 function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: (shortcut: CommandShortcut) => void }) {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const railRef = useRef<HTMLDivElement>(null)
   if (!groups.length) return null
+  const activeGroup = groups[Math.min(activeIndex, groups.length - 1)] ?? groups[0]
+  const activeTone = promptGroupTone(activeGroup.tone)
+
+  const scrollToGroup = (index: number) => {
+    const node = railRef.current
+    if (!node) return
+    node.scrollTo({ left: index * node.clientWidth, behavior: 'smooth' })
+    setActiveIndex(index)
+  }
+
   return (
-    <div className="-mx-3 mb-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex w-max max-w-none gap-2">
-        {groups.map(group => {
-          const tone = promptGroupTone(group.tone)
-          return (
-            <section key={group.id} className={cn('min-w-[236px] max-w-[282px] rounded-2xl border p-2 shadow-sm backdrop-blur', tone.shell)}>
-              <div className="mb-1.5 flex items-center gap-2 px-1">
-                <span className={cn('inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full', tone.icon)}>
-                  {promptGroupIcon(group.tone)}
-                </span>
-                <div className="min-w-0">
-                  <div className="truncate text-xs font-semibold text-foreground">{group.label}</div>
-                  <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{group.reason}</div>
+    <div className="mb-2">
+      <div className="mb-1.5 flex items-center justify-between px-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full', activeTone.icon)}>
+            {promptGroupIcon(activeGroup.tone)}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold leading-tight text-foreground">{activeGroup.label}</div>
+            <div className="truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">{activeGroup.reason}</div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1" aria-label={`${groups.length} prompt sections`}>
+          {groups.map((group, index) => (
+            <button
+              key={group.id}
+              type="button"
+              onClick={() => scrollToGroup(index)}
+              aria-label={`Show ${group.label} prompts`}
+              className={cn(
+                'h-1.5 rounded-full transition-all',
+                index === activeIndex ? 'w-4 bg-foreground/70' : 'w-1.5 bg-muted-foreground/30',
+              )}
+            />
+          ))}
+        </div>
+      </div>
+      <div
+        ref={railRef}
+        onScroll={event => {
+          const node = event.currentTarget
+          const index = Math.round(node.scrollLeft / Math.max(1, node.clientWidth))
+          if (index !== activeIndex && index >= 0 && index < groups.length) setActiveIndex(index)
+        }}
+        className="-mx-3 overflow-x-auto px-3 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <div className="flex gap-3">
+          {groups.map(group => {
+            const tone = promptGroupTone(group.tone)
+            return (
+              <section key={group.id} className={cn('w-full shrink-0 snap-start rounded-2xl border px-2 py-2 shadow-sm backdrop-blur', tone.shell)}>
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {group.shortcuts.slice(0, 7).map(shortcut => (
+                    <button
+                      key={shortcut.id}
+                      type="button"
+                      onClick={() => onRun(shortcut)}
+                      className={cn('inline-flex min-h-[34px] shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors', tone.pill)}
+                    >
+                      <span className="truncate">{shortcut.label}</span>
+                    </button>
+                  ))}
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {group.shortcuts.slice(0, 7).map(shortcut => (
-                  <button
-                    key={shortcut.id}
-                    type="button"
-                    onClick={() => onRun(shortcut)}
-                    className={cn('inline-flex min-h-[31px] max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors', tone.pill)}
-                  >
-                    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
-                      {shortcutIcon(shortcut)}
-                    </span>
-                    <span className="truncate">{shortcut.label}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )
-        })}
+              </section>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

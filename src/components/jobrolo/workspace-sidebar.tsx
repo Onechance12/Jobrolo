@@ -194,7 +194,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
   const editShortcut = (shortcut: CommandShortcut) => {
     const label = window.prompt('Shortcut label', shortcut.label)?.trim()
     if (!label) return
-    const prompt = window.prompt('Prompt to insert into chat', shortcut.prompt)?.trim()
+    const prompt = window.prompt('Prompt text Jobrolo should insert into chat', shortcut.prompt)?.trim()
     if (!prompt) return
     persistShortcuts(shortcuts.map(item => item.id === shortcut.id ? { ...item, label, prompt } : item))
   }
@@ -330,25 +330,35 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
                 </button>
               </div>
               {shortcuts.slice(0, editingShortcuts ? 24 : 8).map(shortcut => (
-                <div key={shortcut.id} className="group flex items-center gap-1">
-                  <button
-                    onClick={() => insertCommandPrompt(shortcut.prompt)}
-                    className="flex min-h-[40px] min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                  >
-                    {shortcutIcon(shortcut)}
-                    <span className="truncate">{shortcut.label}</span>
-                  </button>
-                  {editingShortcuts ? (
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      <button onClick={() => editShortcut(shortcut)} className="rounded-lg p-2 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground" aria-label={`Edit shortcut ${shortcut.label}`}>
-                        <Pencil className="h-3.5 w-3.5" />
+                editingShortcuts ? (
+                  <div key={shortcut.id} className="rounded-xl border border-border bg-sidebar-accent/20 p-2">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 shrink-0">{shortcutIcon(shortcut)}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-sidebar-foreground">{shortcut.label}</div>
+                        <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{shortcut.prompt}</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex gap-1.5">
+                      <button onClick={() => editShortcut(shortcut)} className="flex-1 rounded-lg border border-border px-2 py-1.5 text-[11px] font-medium text-sidebar-foreground hover:bg-sidebar-accent">
+                        Edit title + prompt
                       </button>
-                      <button onClick={() => deleteShortcut(shortcut)} className="rounded-lg p-2 text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30" aria-label={`Delete shortcut ${shortcut.label}`}>
+                      <button onClick={() => deleteShortcut(shortcut)} className="rounded-lg border border-border px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30" aria-label={`Delete shortcut ${shortcut.label}`}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                ) : (
+                  <div key={shortcut.id} className="group flex items-center gap-1">
+                    <button
+                      onClick={() => insertCommandPrompt(shortcut.prompt)}
+                      className="flex min-h-[40px] min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    >
+                      {shortcutIcon(shortcut)}
+                      <span className="truncate">{shortcut.label}</span>
+                    </button>
+                  </div>
+                )
               ))}
               {editingShortcuts ? (
                 <div className="mt-1 grid grid-cols-2 gap-1 border-t border-border pt-2">
