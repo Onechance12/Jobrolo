@@ -2,10 +2,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bot, Loader2, Send, ArrowRight, Sparkles, LockKeyhole, MessageCircleQuestion } from 'lucide-react'
+import { Loader2, Send, ArrowRight, Sparkles, LockKeyhole, MessageCircleQuestion } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Message { role: 'user' | 'assistant'; content: string; timestamp: string }
+
+function JobroloChatIcon() {
+  return (
+    <div className="flex-shrink-0 w-8 h-8 overflow-hidden rounded-full bg-slate-950 shadow-[0_0_18px_rgba(37,99,235,0.45)] ring-1 ring-blue-400/30">
+      <img src="/logo.png" alt="Jobrolo" className="h-full w-full object-cover" />
+    </div>
+  )
+}
 
 export default function OnboardingPage() {
   const router = useRouter()
@@ -17,6 +25,8 @@ export default function OnboardingPage() {
   const [completed, setCompleted] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const messageRefs = useRef<Array<HTMLDivElement | null>>([])
+  const previousMessageCountRef = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const starterPrompts = [
     'How do I use Jobrolo?',
@@ -25,6 +35,11 @@ export default function OnboardingPage() {
     'Start setup',
     'Use my website to help set this up',
     'What info do you need from me?',
+  ]
+  const assistantPrompts = [
+    'How do I use Jobrolo?',
+    'What can Jobrolo do?',
+    'What info do you need?',
   ]
 
   // Auth check + load existing onboarding state
@@ -55,10 +70,38 @@ export default function OnboardingPage() {
     })()
   }, [router])
 
-  // Auto-scroll on new messages
+  // Keep onboarding readable: user sends move the thread forward, but long
+  // Jobrolo answers scroll to the start of the new answer instead of the end.
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+
+    const previousCount = previousMessageCountRef.current
+    previousMessageCountRef.current = messages.length
+
+    if (sending && messages.length === previousCount) {
+      el.scrollTop = el.scrollHeight
+      return
+    }
+
+    if (messages.length <= previousCount) return
+    const lastIndex = messages.length - 1
+    const lastMessage = messages[lastIndex]
+    if (!lastMessage) return
+
+    requestAnimationFrame(() => {
+      const container = scrollRef.current
+      if (!container) return
+      if (lastMessage.role === 'assistant') {
+        const node = messageRefs.current[lastIndex]
+        if (!node) return
+        const containerRect = container.getBoundingClientRect()
+        const nodeRect = node.getBoundingClientRect()
+        container.scrollTop += nodeRect.top - containerRect.top - 16
+      } else {
+        container.scrollTop = container.scrollHeight
+      }
+    })
   }, [messages, sending])
 
   // Focus input when ready
@@ -66,11 +109,11 @@ export default function OnboardingPage() {
     if (!loading && !sending && inputRef.current) inputRef.current.focus()
   }, [loading, sending])
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim()
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim()
     if (!text || sending) return
     setSending(true)
-    setInput('')
+    if (!overrideText) setInput('')
 
     // Optimistic: add user message immediately
     const userMsg: Message = { role: 'user', content: text, timestamp: new Date().toISOString() }
@@ -127,6 +170,12 @@ export default function OnboardingPage() {
     if (sending) return
     setInput(prompt)
     requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const sendPrompt = (prompt: string) => {
+    if (sending) return
+    setInput('')
+    void handleSend(prompt)
   }
 
   if (!authChecked) {
@@ -196,29 +245,55 @@ export default function OnboardingPage() {
               {messages.map((m, i) => (
                 <motion.div
                   key={i}
+                  ref={node => { messageRefs.current[i] = node }}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={cn('flex gap-3', m.role === 'user' ? 'flex-row-reverse' : 'flex-row')}
+                  className={cn('flex items-start gap-3', m.role === 'user' ? 'flex-row-reverse' : 'flex-row')}
                 >
-                  <div className={cn(
-                    'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                    m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gradient-to-br from-cyan-500 to-blue-700 text-white shadow-[0_0_18px_rgba(37,99,235,0.45)]'
-                  )}>
-                    {m.role === 'user' ? <span className="text-xs font-semibold">You</span> : <Bot className="w-4 h-4" />}
-                  </div>
+                  {m.role === 'user' ? (
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center">
+                      <span className="text-xs font-semibold">You</span>
+                    </div>
+                  ) : <JobroloChatIcon />}
                   <div className={cn(
                     'rounded-2xl px-4 py-3 max-w-[80%] text-[15px] leading-relaxed whitespace-pre-wrap',
                     m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-[#0b1220] border border-white/10 text-slate-100 rounded-tl-md'
                   )}>
                     {m.content}
+                    {m.role === 'assistant' && !completed ? (
+                      <div className="mt-4 border-t border-white/10 pt-3">
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Keep going
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {assistantPrompts.map(prompt => (
+                            <button
+                              key={prompt}
+                              type="button"
+                              onClick={() => sendPrompt(prompt)}
+                              disabled={sending}
+                              className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-blue-300/40 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {prompt}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => sendPrompt('I am ready to create my workspace. What final information do you need from me?')}
+                            disabled={sending}
+                            className="rounded-full border border-blue-300/35 bg-blue-500/20 px-3 py-1.5 text-xs font-semibold text-blue-100 transition hover:border-blue-200/60 hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Create workspace
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </motion.div>
               ))}
               {sending && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 text-white flex items-center justify-center">
-                    <Bot className="w-4 h-4" />
-                  </div>
+                  <JobroloChatIcon />
                   <div className="bg-[#0b1220] border border-white/10 rounded-2xl rounded-tl-md px-4 py-3 flex items-center gap-2 text-slate-400 text-sm">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>Thinking…</span>
@@ -261,7 +336,7 @@ export default function OnboardingPage() {
               }}
             />
             <button
-              onClick={handleSend}
+              onClick={() => void handleSend()}
               disabled={!input.trim() || sending}
               className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"
               aria-label="Send"

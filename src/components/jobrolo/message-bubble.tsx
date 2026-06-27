@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Bot, User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain, ExternalLink } from 'lucide-react'
+import { User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain, ExternalLink } from 'lucide-react'
 import { cn, formatMessageTime, formatFileSize, stripJsonWrapper } from '@/lib/utils'
 import { getChannelConfig } from '@/lib/channels'
 import { DocumentCard } from './document-card'
@@ -9,6 +9,14 @@ import { CopilotCardFromMessage } from './copilot-cards'
 import type { ClientMessage, MessageAttachment, ActionResult, ThinkingStep } from '@/lib/types'
 
 interface Props { message: ClientMessage; isStreaming?: boolean; onSpeak?: (text: string) => void; isSpeaking?: boolean; userAvatar?: string | null }
+
+function JobroloAvatar({ className }: { className?: string }) {
+  return (
+    <div className={cn('flex-shrink-0 w-8 h-8 overflow-hidden rounded-full bg-slate-950 shadow-[0_0_18px_rgba(37,99,235,0.45)] ring-1 ring-blue-400/30', className)}>
+      <img src="/logo.png" alt="Jobrolo" className="h-full w-full object-cover" />
+    </div>
+  )
+}
 
 export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Props) {
   const isUser = message.role === 'user'
@@ -24,9 +32,11 @@ export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Prop
     : content
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>
-      <div className={cn('flex-shrink-0 w-8 h-8 overflow-hidden rounded-full flex items-center justify-center', isUser ? 'bg-muted text-muted-foreground' : 'bg-gradient-to-br from-blue-600 to-blue-800 text-white')}>
-        {isUser && userAvatar ? <img src={userAvatar} alt="Your profile" className="h-full w-full object-cover" /> : isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-      </div>
+      {isUser ? (
+        <div className="flex-shrink-0 w-8 h-8 overflow-hidden rounded-full flex items-center justify-center bg-muted text-muted-foreground">
+          {userAvatar ? <img src={userAvatar} alt="Your profile" className="h-full w-full object-cover" /> : <User className="w-4 h-4" />}
+        </div>
+      ) : <JobroloAvatar />}
       <div className={cn('flex-1 min-w-0 max-w-[85%] sm:max-w-[80%] overflow-hidden', isUser && 'flex flex-col items-end')}>
         {!isUser && message.thinking && message.thinking.length > 0 && <ThinkingSteps steps={message.thinking} />}
         <div className={cn('rounded-2xl px-3.5 sm:px-4 py-2.5 text-[15px] leading-relaxed max-w-full overflow-hidden break-words [overflow-wrap:anywhere]', isUser ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-card border border-border text-card-foreground rounded-tl-md')}>
@@ -67,7 +77,7 @@ export function StreamingBubble({ text }: { text: string }) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-600 to-blue-800 text-white"><Bot className="w-4 h-4" /></div>
+      <JobroloAvatar />
       <div className="flex-1 min-w-0 max-w-[85%] sm:max-w-[80%] overflow-hidden">
         <div className="rounded-2xl rounded-tl-md px-3.5 sm:px-4 py-2.5 bg-card border border-border text-card-foreground min-h-[40px] max-w-full overflow-hidden break-words [overflow-wrap:anywhere]">
           {text ? (
