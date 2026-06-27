@@ -43,6 +43,22 @@ function hostnameLabel(url: string) {
   }
 }
 
+function canonicalAttachmentKey(attachment: MessageAttachment) {
+  if (attachment.type !== 'link') return attachment.documentId || attachment.url
+  try {
+    const url = new URL(attachment.url)
+    url.hash = ''
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^utm_/i.test(key) || ['fbclid', 'gclid', 'msclkid'].includes(key.toLowerCase())) {
+        url.searchParams.delete(key)
+      }
+    }
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return attachment.url
+  }
+}
+
 function isWebSourceObject(obj: Record<string, any>, url: string, documentId?: string) {
   if (documentId) return false
   if (!/^https?:\/\//i.test(url)) return false
@@ -104,7 +120,7 @@ function collectAttachmentsFromValue(value: unknown, out: Map<string, MessageAtt
   if (typeof value !== 'object') return
   const obj = value as Record<string, any>
   const attachment = attachmentFromToolObject(obj)
-  if (attachment) out.set(attachment.documentId || attachment.url, attachment)
+  if (attachment) out.set(canonicalAttachmentKey(attachment), attachment)
   for (const child of Object.values(obj)) collectAttachmentsFromValue(child, out, depth + 1)
 }
 
@@ -146,10 +162,10 @@ function mergeAttachments(primary: unknown[], derived: MessageAttachment[]): Mes
   const out = new Map<string, MessageAttachment>()
   for (const value of primary) {
     const attachment = normalizeModelAttachment(value)
-    if (attachment) out.set(attachment.documentId || attachment.url, attachment)
+    if (attachment) out.set(canonicalAttachmentKey(attachment), attachment)
   }
   for (const attachment of derived) {
-    if (isUsableFileUrl(attachment.url)) out.set(attachment.documentId || attachment.url, attachment)
+    if (isUsableFileUrl(attachment.url)) out.set(canonicalAttachmentKey(attachment), attachment)
   }
   return [...out.values()]
 }

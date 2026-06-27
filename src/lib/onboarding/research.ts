@@ -239,8 +239,35 @@ function hostFromUrl(value?: string | null) {
   }
 }
 
+function parsedUrl(value?: string | null) {
+  if (!value) return null
+  try {
+    return new URL(normalizeUrl(value))
+  } catch {
+    return null
+  }
+}
+
 function titleUrlText(entry: any) {
   return [entry?.title, entry?.source, entry?.notes, entry?.snippet, entry?.url].filter(Boolean).join(' ')
+}
+
+function canonicalSourceUrl(value?: string | null) {
+  const url = parsedUrl(value)
+  if (!url) return undefined
+  url.hash = ''
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^utm_/i.test(key) || ['fbclid', 'gclid', 'msclkid'].includes(key.toLowerCase())) {
+      url.searchParams.delete(key)
+    }
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
+function pathSegments(url: string) {
+  const parsed = parsedUrl(url)
+  if (!parsed) return []
+  return parsed.pathname.split('/').map(segment => segment.toLowerCase()).filter(Boolean)
 }
 
 function isRelevantCompanySource(entry: any, input: { companyName?: string; website?: string }) {
@@ -252,27 +279,42 @@ function isRelevantCompanySource(entry: any, input: { companyName?: string; webs
   const company = textKey(input.companyName)
   if (!company) return true
   const text = textKey(titleUrlText(entry))
-  const compactText = text.replace(/\s+/g, '')
   const compactCompany = company.replace(/\s+/g, '')
   const companySlug = slugKey(input.companyName)
-  const path = (() => {
-    try { return new URL(url).pathname.toLowerCase() } catch { return '' }
-  })()
+  const segments = pathSegments(url)
+  const path = segments.join('/')
 
   // Directory/search results often contain similarly named businesses. For BBB,
   // require the exact company slug so "Mitchell & Sons Roofing" does not sneak in
   // when the company is simply "Sons Roofing".
   if (host?.includes('bbb.org') && companySlug) {
-    return path.includes(`/${companySlug}-`) || path.endsWith(`/${companySlug}`)
+    return segments.some(segment => segment === companySlug || segment.startsWith(`${companySlug}-`))
+  }
+
+  if (host?.includes('linkedin.com') || host?.includes('facebook.com') || host?.includes('instagram.com') || host?.includes('youtube.com') || host?.includes('yelp.com')) {
+    return Boolean(companySlug && segments.includes(companySlug)) || Boolean(compactCompany && segments.includes(compactCompany))
+  }
+
+  if (compactCompany && /(?:directory|profile|company|business|reviews?|biz)/i.test(path)) {
+    return segments.includes(companySlug) || segments.includes(compactCompany)
   }
 
   if (text.includes(company)) return true
-  if (compactCompany && compactText.includes(compactCompany)) return true
-  return Boolean(companySlug && url.toLowerCase().includes(companySlug))
+  return Boolean(companySlug && segments.includes(companySlug))
 }
 
-function filterRelevantEntries<T extends { url?: string }>(entries: T[] | undefined, input: { companyName?: string; website?: string }, limit: number) {
-  return (entries ?? []).filter(entry => isRelevantCompanySource(entry, input)).slice(0, limit)
+function filterRelevantEntries<T extends { url?: string | null }>(entries: T[] | undefined, input: { companyName?: string; website?: string }, limit: number) {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const entry of entries ?? []) {
+    if (!isRelevantCompanySource(entry, input)) continue
+    const key = canonicalSourceUrl(entry.url) || titleUrlText(entry)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(entry)
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 async function researchCompanyWebPresence(input: { companyName?: string; website?: string; location?: string }): Promise<CompanyWebPresence> {
@@ -329,7 +371,7 @@ Return JSON only:
 
   const parsed = parseJsonObject(result.text) || {}
   const filterInput = { companyName: input.companyName, website: input.website }
-  const sources = result.sources.filter(source => isRelevantCompanySource(source, filterInput)).slice(0, 12)
+  const sources = filterRelevantEntries(result.sources, filterInput, 12)
   const bbb = parsed.bbb && typeof parsed.bbb === 'object' && isRelevantCompanySource(parsed.bbb, filterInput) ? parsed.bbb : undefined
   return {
     enabled: true,
