@@ -511,7 +511,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         ) : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" variant="outline" onClick={() => insertPrompt('Update my company profile: company name, phone, email, website, and address are ')}>
+        <Button size="sm" variant="outline" onClick={() => insertPrompt('Make edits to company profile: ')}>
           <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit from chat
         </Button>
         <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company website and suggest updates to my company profile: ${website || ''}`.trim())}>
