@@ -23,6 +23,16 @@ function isOpenMapRequest(text: string) {
     || /^(map)(\s+where i am|\s+where i'm at|\s+my location|\s+current location|\s+here)?$/.test(firstLine)
 }
 
+function isInspectionPhotoWorkflowRequest(text: string) {
+  const firstLine = text.split('\n')[0]?.toLowerCase().replace(/[’']/g, "'").replace(/[?.!]/g, '').trim() || ''
+  if (!firstLine) return false
+  return (
+    /\b(start|open|launch|begin|show|get|give me)\b.{0,80}\b(inspection photo workflow|inspection photos|photo checklist|inspection checklist|roof photo capture|roof photos)\b/.test(firstLine) ||
+    /\b(i landed|just landed|walking up|walk up|arrived|i'm here|i am here)\b.{0,80}\binspection\b/.test(firstLine) ||
+    /\binspection\b.{0,80}\b(photo workflow|photo checklist|photo capture|photos first|capture first)\b/.test(firstLine)
+  )
+}
+
 export default function Page() {
   const [initialLoading, setInitialLoading] = useState(true)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
@@ -242,6 +252,30 @@ export default function Page() {
         addGlobalMessage(assistantMessage)
       }
       window.setTimeout(openFieldMap, 80)
+      return { ok: true }
+    }
+    if (isInWorkspace && currentWorkspace?.projectId && visibleText && !args.attachments?.length && isInspectionPhotoWorkflowRequest(visibleText)) {
+      const userMessage: ClientMessage = { id: crypto.randomUUID(), role: 'user', content: visibleText, createdAt: new Date().toISOString() }
+      const assistantMessage: ClientMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Inspection photo workflow is ready. Pick the section you are capturing first — front elevation, roof, damage, soft metals, interior, attic, detached structures, or documents — then take/upload photos. I will tag them to this job instead of guessing later.',
+        contextType: 'field_event',
+        contextData: {
+          cardType: 'field_event',
+          action: 'start_inspection_photo_workflow',
+          mode: 'inspection',
+          title: 'Inspection photo workflow ready',
+          summary: 'Use the photo intake card below to capture photos by section and save them to this job.',
+          projectId: currentWorkspace.projectId,
+        },
+        createdAt: new Date().toISOString(),
+      }
+      addWorkspaceMessage(userMessage)
+      addWorkspaceMessage(assistantMessage)
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('jobrolo:open-inspection-photo-intake', { detail: {} }))
+      }, 80)
       return { ok: true }
     }
     return isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)

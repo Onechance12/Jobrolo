@@ -87,7 +87,7 @@ export function validateAction(action: unknown): string | null {
   if (a.type === 'cross_post') {
     if (typeof a.chatType !== 'string') return 'cross_post requires chatType'
     if (typeof a.message !== 'string' || a.message.length > 5000) return 'cross_post.message must be 1-5000 chars'
-    const ALLOWED_CHANNELS = ['main', 'customer', 'crew', 'supplier', 'finance', 'management', 'sales', 'insurance']
+    const ALLOWED_CHANNELS = ['main', 'customer', 'crew', 'roofing_crew', 'gutter_crew', 'window_crew', 'siding_crew', 'field_crew', 'subcontractor', 'supplier', 'finance', 'management', 'sales', 'insurance', 'production']
     if (!ALLOWED_CHANNELS.includes(a.chatType)) return `cross_post.chatType '${a.chatType}' not allowed`
   }
 

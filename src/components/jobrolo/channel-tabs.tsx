@@ -1,8 +1,7 @@
 'use client'
 import { useWorkspaceStore } from '@/store/workspace-store'
-import { CHANNEL_CONFIG } from '@/lib/channels'
+import { getChannelConfig } from '@/lib/channels'
 import { cn } from '@/lib/utils'
-import type { ChannelType } from '@/lib/types'
 
 export function ChannelTabs() {
   const currentWorkspaceId = useWorkspaceStore(s => s.currentWorkspaceId)
@@ -15,7 +14,7 @@ export function ChannelTabs() {
     <div className="border-b border-border glass px-2 overflow-x-auto">
       <div className="flex gap-1 min-w-max">
         {workspace.chats.map(chat => {
-          const config = CHANNEL_CONFIG[chat.chatType as ChannelType]
+          const config = getChannelConfig(chat.chatType)
           const active = chat.id === currentChatId
           return (
             <button

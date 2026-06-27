@@ -63,6 +63,26 @@ export interface ToolDef {
 const TRUSTED_DIRECT_TOOLS = new Set(['create_customer'])
 const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
 const COMPANY_PROFILE_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator'])
+const PROJECT_CHAT_TYPES = [
+  'main',
+  'customer',
+  'crew',
+  'roofing_crew',
+  'gutter_crew',
+  'window_crew',
+  'siding_crew',
+  'field_crew',
+  'subcontractor',
+  'supplier',
+  'finance',
+  'management',
+  'sales',
+  'insurance',
+  'production',
+] as const
+const PROJECT_CHAT_TYPE_SCHEMA = z.enum(PROJECT_CHAT_TYPES)
+type ProjectChatType = (typeof PROJECT_CHAT_TYPES)[number]
+const CREW_LIKE_CHAT_TYPES = new Set<ProjectChatType>(['crew', 'roofing_crew', 'gutter_crew', 'window_crew', 'siding_crew', 'field_crew', 'subcontractor'])
 
 function canRunDirectWithoutApproval(name: string, ctx: ToolContext) {
   if (!ctx.trustedDirectExecution) return false
@@ -111,6 +131,52 @@ function workspaceChatUrl(workspaceId?: string | null, chatId?: string | null) {
   const params = new URLSearchParams({ workspaceId })
   if (chatId) params.set('chatId', chatId)
   return `${appBaseUrl()}/?${params.toString()}`
+}
+
+function isCrewLikeChatType(chatType?: string | null) {
+  return CREW_LIKE_CHAT_TYPES.has(String(chatType ?? '') as ProjectChatType)
+}
+
+function isCustomerFacingChatType(chatType?: string | null) {
+  return String(chatType ?? '') === 'customer'
+}
+
+function chatTypeLabel(chatType: string) {
+  const labels: Record<string, string> = {
+    main: 'Main',
+    customer: 'Customer',
+    crew: 'Crew',
+    roofing_crew: 'Roofing crew',
+    gutter_crew: 'Gutter crew',
+    window_crew: 'Window crew',
+    siding_crew: 'Siding crew',
+    field_crew: 'Field crew',
+    subcontractor: 'Subcontractor',
+    supplier: 'Supplier',
+    finance: 'Finance',
+    management: 'Management',
+    sales: 'Sales',
+    insurance: 'Insurance',
+    production: 'Production',
+  }
+  return labels[chatType] ?? chatType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function normalizeProjectChatType(chatType: string | undefined, hints: Array<string | null | undefined>): ProjectChatType {
+  const current = (chatType || 'crew') as ProjectChatType
+  if (current !== 'crew') return PROJECT_CHAT_TYPES.includes(current) ? current : 'crew'
+  const text = hints.filter(Boolean).join(' ').toLowerCase()
+  if (/\b(gutter|gutters|downspout|downspouts)\b/.test(text)) return 'gutter_crew'
+  if (/\b(window|windows|screen|screens|glazing)\b/.test(text)) return 'window_crew'
+  if (/\b(siding|fascia|soffit)\b/.test(text)) return 'siding_crew'
+  if (/\b(subcontractor|sub contractor|sub\b|trade partner|vendor)\b/.test(text)) return 'subcontractor'
+  if (/\b(field crew|repair crew|general crew)\b/.test(text)) return 'field_crew'
+  if (/\b(roof|roofing|roofer|roofers|shingle|install crew|installer|installers)\b/.test(text)) return 'roofing_crew'
+  return 'crew'
+}
+
+function permissionChannelForType(channel: ChannelType): ChannelType {
+  return isCrewLikeChatType(channel) ? 'crew' : channel
 }
 
 async function ensureWorkspaceMember(workspaceId: string | null | undefined, ctx: ToolContext) {
@@ -304,6 +370,32 @@ function supplierFromExtractedData(data: Record<string, any>) {
 
 function effectiveDateFromExtractedData(data: Record<string, any>) {
   return String(data.validDate ?? data.effectiveDate ?? data.validFrom ?? data.priceSheetReview?.effectiveDate ?? '').trim() || null
+}
+
+function normalizeDocumentSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(the|a|an|supplier|price|sheet|document|file|pdf|contractor|contr|rfg|roofing|list|items|rows|latest|direct)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function materialRowCountFromDocument(doc: { extractedData: string | null }) {
+  return pendingMaterialItemsFromExtractedData(safeJsonParse<Record<string, any>>(doc.extractedData, {})).length
+}
+
+function scoreDocumentNameMatch(docName: string, query: string) {
+  const normalizedName = normalizeDocumentSearchText(docName)
+  const normalizedQuery = normalizeDocumentSearchText(query)
+  if (!normalizedQuery) return 0
+  if (normalizedName.includes(normalizedQuery)) return 100
+  const queryTokens = normalizedQuery.split(' ').filter(Boolean)
+  if (!queryTokens.length) return 0
+  const nameTokens = new Set(normalizedName.split(' ').filter(Boolean))
+  const matched = queryTokens.filter(token => nameTokens.has(token) || normalizedName.includes(token)).length
+  return Math.round((matched / queryTokens.length) * 90)
 }
 
 function numberFromMoney(value: unknown): number | null {
@@ -1812,7 +1904,7 @@ export const TOOLS: ToolDef[] = [
       filename: z.string().max(300).optional(),
       limit: z.number().int().min(1).max(50).optional(),
       status: z.enum(['pending', 'imported', 'all']).optional(),
-    }).refine(v => Boolean(v.documentId || v.filename), 'documentId or filename is required'),
+    }),
     allowedChannels: 'all',
     execute: async (args, contractorId) => {
       console.log(`[price-sheet] review requested contractorId=${contractorId} documentId=${args.documentId ?? ''} filename=${args.filename ?? ''}`)
@@ -1823,14 +1915,39 @@ export const TOOLS: ToolDef[] = [
           select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, status: true, extractionConfidence: true },
         })
       } else {
-        const needle = args.filename!.toLowerCase()
+        const needle = String(args.filename ?? '').trim()
         const docs = await db.document.findMany({
           where: { contractorId },
           orderBy: { createdAt: 'desc' },
-          take: 50,
+          take: 100,
           select: { id: true, originalName: true, fileType: true, aiCategory: true, extractedData: true, status: true, extractionConfidence: true },
         })
-        doc = docs.find(d => d.originalName.toLowerCase().includes(needle))
+        const likelyPriceSheets = docs
+          .map(d => ({ doc: d, rows: materialRowCountFromDocument(d), score: needle ? scoreDocumentNameMatch(d.originalName, needle) : 0 }))
+          .filter(item => item.doc.fileType === 'price_sheet' || item.doc.aiCategory === 'price_sheet' || item.rows > 0)
+        if (needle) {
+          doc = likelyPriceSheets
+            .sort((a, b) => (b.score + Math.min(b.rows, 20)) - (a.score + Math.min(a.rows, 20)))[0]
+            ?.doc
+          if (doc && scoreDocumentNameMatch(doc.originalName, needle) < 25 && likelyPriceSheets.length > 1) {
+            return {
+              success: true,
+              data: {
+                needsClarification: true,
+                query: needle,
+                candidates: likelyPriceSheets.slice(0, 5).map(item => ({
+                  documentId: item.doc.id,
+                  filename: item.doc.originalName,
+                  fileType: item.doc.fileType,
+                  rowCount: item.rows,
+                })),
+                message: `I found multiple possible price sheets. Which one should I review?`,
+              },
+            }
+          }
+        } else {
+          doc = likelyPriceSheets[0]?.doc
+        }
       }
       if (!doc) return { success: false, data: null, error: 'Price sheet document not found. Call list_documents first if you need the documentId.' }
 
@@ -1948,21 +2065,50 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_project_chat',
-    description: 'Create or open a chat channel for a customer/project workspace, such as a crew chat, customer-facing chat, sales chat, supplement chat, production chat, or insurance chat. Use when the user says "create a crew chat for Timothy" or wants to route a message to a job-specific chat.',
+    description: 'Create or open a chat channel for a customer/project workspace, such as a crew chat, roofing crew chat, gutter crew chat, window crew chat, subcontractor chat, customer-facing chat, sales chat, supplement chat, production chat, or insurance chat. Use when the user says "create a crew chat for Timothy" or wants to route a message to a job-specific chat. Separate trade crew chatTypes can coexist on the same job.',
     schema: z.object({
+      workspaceId: z.string().max(200).optional(),
       projectId: z.string().max(200).optional(),
       customerId: z.string().max(200).optional(),
       customerName: z.string().max(300).optional(),
-      chatType: z.enum(['main', 'customer', 'crew', 'supplier', 'finance', 'management', 'sales', 'insurance']).default('crew'),
+      chatType: PROJECT_CHAT_TYPE_SCHEMA.default('crew'),
       title: z.string().max(200).optional(),
       initialMessage: z.string().max(2000).optional(),
-    }).refine(v => Boolean(v.projectId || v.customerId || v.customerName), 'projectId, customerId, or customerName is required'),
-    allowedChannels: ['main', 'management', 'sales'],
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'crew', 'customer'],
     execute: async (args, contractorId, ctx) => {
+      const chatType = normalizeProjectChatType(args.chatType, [args.title, args.initialMessage, args.customerName])
+      const role = normalizeRole(ctx.userRole)
+      if ((role === 'crew' || role === 'subcontractor') && !isCrewLikeChatType(chatType)) {
+        return { success: true, data: { needsApproval: true, message: 'Crew/subcontractor users can create crew/subcontractor chat threads only. Ask a project manager to create customer, sales, finance, insurance, or management chats.' } }
+      }
+      if (role === 'customer' && chatType !== 'customer') {
+        return { success: true, data: { needsApproval: true, message: 'Customer users can create customer-facing chat threads only. Ask the project team for internal crew/team chats.' } }
+      }
       let project: { id: string; title: string; customerId: string | null; address: string | null; workspace: { id: string } | null; customer: { id: string; name: string; address: string | null } | null } | null = null
       let customer: { id: string; name: string; address: string | null } | null = null
 
-      if (args.projectId) {
+      if (args.workspaceId || (!args.projectId && !args.customerId && !args.customerName && ctx.workspaceId)) {
+        const workspace = await db.workspace.findFirst({
+          where: { id: args.workspaceId || ctx.workspaceId, contractorId, status: 'active' },
+          select: {
+            id: true,
+            project: {
+              select: {
+                id: true,
+                title: true,
+                customerId: true,
+                address: true,
+                workspace: { select: { id: true } },
+                customer: { select: { id: true, name: true, address: true } },
+              },
+            },
+          },
+        })
+        if (!workspace?.project) return { success: false, data: null, error: 'Project workspace not found' }
+        project = workspace.project
+        customer = project.customer
+      } else if (args.projectId) {
         project = await db.project.findFirst({
           where: { id: args.projectId, contractorId },
           select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } }, customer: { select: { id: true, name: true, address: true } } },
@@ -1970,6 +2116,9 @@ export const TOOLS: ToolDef[] = [
         if (!project) return { success: false, data: null, error: 'Project not found' }
         customer = project.customer
       } else {
+        if (!args.customerId && !args.customerName) {
+          return { success: true, data: { needsProject: true, message: `Which customer or project should get the ${chatTypeLabel(chatType)} chat?` } }
+        }
         const resolved = await resolveCustomerForTool(contractorId, { customerId: args.customerId, customerName: args.customerName })
         if ('error' in resolved) return { success: false, data: null, error: resolved.error }
         if ('notFound' in resolved) return { success: true, data: { needsCustomer: true, query: resolved.query, message: `No saved customer found for ${resolved.query}. Create or select the customer before creating a chat.` } }
@@ -1982,10 +2131,10 @@ export const TOOLS: ToolDef[] = [
           select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } }, customer: { select: { id: true, name: true, address: true } } },
         })
         if (projects.length === 0) {
-          return { success: true, data: { needsProject: true, customer, message: `No active project found for ${customer.name}. Create a project/job first, then I can create the ${args.chatType} chat.` } }
+          return { success: true, data: { needsProject: true, customer, message: `No active project found for ${customer.name}. Create a project/job first, then I can create the ${chatTypeLabel(chatType)} chat.` } }
         }
         if (projects.length > 1) {
-          return { success: true, data: { needsClarification: true, customer, projects: projects.map(p => ({ id: p.id, title: p.title, address: p.address })), message: `Multiple active projects found for ${customer.name}. Which project should get the ${args.chatType} chat?` } }
+          return { success: true, data: { needsClarification: true, customer, projects: projects.map(p => ({ id: p.id, title: p.title, address: p.address })), message: `Multiple active projects found for ${customer.name}. Which project should get the ${chatTypeLabel(chatType)} chat?` } }
         }
         project = projects[0]
       }
@@ -2006,15 +2155,19 @@ export const TOOLS: ToolDef[] = [
       }
       await ensureWorkspaceMember(workspace.id, ctx)
 
-      const defaultTitle = args.title || `${args.chatType.charAt(0).toUpperCase()}${args.chatType.slice(1)}`
+      const defaultTitle = args.title || chatTypeLabel(chatType)
+      const existed = await db.workspaceChat.findUnique({
+        where: { workspaceId_chatType: { workspaceId: workspace.id, chatType } },
+        select: { id: true },
+      })
       const chat = await db.workspaceChat.upsert({
-        where: { workspaceId_chatType: { workspaceId: workspace.id, chatType: args.chatType } },
+        where: { workspaceId_chatType: { workspaceId: workspace.id, chatType } },
         update: { title: defaultTitle, lastActivity: new Date() },
         create: {
           workspaceId: workspace.id,
-          chatType: args.chatType,
+          chatType,
           title: defaultTitle,
-          visibility: args.chatType === 'customer' ? 'customer' : 'internal',
+          visibility: isCustomerFacingChatType(chatType) ? 'customer' : 'internal',
         },
         select: { id: true, chatType: true, title: true, visibility: true, lastActivity: true },
       })
@@ -2045,6 +2198,7 @@ export const TOOLS: ToolDef[] = [
             workspaceId: workspace.id,
             chatId: chat.id,
             chatType: chat.chatType,
+            chatTypeLabel: chatTypeLabel(chat.chatType),
             visibility: chat.visibility,
             title: chat.title,
             chatUrl: workspaceChatUrl(workspace.id, chat.id),
@@ -2058,22 +2212,24 @@ export const TOOLS: ToolDef[] = [
               title: project.title,
               address: project.address,
             },
+            reusedExisting: Boolean(existed),
+            subcontractorRoleHint: isCrewLikeChatType(chat.chatType) ? chatTypeLabel(chat.chatType) : null,
           },
-          message: `Created/opened the ${args.chatType} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'} Chat link: ${workspaceChatUrl(workspace.id, chat.id)}`,
+          message: `${existed ? 'Opened existing' : 'Created'} ${chatTypeLabel(chat.chatType)} chat for ${project.title}${projectNumber(project) ? ` (${projectNumber(project)})` : ''}${seededMessage ? ' and posted the starter note.' : '.'} Chat link: ${workspaceChatUrl(workspace.id, chat.id)}`,
         },
       }
     },
   },
   {
     name: 'invite_user_to_chat',
-    description: 'Invite an employee, crew member, subcontractor, sales rep, manager, or customer/homeowner to a Jobrolo workspace chat. Creates an invited user, workspace membership, in-app notification, and one-time invite link that can be copied and texted manually. Use for "add Jose to the crew chat", "invite homeowner to customer chat", "add employee to this job chat", or "give me a link to share". Requires approval because it grants chat access.',
+    description: 'Invite an employee, crew member, subcontractor, sales rep, manager, or customer/homeowner to a Jobrolo workspace chat. Creates an invited user, workspace membership, in-app notification, and one-time invite link that can be copied and texted manually. Use for "add Jose to the roofing crew chat", "invite homeowner to customer chat", "add employee to this job chat", or "give me a link to share". Requires approval because it grants chat access.',
     schema: z.object({
       workspaceId: z.string().max(200).optional(),
       projectId: z.string().max(200).optional(),
       customerId: z.string().max(200).optional(),
       customerName: z.string().max(300).optional(),
       chatId: z.string().max(200).optional(),
-      chatType: z.enum(['main', 'customer', 'crew', 'supplier', 'finance', 'management', 'sales', 'insurance']).optional(),
+      chatType: PROJECT_CHAT_TYPE_SCHEMA.optional(),
       name: z.string().min(2).max(160),
       email: z.string().email().max(240),
       phone: z.string().max(60).optional(),
@@ -2087,7 +2243,7 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId, ctx) => {
       let workspaceId = args.workspaceId || ctx.workspaceId || undefined
       let chatId = args.chatId || ctx.chatId || undefined
-      let chatType = args.chatType || undefined
+      let chatType = args.chatType ? normalizeProjectChatType(args.chatType, [args.note, args.name]) : undefined
 
       if (!workspaceId && args.projectId) {
         const workspace = await db.workspace.findFirst({
@@ -2133,8 +2289,8 @@ export const TOOLS: ToolDef[] = [
           create: {
             workspaceId,
             chatType,
-            title: chatType.charAt(0).toUpperCase() + chatType.slice(1),
-            visibility: chatType === 'customer' ? 'customer' : 'internal',
+            title: chatTypeLabel(chatType),
+            visibility: isCustomerFacingChatType(chatType) ? 'customer' : 'internal',
           },
           select: { id: true },
         })
@@ -2147,7 +2303,7 @@ export const TOOLS: ToolDef[] = [
         name: args.name,
         email: args.email,
         phone: args.phone,
-        role: args.role || (chatType === 'customer' ? 'customer' : chatType === 'crew' ? 'crew' : 'employee'),
+        role: args.role || (isCustomerFacingChatType(chatType) ? 'customer' : isCrewLikeChatType(chatType) ? 'crew' : 'employee'),
         sendEmail: args.sendEmail,
         sendSms: args.sendSms,
         note: args.note,
@@ -3932,7 +4088,7 @@ export async function executeTool(
   if (!tool) return { success: false, data: null, error: `Unknown tool: ${name}` }
 
   // Channel permissioning
-  if (ctx.channelType && tool.allowedChannels !== 'all' && !tool.allowedChannels.includes(ctx.channelType)) {
+  if (ctx.channelType && tool.allowedChannels !== 'all' && !tool.allowedChannels.includes(permissionChannelForType(ctx.channelType))) {
     return { success: false, data: null, error: `Tool '${name}' not allowed in '${ctx.channelType}' channel` }
   }
 
@@ -4046,7 +4202,7 @@ export function isToolAllowedInChannel(name: string, channel: ChannelType): bool
   const tool = TOOL_MAP.get(name)
   if (!tool) return false
   if (tool.allowedChannels === 'all') return true
-  return tool.allowedChannels.includes(channel)
+  return tool.allowedChannels.includes(permissionChannelForType(channel))
 }
 
 export function getToolDefinitions(): Array<{ name: string; description: string; parameters: Record<string, unknown>; requiredParams: string[] }> {

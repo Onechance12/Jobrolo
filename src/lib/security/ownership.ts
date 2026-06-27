@@ -18,15 +18,32 @@ export function hasCompanyWideAccess(ctx: TenantContext) {
   return ['owner', 'admin', 'manager', 'project_manager'].includes(String(ctx.user.role ?? '').toLowerCase())
 }
 
-export function canAccessWorkspaceChat(ctx: TenantContext, chat: { chatType?: string | null; visibility?: string | null }) {
+type WorkspaceChatAccessInput = { id?: string | null; chatType?: string | null; visibility?: string | null }
+type WorkspaceMemberAccessInput = { role?: string | null; permissions?: string | null } | null | undefined
+
+function allowedChatIds(member?: WorkspaceMemberAccessInput) {
+  return new Set(
+    String(member?.permissions ?? '')
+      .split(',')
+      .map(part => part.trim())
+      .filter(part => part.startsWith('chat:'))
+      .map(part => part.slice('chat:'.length))
+      .filter(Boolean),
+  )
+}
+
+export function canAccessWorkspaceChat(ctx: TenantContext, chat: WorkspaceChatAccessInput, member?: WorkspaceMemberAccessInput) {
   if (hasCompanyWideAccess(ctx)) return true
-  const role = String(ctx.user?.role ?? '').toLowerCase()
+  const scopedChatIds = allowedChatIds(member)
+  if (scopedChatIds.size > 0) return Boolean(chat.id && scopedChatIds.has(chat.id))
+  const role = String(member?.role ?? ctx.user?.role ?? '').toLowerCase()
   const chatType = String(chat.chatType ?? '').toLowerCase()
   const visibility = String(chat.visibility ?? '').toLowerCase()
+  const isCrewChat = chatType === 'crew' || chatType.endsWith('_crew') || chatType === 'subcontractor'
   if (role === 'customer') return visibility === 'customer' || chatType === 'customer'
-  if (role === 'crew' || role === 'subcontractor') return chatType === 'crew'
+  if (role === 'crew' || role === 'subcontractor') return isCrewChat
   if (role === 'sales') return ['sales', 'customer', 'main'].includes(chatType)
-  if (role === 'employee') return ['main', 'production', 'crew'].includes(chatType)
+  if (role === 'employee') return ['main', 'production'].includes(chatType) || isCrewChat
   return chatType === 'main'
 }
 
@@ -50,12 +67,17 @@ export async function requireWorkspaceChat(ctx: TenantContext, workspaceId: stri
   // First verify the workspace belongs to the contractor
   const ws = await requireWorkspace(ctx, workspaceId)
   if (!ws) return null
+  const member = hasCompanyWideAccess(ctx) ? null : await db.workspaceMember.findFirst({
+    where: { workspaceId, userId: ctx.user?.id ?? '__none__' },
+    select: { role: true, permissions: true },
+  })
+  if (!hasCompanyWideAccess(ctx) && !member) return null
   // Then verify the chat belongs to that workspace
   const chat = await db.workspaceChat.findFirst({
     where: { id: chatId, workspaceId },
   })
   if (!chat) return null
-  if (!canAccessWorkspaceChat(ctx, chat)) return null
+  if (!canAccessWorkspaceChat(ctx, chat, member)) return null
   return chat
 }
 

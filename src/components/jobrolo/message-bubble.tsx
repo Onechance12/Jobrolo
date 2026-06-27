@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Bot, User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain } from 'lucide-react'
 import { cn, formatMessageTime, formatFileSize, stripJsonWrapper } from '@/lib/utils'
-import { CHANNEL_CONFIG } from '@/lib/channels'
+import { getChannelConfig } from '@/lib/channels'
 import { DocumentCard } from './document-card'
 import { CopilotCardFromMessage } from './copilot-cards'
 import type { ClientMessage, MessageAttachment, ActionResult, ThinkingStep } from '@/lib/types'
@@ -168,7 +168,7 @@ function ActionResultsCard({ results }: { results: ActionResult[] }) {
 }
 
 function ActionRow({ result }: { result: ActionResult }) {
-  const config = result.targetChatType ? CHANNEL_CONFIG[result.targetChatType as keyof typeof CHANNEL_CONFIG] : null
+  const config = result.targetChatType ? getChannelConfig(result.targetChatType) : null
   const Icon = result.status === 'executed' ? CheckCircle2 : result.status === 'failed' ? XCircle : Circle
   const color = result.status === 'executed' ? 'text-blue-600 dark:text-blue-300' : result.status === 'failed' ? 'text-rose-600' : 'text-muted-foreground/60'
   return (

@@ -45,16 +45,18 @@ const OPERATIONAL_INTENT_PHRASES = [
   'let me review', 'let me pull', 'let me grab', 'let me fetch', 'let me show', 'let me list', 'let me see',
   'let me first', 'let me help', 'let me process', 'let me save', 'let me create', 'let me update',
   'let me add', 'let me attach', 'let me link', 'let me import', 'let me extract', 'let me upload',
-  'let me clear', 'let me proceed',
+  'let me clear', 'let me proceed', 'let me start', 'let me set up',
   "i'll search", "i'll check", "i'll look", "i'll find", "i'll retrieve", "i'll get", "i'll review",
   "i'll pull", "i'll grab", "i'll fetch", "i'll show", "i'll list", "i'll see", "i'll process",
   "i'll help", "i'll first", "i'll save", "i'll create", "i'll update", "i'll add", "i'll attach",
   "i'll link", "i'll import", "i'll extract", "i'll upload", "i'll clear", "i'll proceed", "i'll now",
+  "i'll start", "i'll set up",
   'i will search', 'i will check', 'i will look', 'i will find', 'i will retrieve', 'i will get', 'i will review',
   'i will pull', 'i will grab', 'i will fetch', 'i will show', 'i will first', 'i will help',
   'i will process', 'i will save', 'i will create', 'i will update', 'i will add', 'i will attach',
   'i will link', 'i will import', 'i will extract', 'i will upload', 'i will clear', 'i will proceed',
-  'i will now', 'please hold on', 'one moment', 'checking now', 'searching now', 'looking now',
+  'i will start', 'i will set up', 'i will now', 'please hold on', 'one moment', 'checking now', 'searching now', 'looking now',
+  "i'm starting", 'i am starting', "i'm setting up", 'i am setting up',
   'starting the', 'starting this', 'starting your', 'setting up', 'setting this up',
   'fetching your', 'retrieving your', 'pulling up your', 'getting your', 'looking up your',
   'fetching the', 'retrieving the', 'pulling up the', 'getting the', 'looking up the',
@@ -372,6 +374,12 @@ function findRecentRequestedChatType(messages: ChatMessage[], beforeIndex: numbe
 
 function inferChatType(text: string): string | null {
   const lower = plainMessageText(text).toLowerCase()
+  if (/\b(gutter|gutters|downspout|downspouts)\b/.test(lower)) return 'gutter_crew'
+  if (/\b(window|windows|screen|screens|glazing)\b/.test(lower)) return 'window_crew'
+  if (/\b(siding|soffit|fascia)\b/.test(lower)) return 'siding_crew'
+  if (/\b(roofing crew|roofer|roofers|roof crew|install crew|installer|installers)\b/.test(lower)) return 'roofing_crew'
+  if (/\b(field crew|repair crew)\b/.test(lower)) return 'field_crew'
+  if (/\b(subcontractor|sub contractor|sub\b|trade partner)\b/.test(lower)) return 'subcontractor'
   if (/\b(customer|homeowner|client)\b/.test(lower)) return 'customer'
   if (/\b(crew|roofer|roofing crew|installer|install crew|subcontractor|sub contractor|sub)\b/.test(lower)) return 'crew'
   if (/\bsales\b/.test(lower)) return 'sales'
@@ -461,6 +469,40 @@ Call link_document_to_customer with customerName "${customerName}"${documentRef.
 Only say linked/attached after the tool result confirms success. Respond as JSON only.`
 }
 
+function isPriceSheetReviewRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!/\b(price\s*sheet|supplier|material|materials|unit price|unit and price|pending import|imported|first\s+\d+\s+(?:rows|items))\b/.test(lower)) return false
+  if (/\b(delete|detach|remove|unassign|clear|replace|import these|import them|import rows|import items)\b/.test(lower)) return false
+  return /\b(review|show|list|tell me|first|rows|items|unit|price|pending|imported|saved)\b/.test(lower)
+}
+
+function documentHintFromPriceSheetText(text: string) {
+  const clean = plainMessageText(text)
+  const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
+  if (filename) return filename
+  const lower = clean.toLowerCase()
+  if (lower.includes('texas direct') || lower.includes('texas')) return 'Texas Direct'
+  if (lower.includes('qxo') || lower.includes('txd') || lower.includes('new con')) return 'QXO TXD New Con'
+  return ''
+}
+
+function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
+  const latestUser = lastMessageByRole(messages, 'user')
+  if (!latestUser) return null
+  const userText = plainMessageText(latestUser.message.content)
+  if (isPriceSheetReviewRequest(userText)) {
+    const filename = documentHintFromPriceSheetText(userText)
+    return `The latest user request is a read-only supplier/material price sheet review request:
+"${userText.slice(0, 300)}"
+
+Do not detach, link, delete, clear, replace, or import anything.
+Call review_price_sheet_items now with limit 10${filename ? ` and filename "${filename}"` : ''}.
+Only after that tool result returns, answer with the extracted rows and pending/imported status.
+Respond as JSON only.`
+  }
+  return null
+}
+
 function buildMissingToolInstruction(text: string) {
   if (looksLikeApprovalReplayFailure(text)) {
     return `You described an approval failure without calling the approval replay tool.
@@ -482,6 +524,7 @@ Common recovery examples:
 - To attach an uploaded photo/file to a customer, call link_document_to_customer. A projectId is not required.
 - If you previously asked whether to link/attach a document/photo and the user replied "yes" or "yea", call link_document_to_customer or the appropriate save/link tool using the prior document/customer context.
 - To create a project/job for a customer, call create_project_for_customer.
+- To review supplier price sheet rows, call review_price_sheet_items. Do not detach, clear, replace, delete, or import anything unless the user explicitly asked for that operation.
 - To remove a file from a customer/project but keep it saved, call detach_document_from_customer. Do not delete unless the user explicitly asked to permanently delete the file.
 - To move a supplier price sheet out of a customer file and into company pricing, call detach_document_from_customer, then review_price_sheet_items; ask for confirmation before import_price_sheet_items.
 - To delete a customer/client, call delete_customer, not delete_documents_by_name.
@@ -489,6 +532,7 @@ Common recovery examples:
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
 - To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
+- To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is a new property/lead with browser GPS.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 
 If no tool exists for the requested operation, do not claim it is done. Respond with final=true and clearly say the workflow cannot be saved/executed yet, naming the missing tool/workflow.
@@ -540,6 +584,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const insertAt = Math.max(0, messages.length - 1)
     console.log(`[agent-loop] affirmative continuation detected contractorId=${opts.contractorId}`)
     messages.splice(insertAt, 0, { role: 'system', content: continuationInstruction })
+  }
+  const deterministicIntentInstruction = buildDeterministicIntentInstruction(messages)
+  if (deterministicIntentInstruction) {
+    const insertAt = Math.max(0, messages.length - 1)
+    console.log(`[agent-loop] deterministic intent instruction inserted contractorId=${opts.contractorId}`)
+    messages.splice(insertAt, 0, { role: 'system', content: deterministicIntentInstruction })
   }
   const iterations: AgentIteration[] = []
   let totalToolCalls = 0

@@ -78,8 +78,19 @@ export async function POST(req: NextRequest) {
     tv: (updated.tokenVersion ?? 0),
   })
 
-  const firstWorkspace = user.workspaceMembers[0]?.workspace
-  const firstChat = firstWorkspace?.chats.find(chat => chat.chatType === roleDefaultChat(updated.role)) ?? firstWorkspace?.chats[0] ?? null
+  const firstMember = user.workspaceMembers[0]
+  const firstWorkspace = firstMember?.workspace
+  const explicitChatIds = new Set(
+    String(firstMember?.permissions ?? '')
+      .split(',')
+      .map(part => part.trim())
+      .filter(part => part.startsWith('chat:'))
+      .map(part => part.slice('chat:'.length)),
+  )
+  const firstChat = firstWorkspace?.chats.find(chat => explicitChatIds.has(chat.id))
+    ?? firstWorkspace?.chats.find(chat => roleDefaultChatTypes(updated.role).includes(chat.chatType))
+    ?? firstWorkspace?.chats[0]
+    ?? null
   const res = NextResponse.json({
     success: true,
     user: { id: updated.id, name: updated.name, email: updated.email, role: updated.role },
@@ -92,12 +103,12 @@ export async function POST(req: NextRequest) {
   return res
 }
 
-function roleDefaultChat(role?: string | null) {
+function roleDefaultChatTypes(role?: string | null) {
   const r = String(role ?? '').toLowerCase()
-  if (r === 'customer') return 'customer'
-  if (r === 'crew' || r === 'subcontractor') return 'crew'
-  if (r === 'sales') return 'sales'
-  return 'main'
+  if (r === 'customer') return ['customer']
+  if (r === 'crew' || r === 'subcontractor') return ['crew', 'roofing_crew', 'gutter_crew', 'window_crew', 'siding_crew', 'field_crew', 'subcontractor']
+  if (r === 'sales') return ['sales']
+  return ['main']
 }
 
 function roleWelcomeTitle(role?: string | null) {

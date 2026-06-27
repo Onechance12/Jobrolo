@@ -56,7 +56,14 @@ export async function GET(req: NextRequest) {
     db.task.findMany({ where: { project: { contractorId: ctx.contractorId, ...projectAccess } }, include: { project: { select: { id: true, title: true } } }, orderBy: { createdAt: 'desc' }, take: 50 }),
     db.document.findMany({ where: { contractorId: ctx.contractorId, ...documentAccess }, orderBy: { createdAt: 'desc' }, take: 30 }),
     companyWide ? db.conversation.findMany({ where: { contractorId: ctx.contractorId }, orderBy: { updatedAt: 'desc' }, take: 1, include: { messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true } }, _count: { select: { messages: true } } } }) : Promise.resolve([]),
-    db.workspace.findMany({ where: { contractorId: ctx.contractorId, status: 'active', ...workspaceAccess }, include: { chats: { select: { id: true, chatType: true, visibility: true } }, project: { select: { id: true, title: true, status: true, priority: true, address: true, value: true, customer: { select: { id: true, name: true } } } } } }),
+    db.workspace.findMany({
+      where: { contractorId: ctx.contractorId, status: 'active', ...workspaceAccess },
+      include: {
+        chats: { select: { id: true, chatType: true, visibility: true } },
+        members: { where: { userId: memberUserId }, select: { role: true, permissions: true } },
+        project: { select: { id: true, title: true, status: true, priority: true, address: true, value: true, customer: { select: { id: true, name: true } } } },
+      },
+    }),
     companyWide ? db.documentTemplate.findMany({ where: { contractorId: ctx.contractorId }, orderBy: { updatedAt: 'desc' }, take: 20 }) : Promise.resolve([]),
     companyWide ? db.documentTemplateUpload.findMany({ where: { contractorId: ctx.contractorId }, orderBy: { updatedAt: 'desc' }, take: 20 }) : Promise.resolve([]),
     db.inboxItem.findMany({ where: { contractorId: ctx.contractorId, status: { in: ['unread', 'read'] }, OR: [{ userId: ctx.user?.id ?? '__none__' }, { role: ctx.user?.role ?? '__none__' }, ...(companyWide ? [{ userId: null }] : [])] }, orderBy: { createdAt: 'desc' }, take: 20 }),
@@ -69,7 +76,10 @@ export async function GET(req: NextRequest) {
     stats: { projects: projects.length, openTasks: tasks.filter(t => t.status === 'open').length, inboxItems: inboxItems.length, actionRequests: actionRequests.length, activeFieldVisits: fieldVisits.length },
     customers: customers.map(c => ({ id: c.id, clientNumber: customerNumber(c), customerNumber: customerNumber(c), name: c.name, phone: c.phone, email: c.email, address: c.address })),
     projects: projects.map(p => ({ id: p.id, projectNumber: projectNumber(p), title: p.title, status: p.status, priority: p.priority, value: p.value, customerId: p.customer?.id, customerName: p.customer?.name, customerNumber: p.customer ? customerNumber(p.customer) : null })),
-    workspaces: workspaces.map(w => ({ id: w.id, name: w.name, type: w.type, projectId: w.projectId, chats: w.chats.filter(ch => canAccessWorkspaceChat(ctx, ch)).map(ch => ({ id: ch.id, chatType: ch.chatType })) })),
+    workspaces: workspaces.map(w => {
+      const member = w.members[0] ?? null
+      return { id: w.id, name: w.name, type: w.type, projectId: w.projectId, chats: w.chats.filter(ch => canAccessWorkspaceChat(ctx, ch, member)).map(ch => ({ id: ch.id, chatType: ch.chatType })) }
+    }),
     documents: docs.slice(0, 10).map(d => ({ id: d.id, name: d.originalName, type: d.fileType, summary: d.aiSummary })),
     documentTemplates: documentTemplates.map(t => ({ id: t.id, name: t.name, type: t.type, status: t.status, reviewStatus: t.reviewStatus })),
     templateUploads: templateUploads.map(u => ({ id: u.id, name: u.name, templateType: u.templateType, status: u.status, templateId: u.templateId })),
@@ -86,7 +96,10 @@ export async function GET(req: NextRequest) {
     businessContext,
     conversationId: convos[0]?.id ?? null,
     conversations: convos.map(cv => ({ id: cv.id, title: cv.title, preview: cv.messages[0]?.content?.slice(0, 100) ?? '', messageCount: cv._count.messages, createdAt: cv.createdAt, updatedAt: cv.updatedAt })),
-    workspaces: workspaces.map(w => ({ id: w.id, name: w.name, type: w.type, chats: w.chats.filter(ch => canAccessWorkspaceChat(ctx, ch)), project: w.project })),
+    workspaces: workspaces.map(w => {
+      const member = w.members[0] ?? null
+      return { id: w.id, name: w.name, type: w.type, chats: w.chats.filter(ch => canAccessWorkspaceChat(ctx, ch, member)), project: w.project }
+    }),
     customers: customers.map(c => ({ ...c, clientNumber: customerNumber(c), customerNumber: customerNumber(c) })),
     projects: projects.map(p => ({ id: p.id, projectNumber: projectNumber(p), title: p.title, status: p.status, priority: p.priority, value: p.value, customerId: p.customer?.id ?? null, customerName: p.customer?.name ?? null, customerNumber: p.customer ? customerNumber(p.customer) : null })),
     tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, projectName: t.project?.title })),

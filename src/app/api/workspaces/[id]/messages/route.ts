@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireContext } from '@/lib/security/context'
-import { requireWorkspace } from '@/lib/security/ownership'
+import { requireWorkspace, requireWorkspaceChat } from '@/lib/security/ownership'
 export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -17,11 +17,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  // SECURITY: Verify the chat belongs to THIS workspace (prevents chat ID mixing)
-  const chat = await db.workspaceChat.findFirst({
-    where: { id: chatId, workspaceId },
-    select: { id: true },
-  })
+  // SECURITY: Verify the chat belongs to THIS workspace and this user can see it.
+  const chat = await requireWorkspaceChat(ctx, workspaceId, chatId)
   if (!chat) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }

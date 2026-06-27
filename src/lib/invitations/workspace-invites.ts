@@ -48,11 +48,23 @@ function normalizeRole(role: string): InviteRole {
   return 'employee'
 }
 
-function permissionsFor(role: InviteRole) {
-  if (role === 'customer') return 'read,write_limited,customer'
-  if (role === 'crew' || role === 'subcontractor') return 'read,write_limited,field'
-  if (role === 'sales') return 'read,write,sales'
-  return 'read,write'
+function permissionsFor(role: InviteRole, chatId?: string | null, existing?: string | null) {
+  const parts = new Set(
+    (existing || '')
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean),
+  )
+  const base =
+    role === 'customer' ? 'read,write_limited,customer' :
+    role === 'crew' || role === 'subcontractor' ? 'read,write_limited,field' :
+    role === 'sales' ? 'read,write,sales' :
+    'read,write'
+  for (const part of base.split(',')) parts.add(part)
+  if ((role === 'customer' || role === 'crew' || role === 'subcontractor') && chatId) {
+    parts.add(`chat:${chatId}`)
+  }
+  return Array.from(parts).join(',')
 }
 
 function canInvite(role?: string | null) {
@@ -136,10 +148,15 @@ export async function createWorkspaceInvite(ctx: TenantContext, input: CreateWor
         },
       })
 
+  const existingMember = await db.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },
+    select: { permissions: true },
+  })
+  const permissions = permissionsFor(role, selectedChat?.id ?? null, existingMember?.permissions)
   const member = await db.workspaceMember.upsert({
     where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },
-    update: { role, permissions: permissionsFor(role) },
-    create: { workspaceId: workspace.id, userId: user.id, role, permissions: permissionsFor(role) },
+    update: { role, permissions },
+    create: { workspaceId: workspace.id, userId: user.id, role, permissions },
   })
 
   const inviteUrl = `${appUrl()}/invite?token=${encodeURIComponent(token)}`

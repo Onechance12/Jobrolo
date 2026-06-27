@@ -339,11 +339,18 @@ function chatLabel(chatType: string) {
     main: 'Internal',
     customer: 'Customer',
     crew: 'Crew',
+    roofing_crew: 'Roofing crew',
+    gutter_crew: 'Gutter crew',
+    window_crew: 'Window crew',
+    siding_crew: 'Siding crew',
+    field_crew: 'Field crew',
+    subcontractor: 'Subcontractor',
     supplier: 'Supplier',
     finance: 'Finance',
     management: 'Management',
     sales: 'Sales',
     insurance: 'Insurance',
+    production: 'Production',
   }
   return labels[chatType] ?? chatType
 }

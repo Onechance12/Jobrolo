@@ -20,21 +20,24 @@ export async function GET(req: NextRequest) {
       customer: { select: { id: true, name: true, phone: true, email: true, address: true } },
       subcontractor: { select: { id: true, name: true, company: true, specialty: true, phone: true } },
       chats: { select: { id: true, chatType: true, title: true, visibility: true, lastActivity: true, _count: { select: { messages: true } } }, orderBy: { chatType: 'asc' } },
+      members: { where: { userId: ctx.user?.id ?? '__none__' }, select: { role: true, permissions: true } },
       memories: { orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, category: true, content: true, createdAt: true } },
     },
     orderBy: { updatedAt: 'desc' },
   })
 
   return NextResponse.json({
-    workspaces: ws.map(w => ({
+    workspaces: ws.map(w => {
+      const member = w.members[0] ?? null
+      const accessibleChats = w.chats.filter(c => canAccessWorkspaceChat(ctx, c, member))
+      return {
       id: w.id, name: w.name, type: w.type, description: w.description, color: w.color, status: w.status,
       projectId: w.projectId, customerId: w.customerId, subcontractorId: w.subcontractorId,
-      chats: w.chats
-        .filter(c => canAccessWorkspaceChat(ctx, c))
+      chats: accessibleChats
         .map(c => ({ id: c.id, chatType: c.chatType, title: c.title, visibility: c.visibility, messageCount: c._count.messages, lastActivity: c.lastActivity })),
-      chatCount: w.chats.filter(c => canAccessWorkspaceChat(ctx, c)).length,
+      chatCount: accessibleChats.length,
       project: w.project, customer: w.customer, subcontractor: w.subcontractor,
       recentMemory: w.memories,
-    })),
+    }}),
   })
 }
