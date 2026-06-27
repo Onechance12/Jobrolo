@@ -21,6 +21,7 @@ import { db } from '@/lib/db'
 import { chatComplete } from '@/lib/ai'
 import { researchCompany, type CompanyResearch } from './research'
 import { DEFAULT_CHANNELS_BY_WORKSPACE } from '@/lib/channels'
+import { upsertContractorProfile } from '@/lib/contractor-profile'
 
 export interface OnboardingMessage {
   role: 'user' | 'assistant'
@@ -31,6 +32,19 @@ export interface OnboardingMessage {
 export interface BusinessProfile {
   companyName?: string
   website?: string
+  phone?: string
+  email?: string
+  addressLine1?: string
+  addressLine2?: string
+  city?: string
+  state?: string
+  postalCode?: string
+  country?: string
+  licenseNumber?: string
+  ownerName?: string
+  publicContactName?: string
+  publicContactTitle?: string
+  logoPreference?: string
   description?: string
   businessType?: string  // roofing, restoration, public_adjuster, general_contractor, hvac, plumbing, siding, gutters, painting, electrical, other
   services: string[]
@@ -52,6 +66,8 @@ export interface BusinessProfile {
 // Info categories the agent tracks — each adds to confidence when covered
 const INFO_CATEGORIES = [
   'company_identity',     // name, website, description
+  'company_contact',      // phone, email, address for estimates/invoices/reports
+  'brand_assets',         // logo preference / upload reminder
   'business_type',        // roofing, restoration, etc.
   'services',             // what they do
   'service_area',         // where they work
@@ -67,6 +83,8 @@ const INFO_CATEGORIES = [
 // Per-business-type question banks — agent picks from these based on context
 const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>> = {
   roofing: [
+    { topic: 'company_contact', question: "What phone number, email, and business address should show on your estimates, invoices, reports, and customer-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'work_type', question: "Are you mostly doing retail roofing (direct to homeowner) or insurance work (storm damage, claims)?" },
     { topic: 'customer_model', question: "Residential, commercial, or both?" },
     { topic: 'crew_model', question: "Do you have in-house crews, or do you use subcontractors?" },
@@ -75,6 +93,8 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What's the #1 thing you want Jobrolo to help with?" },
   ],
   restoration: [
+    { topic: 'company_contact', question: "What phone number, email, and business address should show on your estimates, invoices, reports, and customer-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'work_type', question: "Are you doing mostly insurance restoration, or also taking on retail work?" },
     { topic: 'customer_model', question: "Residential, commercial, or both?" },
     { topic: 'crew_model', question: "In-house crews or subcontractors? What trades?" },
@@ -84,6 +104,8 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "Where do you lose the most time right now?" },
   ],
   public_adjuster: [
+    { topic: 'company_contact', question: "What phone number, email, office address, and license information should show on your client-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and documents, or skip that for later?" },
     { topic: 'services', question: "Do you handle residential, commercial, or both? What claim types — property, casualty, wind/hail?" },
     { topic: 'service_area', question: "What states or regions are you licensed in?" },
     { topic: 'team_size', question: "Solo, or do you have a team of adjusters working under you?" },
@@ -92,6 +114,8 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What would make your life easier day-to-day?" },
   ],
   general_contractor: [
+    { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "What trades do you cover? Kitchen/bath, additions, whole-home, disaster recovery?" },
     { topic: 'customer_model', question: "Residential, commercial, or both?" },
     { topic: 'crew_model', question: "In-house crews, or do you sub out trades?" },
@@ -100,6 +124,8 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What's the biggest bottleneck in your operation right now?" },
   ],
   hvac: [
+    { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "Residential install, commercial service, or both? Do you do new construction or replacement/retrofit?" },
     { topic: 'crew_model', question: "Employed techs or subcontractors?" },
     { topic: 'service_area', question: "What's your service area?" },
@@ -107,6 +133,8 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'goals', question: "What do you want Jobrolo to help with?" },
   ],
   default: [
+    { topic: 'company_contact', question: "What phone number, email, and business address should show on estimates, invoices, reports, and customer-facing documents?" },
+    { topic: 'brand_assets', question: "Do you want to upload a company logo now for reports and estimates, or skip that for later?" },
     { topic: 'services', question: "What services do you offer?" },
     { topic: 'service_area', question: "What area do you serve?" },
     { topic: 'team_size', question: "How big is your team?" },
@@ -127,6 +155,8 @@ const AUTO_COMPLETE_THRESHOLD = 80  // above this, we push to complete aggressiv
 // ---------------------------------------------------------------------------
 
 const TOPIC_KEYWORDS: Record<string, string[]> = {
+  company_contact: ['phone', 'email', 'address', 'office', 'business address', 'mailing address', 'estimates', 'invoices', 'reports'],
+  brand_assets: ['logo', 'brand', 'branding', 'skip logo', 'upload logo', 'later'],
   software: ['acculynx', 'xactimate', 'jobnimbus', 'servicetitan', 'housecall', 'fieldedge', 'procore', 'buildertrend', 'coconstruct', 'accu lynx', 'eagleview', 'symbility', 'claimxperience', 'encircle', 'dash', 'horizon'],
   crew_model: ['subcontractor', 'sub contractor', 'subs', 'in-house', 'in house', 'inhouse', 'w-2', 'w2', '1099', 'employees', 'employed'],
   customer_model: ['residential', 'commercial', 'homeowner', 'home owner', 'resi'],
@@ -223,6 +253,8 @@ YOUR GOAL: Learn enough about ${userName}'s business to set up their Jobrolo wor
 
 IMPORTANT: The user's name is "${userName}". Always use this name. Do NOT call them "Mike" or any other name.
 
+COMPANY PROFILE GOAL: Jobrolo uses the company profile on estimates, invoices, roof reports, contracts, signatures, and customer-facing documents. During onboarding, collect or confirm the public-facing company/display name, website, business phone, email, business address, license/insurance details if relevant, public contact, and logo preference. Logo is optional: if they do not have one ready, mark brand_assets covered and tell them they can upload it later.
+
 CURRENT STATE:
 - Business profile so far:
 ${profileJson}
@@ -251,6 +283,8 @@ CRITICAL RULES (read carefully):
 10. If all key topics are covered, DON'T keep asking filler questions. Move to completion immediately.
 11. DO NOT say "I have all the information needed" or "I have most of what I need" unless you are ACTUALLY ready to complete. If you say this, you must ask "Ready to get started?" in the same message.
 12. The user's name is "${userName}". Use ONLY this name. Never "Mike" or any other name.
+13. If the user gives company contact details, extract them into phone, email, addressLine1, city, state, postalCode, licenseNumber, publicContactName, or publicContactTitle when possible.
+14. Do NOT require a logo to complete onboarding. If the user says to skip it, add "brand_assets" to newlyCoveredTopics and store logoPreference: "skip_for_now".
 
 AVAILABLE QUESTION BANK (only use for topics NOT yet covered — adapt wording, don't copy verbatim):
 ${availableQuestions || '(all topics covered — move to completion)'}
@@ -369,6 +403,8 @@ function calculateConfidence(profile: BusinessProfile, coveredTopics: string[]):
   let score = 0
   if (profile.companyName) score += 10
   if (profile.website) score += 5
+  if (profile.phone || profile.email || profile.addressLine1 || profile.location) score += 8
+  if (profile.logoPreference) score += 3
   if (profile.description) score += 5
   if (profile.businessType) score += 15  // critical — drives question selection
   if (profile.services.length > 0) score += 10
@@ -396,6 +432,12 @@ async function finalizeOnboarding(contractorId: string, profile: BusinessProfile
   const memoryEntries: Array<{ category: string; content: string }> = []
   if (profile.companyName) memoryEntries.push({ category: 'default', content: `Company name: ${profile.companyName}` })
   if (profile.website) memoryEntries.push({ category: 'default', content: `Website: ${profile.website}` })
+  if (profile.phone) memoryEntries.push({ category: 'default', content: `Company phone: ${profile.phone}` })
+  if (profile.email) memoryEntries.push({ category: 'default', content: `Company email: ${profile.email}` })
+  if (profile.addressLine1) memoryEntries.push({ category: 'default', content: `Company address: ${[profile.addressLine1, profile.addressLine2, profile.city, profile.state, profile.postalCode].filter(Boolean).join(', ')}` })
+  if (profile.licenseNumber) memoryEntries.push({ category: 'default', content: `Company license: ${profile.licenseNumber}` })
+  if (profile.publicContactName || profile.publicContactTitle) memoryEntries.push({ category: 'default', content: `Public contact: ${[profile.publicContactName, profile.publicContactTitle].filter(Boolean).join(' · ')}` })
+  if (profile.logoPreference) memoryEntries.push({ category: 'preference', content: `Company logo preference: ${profile.logoPreference}` })
   if (profile.description) memoryEntries.push({ category: 'default', content: `Description: ${profile.description}` })
   if (profile.businessType) memoryEntries.push({ category: 'preference', content: `Business type: ${profile.businessType}` })
   if (profile.services.length) memoryEntries.push({ category: 'preference', content: `Services: ${profile.services.join(', ')}` })
@@ -412,6 +454,43 @@ async function finalizeOnboarding(contractorId: string, profile: BusinessProfile
   if (profile.productionProcess) memoryEntries.push({ category: 'policy', content: `Production process: ${profile.productionProcess}` })
   if (profile.claimProcess) memoryEntries.push({ category: 'policy', content: `Claim process: ${profile.claimProcess}` })
   if (profile.communicationPrefs) memoryEntries.push({ category: 'preference', content: `Communication preferences: ${profile.communicationPrefs}` })
+
+  await upsertContractorProfile(contractorId, {
+    companyName: profile.companyName,
+    displayName: profile.companyName,
+    website: profile.website,
+    phone: profile.phone,
+    email: profile.email,
+    addressLine1: profile.addressLine1,
+    addressLine2: profile.addressLine2,
+    city: profile.city,
+    state: profile.state,
+    postalCode: profile.postalCode,
+    country: profile.country,
+    licenseNumber: profile.licenseNumber,
+    ownerName: profile.ownerName,
+    publicContactName: profile.publicContactName,
+    publicContactTitle: profile.publicContactTitle,
+    metadata: {
+      onboarding: {
+        description: profile.description,
+        businessType: profile.businessType,
+        services: profile.services,
+        serviceAreas: profile.serviceAreas,
+        location: profile.location,
+        teamSize: profile.teamSize,
+        crewModel: profile.crewModel,
+        customerModel: profile.customerModel,
+        workType: profile.workType,
+        softwareUsed: profile.softwareUsed,
+        goals: profile.goals,
+        specialties: profile.specialties,
+        logoPreference: profile.logoPreference,
+      },
+    },
+  }).catch(err => {
+    console.warn('[onboarding] contractor profile save failed:', err instanceof Error ? err.message : String(err))
+  })
 
   for (const entry of memoryEntries) {
     await db.contractorMemory.create({

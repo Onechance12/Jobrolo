@@ -732,13 +732,13 @@ export default function Page() {
                       <div className="text-xs text-muted-foreground">Profile & settings</div>
                     </div>
                     <button
-                      onClick={() => { setProfileMenuOpen(false); window.location.href = '/settings/company' }}
+                      onClick={() => { setProfileMenuOpen(false); handleStartPrompt('Show my saved company profile. If anything important is missing for estimates, invoices, roof reports, contracts, signatures, or customer-facing documents, show it as a company profile card.') }}
                       className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"
                     >
                       <Settings className="h-4 w-4" /> Company profile
                     </button>
                     <button
-                      onClick={() => { setProfileMenuOpen(false); window.location.href = '/settings/notifications' }}
+                      onClick={() => { setProfileMenuOpen(false); handleStartPrompt('What needs attention right now? Show pending approvals, review items, invites, failed work, routed tasks, and anything I need to decide.') }}
                       className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"
                     >
                       <Bell className="h-4 w-4" /> Notifications

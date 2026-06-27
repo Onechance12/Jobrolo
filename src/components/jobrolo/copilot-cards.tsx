@@ -456,6 +456,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
   const phone = textValue(profile.phone)
   const email = textValue(profile.email)
   const address = textValue(profile.address)
+  const logo = textValue(profile.logoUrl) || textValue(profile.logoDocumentId)
   const licenseNumber = textValue(profile.licenseNumber)
   const ownerName = textValue(profile.ownerName)
   const contact = [textValue(profile.publicContactName), textValue(profile.publicContactTitle)].filter(Boolean).join(' · ')
@@ -464,6 +465,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     !phone ? 'phone' : null,
     !email ? 'email' : null,
     !address ? 'address' : null,
+    !logo ? 'logo' : null,
   ].filter(Boolean)
 
   function insertPrompt(text: string) {
@@ -493,7 +495,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         </div>
         {missing.length ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            Missing basics: {missing.join(', ')}. You can update these from chat.
+            Missing document profile items: {missing.join(', ')}. These help estimates, invoices, reports, contracts, and signatures look complete. You can update them from chat.
           </div>
         ) : null}
       </CardContent>
@@ -504,6 +506,11 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company website and suggest updates to my company profile: ${website || ''}`.trim())}>
           <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research website
         </Button>
+        {!logo ? (
+          <Button size="sm" variant="outline" onClick={() => insertPrompt('I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.')}>
+            Add logo
+          </Button>
+        ) : null}
       </CardFooter>
     </Card>
   )
