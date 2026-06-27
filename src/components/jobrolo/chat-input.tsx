@@ -29,7 +29,8 @@ function shouldRequestBrowserLocation(prompt: string) {
   const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now|address i'?m at|address i am at|this address i'?m at|this address i am at)\b/i.test(t)
   const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route|inspection|appointment|jobsite|job site|arrived|onsite|on site)\b/i.test(t)
   const liveFieldMoment = /\b(walking up|walk up|i'?m here|i arrived|arrived|just landed|landed (an? )?inspection|got (an? )?inspection|set (an? )?inspection|at the house|at the property|outside mowing)\b/i.test(t)
-  return asksHere || liveFieldMoment || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
+  const doorOrFieldLog = /\b(knocking|knocked|door knock|approaching (?:the )?door|at (?:the|this) door|someone answered|no answer|not interested|interested|follow[- ]?up|talked to (?:the )?(?:homeowner|customer|owner|tenant)|spoke with (?:the )?(?:homeowner|customer|owner|tenant)|left (?:a )?(?:card|flyer|door hanger))\b/i.test(t)
+  return asksHere || liveFieldMoment || doorOrFieldLog || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
 }
 
 function browserLocationErrorMessage(err: unknown) {
@@ -54,6 +55,17 @@ function getBrowserLocation(): Promise<GeolocationPosition> {
   })
 }
 
+function browserLocationUploadFields(pos: GeolocationPosition): Record<string, string> {
+  const { latitude, longitude, accuracy } = pos.coords
+  return {
+    captureLatitude: String(latitude),
+    captureLongitude: String(longitude),
+    captureAccuracyMeters: String(Math.round(accuracy)),
+    captureSource: 'browser_gps',
+    capturedAt: new Date().toISOString(),
+  }
+}
+
 function appendBrowserLocation(prompt: string, pos: GeolocationPosition) {
   const { latitude, longitude, accuracy } = pos.coords
   return `${prompt}
@@ -65,6 +77,23 @@ accuracyMeters: ${Math.round(accuracy)}
 source: browser_gps
 capturedAt: ${new Date().toISOString()}
 Use this location for the user's "where I am / here / near me" request. Do not ask the user to type GPS coordinates again unless you need a street name or landmark for a specific tool.`
+}
+
+function shouldCaptureLocationForUpload(input: {
+  mode: Props['mode']
+  prompt: string
+  files: File[]
+  uploadFields?: Record<string, string>
+}) {
+  if (!input.files.length) return false
+  const fields = input.uploadFields ?? {}
+  if (['company_logo', 'company_pricing', 'company_document', 'company_profile'].includes(fields.uploadPurpose)) return false
+  if (fields.uploadPurpose === 'inspection_photo' || fields.photoSection || fields.photoSectionLabel) return true
+  const lower = `${input.prompt} ${input.files.map(file => file.name).join(' ')}`.toLowerCase()
+  const hasImage = input.files.some(file => file.type.startsWith('image/'))
+  if (shouldRequestBrowserLocation(input.prompt)) return true
+  if (input.mode === 'field' && hasImage) return true
+  return hasImage && /\b(field|inspection|roof|damage|elevation|interior|attic|detached|gutter|vent|slope|facet|hail|wind|jobsite|job site|current project|this job|this property)\b/.test(lower)
 }
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mode = 'command' }: Props) {
@@ -163,18 +192,25 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
             photoSectionLabel: selectedInspectionSection.label,
           }
         : undefined
-      if (t && shouldRequestBrowserLocation(t)) {
+      const needsTextLocation = Boolean(t && shouldRequestBrowserLocation(t))
+      const needsUploadLocation = shouldCaptureLocationForUpload({ mode, prompt: t, files: filesToSend, uploadFields })
+      let locationFields: Record<string, string> = {}
+      if (needsTextLocation || needsUploadLocation) {
         setLocalError('Requesting your location… allow it in the browser popup so Jobrolo can use where you are right now.')
         try {
-          const position = await getBrowserLocation()
-          finalText = appendBrowserLocation(t, position)
+          const locationPosition = await getBrowserLocation()
+          locationFields = browserLocationUploadFields(locationPosition)
+          if (needsTextLocation && t) finalText = appendBrowserLocation(t, locationPosition)
           setLocalError(null)
         } catch (err) {
-          setLocalError(browserLocationErrorMessage(err))
-          return
+          if (needsTextLocation) {
+            setLocalError(browserLocationErrorMessage(err))
+            return
+          }
+          setLocalError(`${browserLocationErrorMessage(err)} I can still save the upload, but it will not include GPS evidence.`)
         }
       }
-      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend, uploadFields })
+      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend, uploadFields: { ...uploadFields, ...locationFields } })
       if (result && typeof result === 'object' && result.keepAttachments) {
         setLocalError('Upload did not finish. I kept the file attached so you can try again.')
         return

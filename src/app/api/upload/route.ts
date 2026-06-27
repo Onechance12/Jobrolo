@@ -6,6 +6,7 @@ import { requireCustomer, requireProject, requireWorkspace } from '@/lib/securit
 import { MAX_FILES_PER_UPLOAD, validateUpload, safeFilename } from '@/lib/security/upload-validation'
 import { enqueueAgentJob, kickAgentJob } from '@/lib/jobs/queue'
 import { toFileUrl } from '@/lib/file-url'
+import { resolveFieldEntity } from '@/lib/field-copilot'
 import { v4 as uuidv4 } from 'uuid'
 
 export const runtime = 'nodejs'
@@ -50,6 +51,29 @@ function isCompanyLevelUpload(uploadPurpose: string) {
   return ['company_logo', 'company_pricing', 'company_document', 'company_profile'].includes(uploadPurpose)
 }
 
+function numberField(value: FormDataEntryValue | null) {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  const number = Number(value)
+  return Number.isFinite(number) ? number : undefined
+}
+
+function uploadCaptureLocation(form: FormData) {
+  const latitude = numberField(form.get('captureLatitude'))
+  const longitude = numberField(form.get('captureLongitude'))
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') return null
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null
+  const accuracyMeters = numberField(form.get('captureAccuracyMeters'))
+  const source = String(form.get('captureSource') || 'browser_gps').trim() || 'browser_gps'
+  const capturedAt = String(form.get('capturedAt') || '').trim()
+  return {
+    latitude,
+    longitude,
+    accuracyMeters,
+    source,
+    capturedAt: capturedAt || new Date().toISOString(),
+  }
+}
+
 export async function POST(req: NextRequest) {
   const requestId = uuidv4().slice(0, 8)
   console.log(`[upload] received requestId=${requestId} contentLength=${req.headers.get('content-length') || 'unknown'}`)
@@ -84,6 +108,7 @@ export async function POST(req: NextRequest) {
     const uploadPurpose = String(form.get('uploadPurpose') || '').trim()
     const photoSection = String(form.get('photoSection') || '').trim()
     const photoSectionLabel = String(form.get('photoSectionLabel') || '').trim()
+    const captureLocation = uploadCaptureLocation(form)
 
     let workspaceId: string | undefined
     let projectId: string | undefined
@@ -119,6 +144,7 @@ export async function POST(req: NextRequest) {
       status: string
       url: string | null
       thumbnailUrl: string | null
+      locationResolution?: unknown
     }> = []
 
     for (const file of files) {
@@ -148,9 +174,17 @@ export async function POST(req: NextRequest) {
               uploadPurpose: uploadPurpose || null,
               photoSection: photoSection || null,
               photoSectionLabel: photoSectionLabel || null,
+              captureLocation,
               capturedFrom: 'chat_input',
             },
           }
+        : captureLocation
+          ? {
+              uploadContext: {
+                captureLocation,
+                capturedFrom: 'chat_input',
+              },
+            }
         : null
       const document = await db.document.create({
         data: {
@@ -172,6 +206,28 @@ export async function POST(req: NextRequest) {
         },
       })
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
+
+      let locationResolution: unknown = undefined
+      if (!companyLevelUpload && captureLocation) {
+        try {
+          locationResolution = await resolveFieldEntity(ctx, {
+            documentId: document.id,
+            projectId,
+            customerId,
+            currentLocation: {
+              latitude: captureLocation.latitude,
+              longitude: captureLocation.longitude,
+              accuracyMeters: captureLocation.accuracyMeters,
+              source: captureLocation.source,
+            },
+            mode: uploadPurpose === 'inspection_photo' ? 'inspection_photo_upload' : 'upload_location',
+            uploadedAt: captureLocation.capturedAt,
+          })
+          console.log(`[upload] location resolved requestId=${requestId} documentId=${document.id}`)
+        } catch (err) {
+          console.warn(`[upload] location resolution skipped requestId=${requestId} documentId=${document.id}:`, err)
+        }
+      }
 
       try {
         const analysisJob = await enqueueAgentJob({
@@ -197,6 +253,7 @@ export async function POST(req: NextRequest) {
         status: document.status,
         url: toFileUrl(document.filePath),
         thumbnailUrl: thumbnailUrl(saved),
+        ...(locationResolution ? { locationResolution } : {}),
       })
     }
 
