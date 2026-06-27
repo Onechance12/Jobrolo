@@ -69,6 +69,28 @@ export type DoorAttemptInput = {
   metadata?: Record<string, unknown> | null
 }
 
+export type FieldObservationInput = {
+  propertyMemoryId?: string | null
+  canvassingLeadId?: string | null
+  sessionId?: string | null
+  address?: string | null
+  homeownerName?: string | null
+  phone?: string | null
+  type?: string | null
+  outcome?: string | null
+  title?: string | null
+  summary: string
+  roofCondition?: string | null
+  damageSignal?: string | null
+  severity?: string | null
+  confidence?: number | null
+  contactName?: string | null
+  contactRole?: string | null
+  nextStep?: string | null
+  location?: PropertyLocationInput | null
+  metadata?: Record<string, unknown> | null
+}
+
 export type CanvassingGamePlanInput = {
   sessionId?: string | null
   title?: string | null
@@ -111,6 +133,17 @@ function normalizeLocation(input?: PropertyLocationInput | null) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
   return { lat, lng, accuracyMeters: input.accuracyMeters ?? null, source: input.source ?? null }
+}
+
+function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const earth = 6371000
+  const toRad = (value: number) => value * Math.PI / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * earth * Math.asin(Math.sqrt(h))
 }
 
 function parseDate(value?: string | Date | null) {
@@ -304,6 +337,156 @@ export async function recordDoorAttempt(ctx: TenantContext, input: DoorAttemptIn
 
   await updateStreetMemoryFromAttempt(ctx, propertyId, input.outcome)
   return attempt
+}
+
+export async function recordFieldObservation(ctx: TenantContext, input: FieldObservationInput) {
+  const loc = normalizeLocation(input.location)
+  let propertyMemoryId = input.propertyMemoryId ?? undefined
+  let canvassingLeadId = input.canvassingLeadId ?? undefined
+  let matchedLead: { id: string; sessionId: string | null; address: string | null; homeownerName: string | null; phone: string | null; latitude: number | null; longitude: number | null } | null = null
+  let matchedExistingMemory = Boolean(input.propertyMemoryId)
+
+  if (!propertyMemoryId && !canvassingLeadId && loc) {
+    const leads = await db.canvassingLead.findMany({
+      where: { contractorId: ctx.contractorId, latitude: { not: null }, longitude: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+      select: { id: true, sessionId: true, address: true, homeownerName: true, phone: true, latitude: true, longitude: true },
+    })
+    matchedLead = leads
+      .map(lead => ({
+        lead,
+        distance: typeof lead.latitude === 'number' && typeof lead.longitude === 'number'
+          ? distanceMeters(loc, { lat: lead.latitude, lng: lead.longitude })
+          : Number.POSITIVE_INFINITY,
+      }))
+      .filter(candidate => candidate.distance <= 75)
+      .sort((a, b) => a.distance - b.distance)[0]?.lead ?? null
+    if (matchedLead) canvassingLeadId = matchedLead.id
+  }
+
+  if (!propertyMemoryId && !canvassingLeadId && loc) {
+    const memories = await db.propertyMemory.findMany({
+      where: { contractorId: ctx.contractorId, latitude: { not: null }, longitude: { not: null } },
+      orderBy: { lastObservedAt: 'desc' },
+      take: 200,
+      select: { id: true, latitude: true, longitude: true },
+    })
+    const nearestMemory = memories
+      .map(memory => ({
+        memory,
+        distance: typeof memory.latitude === 'number' && typeof memory.longitude === 'number'
+          ? distanceMeters(loc, { lat: memory.latitude, lng: memory.longitude })
+          : Number.POSITIVE_INFINITY,
+      }))
+      .filter(candidate => candidate.distance <= 75)
+      .sort((a, b) => a.distance - b.distance)[0]?.memory ?? null
+    if (nearestMemory) {
+      propertyMemoryId = nearestMemory.id
+      matchedExistingMemory = true
+    }
+  }
+
+  if (!propertyMemoryId && !canvassingLeadId) {
+    if (!loc && !input.address) throw new Error('Location, address, propertyMemoryId, or canvassingLeadId is required')
+    const property = await upsertPropertyMemory(ctx, {
+      address: input.address,
+      homeownerName: input.homeownerName,
+      phone: input.phone,
+      sessionId: input.sessionId,
+      location: input.location,
+      roofCondition: input.roofCondition,
+      damageSignal: input.damageSignal,
+      summary: input.summary,
+      status: input.outcome === 'inspection_set' || input.outcome === 'interested' ? 'prospect' : undefined,
+      solicitationStatus: input.outcome === 'no_soliciting' || input.outcome === 'do_not_knock' ? input.outcome : undefined,
+      occupancyStatus: input.outcome === 'renter' ? 'renter' : undefined,
+      dataSource: { source: 'field_observation', userId: ctx.user?.id },
+    })
+    propertyMemoryId = property.id
+  }
+
+  const doorOutcomes = new Set(['knocked', 'no_answer', 'spoke', 'interested', 'inspection_set', 'follow_up', 'not_interested', 'renter', 'no_soliciting', 'do_not_knock'])
+  const normalizedOutcome = input.outcome?.trim()
+  const result = normalizedOutcome && doorOutcomes.has(normalizedOutcome)
+    ? await recordDoorAttempt(ctx, {
+        propertyMemoryId,
+        canvassingLeadId,
+        sessionId: input.sessionId ?? matchedLead?.sessionId,
+        outcome: normalizedOutcome,
+        contactName: input.contactName,
+        contactRole: input.contactRole,
+        summary: input.summary,
+        nextStep: input.nextStep,
+        location: input.location,
+        metadata: { ...(input.metadata ?? {}), source: 'field_observation' },
+      })
+    : await recordPropertyObservation(ctx, {
+        propertyMemoryId,
+        canvassingLeadId,
+        sessionId: input.sessionId ?? matchedLead?.sessionId,
+        type: input.type?.trim() || 'field_observation',
+        title: input.title,
+        summary: input.summary,
+        roofCondition: input.roofCondition,
+        damageSignal: input.damageSignal,
+        severity: input.severity,
+        confidence: input.confidence,
+        location: input.location,
+        metadata: { ...(input.metadata ?? {}), source: 'field_observation' },
+      })
+
+  const activitySessionId = input.sessionId ?? matchedLead?.sessionId
+  if (canvassingLeadId || activitySessionId) {
+    await db.canvassingActivity.create({
+      data: {
+        contractorId: ctx.contractorId,
+        sessionId: activitySessionId ?? undefined,
+        leadId: canvassingLeadId ?? undefined,
+        userId: ctx.user?.id,
+        type: normalizedOutcome ?? input.type?.trim() ?? 'field_observation',
+        summary: input.summary.slice(0, 1000),
+        latitude: loc?.lat,
+        longitude: loc?.lng,
+        metadataJson: JSON.stringify({
+          ...(input.metadata ?? {}),
+          source: 'field_observation',
+          propertyMemoryId,
+          observationType: input.type,
+          outcome: normalizedOutcome,
+        }),
+      },
+    }).catch(() => null)
+  }
+
+  if (loc) {
+    await db.fieldLocationPing.create({
+      data: {
+        contractorId: ctx.contractorId,
+        userId: ctx.user?.id,
+        canvassingLeadId,
+        latitude: loc.lat,
+        longitude: loc.lng,
+        accuracyMeters: loc.accuracyMeters ?? undefined,
+        source: loc.source ?? 'field_observation',
+        metadataJson: JSON.stringify({
+          propertyMemoryId,
+          observationType: input.type,
+          outcome: normalizedOutcome,
+          summary: input.summary.slice(0, 500),
+          source: 'field_observation',
+        }),
+      },
+    }).catch(() => null)
+  }
+
+  return {
+    result,
+    propertyMemoryId,
+    canvassingLeadId,
+    matchedExisting: Boolean(matchedLead || matchedExistingMemory || input.canvassingLeadId),
+    locationCaptured: Boolean(loc),
+  }
 }
 
 async function updateStreetMemoryFromAttempt(ctx: TenantContext, propertyMemoryId: string, outcome: string) {

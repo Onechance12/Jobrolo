@@ -575,6 +575,73 @@ function isFieldInspectionLeadRequest(text: string) {
   return hasLocation && hasInspectionIntent
 }
 
+function withoutBrowserLocationBlock(text: string) {
+  return plainMessageText(text).replace(/\[BROWSER_LOCATION\][\s\S]*$/i, '').trim()
+}
+
+function looksLikeRelayedPropertyInfo(text: string) {
+  const lower = withoutBrowserLocationBlock(text).toLowerCase()
+  return /\b(customer|homeowner|owner|tenant|renter|adjuster|roofer|crew|sub|sales|pm)\s+(?:texted|messaged|emailed|called|said|told|sent)\b/.test(lower)
+    || /\b(?:text|message|email|call)\s+(?:from|came in|said)\b/.test(lower)
+    || /\b(?:scope|estimate|document|pdf|file|report)\s+(?:says|said|shows|mentions|lists|has)\b/.test(lower)
+    || /\b(?:according to|from the pdf|from the document|from the file|uploaded scope|uploaded estimate)\b/.test(lower)
+}
+
+function classifyFieldObservation(text: string) {
+  const clean = withoutBrowserLocationBlock(text)
+  const lower = clean.toLowerCase()
+  let outcome: string | undefined
+  if (/\b(no soliciting|do not solicit|do not knock|no knock)\b/.test(lower)) outcome = lower.includes('do not knock') ? 'do_not_knock' : 'no_soliciting'
+  else if (/\b(renter|renters|tenant|tenants)\b/.test(lower)) outcome = 'renter'
+  else if (/\b(no answer|nobody answered|no one answered)\b/.test(lower)) outcome = 'no_answer'
+  else if (/\b(not interested|no interest)\b/.test(lower)) outcome = 'not_interested'
+  else if (/\b(interested|wants inspection|wants me to inspect|inspection set|set inspection|landed inspection|got inspection)\b/.test(lower)) outcome = /\binspection/.test(lower) ? 'inspection_set' : 'interested'
+  else if (/\b(knocked|knocking|door knock)\b/.test(lower)) outcome = 'knocked'
+  else if (/\b(spoke with|talked to|someone answered)\b/.test(lower)) outcome = 'spoke'
+  else if (/\bfollow[- ]?up\b/.test(lower)) outcome = 'follow_up'
+
+  const damageSignals: string[] = []
+  if (/\bhail\b/.test(lower)) damageSignals.push('hail')
+  if (/\bwind\b/.test(lower)) damageSignals.push('wind')
+  if (/\bmissing shingles?\b/.test(lower)) damageSignals.push('missing shingles')
+  if (/\bcreased shingles?\b/.test(lower)) damageSignals.push('creased shingles')
+  if (/\bsoft metals?|gutters?|vents?|drip edge|flashing\b/.test(lower)) damageSignals.push('soft metals')
+  if (/\bwindow screens?|screens?\b/.test(lower)) damageSignals.push('window screens')
+  if (/\binterior leak|ceiling stain|water stain|drywall|interior\b/.test(lower)) damageSignals.push('interior')
+
+  const roofCondition = /\b(new roof)\b/.test(lower) ? 'new_roof'
+    : /\b(old roof|aged roof)\b/.test(lower) ? 'aged'
+    : damageSignals.length ? 'visible_damage'
+    : undefined
+
+  const type = outcome ? 'door_or_property_note'
+    : damageSignals.length ? 'damage_observation'
+    : /\b(dog|gate locked|locked gate|vacant|for sale|sold)\b/.test(lower) ? 'property_access_note'
+    : 'field_observation'
+
+  return {
+    type,
+    outcome,
+    title: outcome ? outcome.replace(/_/g, ' ') : type.replace(/_/g, ' '),
+    summary: clean.slice(0, 800),
+    roofCondition,
+    damageSignal: damageSignals.length ? damageSignals.join(', ') : undefined,
+    severity: /\b(major|severe|bad|heavy|lots of|tons of)\b/.test(lower) ? 'high' : damageSignals.length ? 'moderate' : undefined,
+  }
+}
+
+function isLiveFieldObservationRequest(text: string) {
+  const clean = withoutBrowserLocationBlock(text)
+  const lower = clean.toLowerCase()
+  if (!browserLocationFromText(text)) return false
+  if (looksLikeRelayedPropertyInfo(text) && !/\b(i am here|i'm here|where i am|where i'm at|current location|at the property|at this property|from the ground|i saw|i see|noticed|observed)\b/.test(lower)) return false
+  if (/\b(open|show|pull up|display)\b.{0,40}\bmap\b/.test(lower)) return false
+  if (/\b(start|landed|got|set)\b.{0,35}\binspection\b/.test(lower)) return false
+  const fieldSignals = /\b(i saw|i see|seeing|noticed|observed|from (?:the )?ground|from driveway|from street|standing|walking around|on (?:the )?roof|during (?:the )?inspection|at (?:the )?inspection|knocked|knocking|door knock|someone answered|no answer|not interested|interested|follow[- ]?up|talked to|spoke with|left (?:a )?(?:card|flyer|door hanger))\b/.test(lower)
+  const propertySignals = /\b(roof damage|missing shingles?|creased shingles?|lifted shingles?|hail damage|wind damage|dents?|dented|soft metals?|gutters?|vents?|window screens?|screens?|collateral|fence damage|interior leak|ceiling stain|water stain|attic leak|tarp|new roof|old roof|no soliciting|do not knock|renters?|tenants?|vacant|dog|gate locked)\b/.test(lower)
+  return fieldSignals || propertySignals
+}
+
 function isCreatePotentialLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!/\b(create|add|save|start)\b.{0,30}\blead\b|\blead\b.{0,30}\b(create|add|save|start)\b/.test(lower)) return false
@@ -692,6 +759,20 @@ Call resolve_field_location now with {${locationArgs}"mode":"inspection_check"}.
 After the tool returns, tell the user whether a saved inspection/project/customer/lead appears to match this location. If nothing matches, say that honestly and offer to start a new field inspection lead. Respond as JSON only.`
 }
 
+function buildFieldObservationInstruction(userText: string) {
+  const location = browserLocationFromText(userText)
+  const classification = classifyFieldObservation(userText)
+  return `The latest user message is a live field/property observation with browser GPS:
+"${withoutBrowserLocationBlock(userText).slice(0, 500)}"
+
+Do not create a customer or project from this note.
+Do not treat this as office/admin information, a customer text, or a pasted scope.
+Call record_field_observation_at_location now with:
+${JSON.stringify({ ...classification, ...(location ? { location } : {}) })}
+
+After the tool returns, confirm the observation was saved with GPS and say whether it matched an existing property/lead or stayed as lightweight property memory. Respond as JSON only.`
+}
+
 function buildFieldInspectionLeadToolCall(userText: string, fallbackLocation?: ReturnType<typeof browserLocationFromText>): ToolCall {
   const location = browserLocationFromText(userText) ?? fallbackLocation ?? null
   return {
@@ -744,6 +825,18 @@ function buildFieldLocationResolveToolCall(userText: string): ToolCall | null {
   }
 }
 
+function buildFieldObservationToolCall(userText: string): ToolCall {
+  const location = browserLocationFromText(userText)
+  const classification = classifyFieldObservation(userText)
+  return {
+    name: 'record_field_observation_at_location',
+    args: {
+      ...classification,
+      ...(location ? { location } : {}),
+    },
+  }
+}
+
 function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'documentIds'>): ToolCall | null {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
@@ -754,6 +847,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
+  if (isLiveFieldObservationRequest(userText)) return buildFieldObservationToolCall(userText)
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadToolCall(userText, mostRecentBrowserLocation(messages))
   if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationToolCall(messages)
   if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveToolCall(userText)
@@ -775,6 +869,7 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
+  if (isLiveFieldObservationRequest(userText)) return buildFieldObservationInstruction(userText)
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadInstruction(userText, mostRecentBrowserLocation(messages))
   if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationInstruction(messages)
   if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveInstruction(userText)
@@ -823,6 +918,7 @@ Common recovery examples:
 - If the user uploaded a logo and asked to add it to the company profile, call update_contractor_profile with logoDocumentId from the current uploaded document. Do not wait for logo/image analysis.
 - To create a named/address potential lead before an inspection is set, call create_canvassing_lead_at_location with homeownerName/address/phone/status="new".
 - To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is clearly an inspection/appointment at a new property with browser GPS.
+- To save live field observations like "missing shingles from ground", "dents to soft metals", "no soliciting sign", "renters", or "window screen damage" with browser GPS, call record_field_observation_at_location. Do not create a customer/project unless the user explicitly asks to convert it.
 - If the user asks to research "it/this property/this house" during a field inspection flow, call research_property_now with the latest browser GPS/location context. Do not ask for homeowner name or phone first.
 - If the user says "yes create a project" after a customer was just discussed, use that customerName unless multiple customers are possible.
 

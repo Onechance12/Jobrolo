@@ -26,11 +26,16 @@ interface Props {
 
 function shouldRequestBrowserLocation(prompt: string) {
   const t = prompt.toLowerCase().replace(/[’']/g, "'")
+  const relayedInfo = /\b(customer|homeowner|owner|tenant|renter|adjuster|roofer|crew|sub|sales|pm)\s+(?:texted|messaged|emailed|called|said|told|sent)|\b(?:text|message|email|call)\s+(?:from|came in|said)|\b(?:scope|estimate|document|pdf|file|photo|image|report)\s+(?:says|said|shows|mentions|lists|has)|\b(?:according to|from the pdf|from the document|from the file|uploaded scope|uploaded estimate)\b/i.test(t)
   const asksHere = /\b(where i'?m at|where i am|right here|use my location|my location|current location|near me|nearby|gps|where we are|where i'm standing|where i am standing|here right now|address i'?m at|address i am at|this address i'?m at|this address i am at)\b/i.test(t)
   const fieldIntent = /\b(canvass|canvassing|door|knock|street|field|lead|property|house|map|route|inspection|appointment|jobsite|job site|arrived|onsite|on site)\b/i.test(t)
   const liveFieldMoment = /\b(walking up|walk up|i'?m here|i arrived|arrived|just landed|landed (an? )?inspection|got (an? )?inspection|set (an? )?inspection|at the house|at the property|outside mowing)\b/i.test(t)
   const doorOrFieldLog = /\b(knocking|knocked|door knock|approaching (?:the )?door|at (?:the|this) door|someone answered|no answer|not interested|interested|follow[- ]?up|talked to (?:the )?(?:homeowner|customer|owner|tenant)|spoke with (?:the )?(?:homeowner|customer|owner|tenant)|left (?:a )?(?:card|flyer|door hanger))\b/i.test(t)
-  return asksHere || liveFieldMoment || doorOrFieldLog || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
+  const damageOrPropertySignal = /\b(roof damage|missing shingles?|creased shingles?|lifted shingles?|wind damage|hail damage|dents?|dented|soft metals?|gutters?|vents?|screens?|window screen|collateral|fence damage|interior leak|ceiling stain|water stain|attic leak|tarp|new roof|old roof|no soliciting|do not knock|renters?|tenants?|vacant|dog|gate locked)\b/i.test(t)
+  const liveObservationLanguage = /\b(i saw|i see|seeing|noticed|observed|from (?:the )?ground|from driveway|from street|standing|walking around|on (?:the )?roof|during (?:the )?inspection|at (?:the )?inspection)\b/i.test(t)
+  const livePropertyNote = (liveObservationLanguage && damageOrPropertySignal) || /\b(no soliciting|do not knock|renters?|tenants?|vacant|dog|gate locked)\b/i.test(t)
+  const terseFieldDamageNote = !relayedInfo && damageOrPropertySignal && t.split(/\s+/).filter(Boolean).length <= 10
+  return asksHere || liveFieldMoment || doorOrFieldLog || (!relayedInfo && livePropertyNote) || terseFieldDamageNote || (fieldIntent && /\b(here|right now|current|nearby|near me|gps|location|where i am|where i'm at)\b/i.test(t))
 }
 
 function browserLocationErrorMessage(err: unknown) {

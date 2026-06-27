@@ -25,7 +25,7 @@ import { getFieldBriefing, executeFieldAction, resolveFieldEntity, listCopilotIn
 import { createUnsignedDocumentPdf, getSignedDocumentArtifacts } from '@/lib/final-documents'
 import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, createRoofReportPdf, reviewRoofReportCandidatePhotos, updateRoofReportPhotoSelection, bulkAddPhotosToRoofReport, shareRoofReport } from '@/lib/roof-reports'
 import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, convertCanvassingLead } from '@/lib/canvassing'
-import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, createCanvassingGamePlan } from '@/lib/property-memory'
+import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, recordFieldObservation, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { researchCompany } from '@/lib/onboarding/research'
 import { sanitizeHtml } from '@/lib/security/html'
@@ -4038,6 +4038,53 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId, ctx) => {
       const attempt = await recordDoorAttempt(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: { attempt, card: { cardType: 'door_attempt', attemptId: attempt.id, propertyMemoryId: attempt.propertyMemoryId, outcome: attempt.outcome, summary: attempt.summary, followUpAt: attempt.followUpAt } } }
+    },
+  },
+  {
+    name: 'record_field_observation_at_location',
+    description: 'Record a live field observation with GPS without creating a customer/project. Use when the user is physically at/near a property and says things like missing shingles, dents to soft metals, no-soliciting sign, renter/tenant, window screen damage, roof damage from the ground, gate locked, dog, or other inspection/canvassing notes. Reuses nearby property memory/leads when possible, stores exact GPS evidence, and keeps conversion to customer/job separate.',
+    schema: z.object({
+      propertyMemoryId: z.string().optional(),
+      canvassingLeadId: z.string().optional(),
+      sessionId: z.string().optional(),
+      address: z.string().optional(),
+      homeownerName: z.string().optional(),
+      phone: z.string().optional(),
+      type: z.string().optional(),
+      outcome: z.string().optional(),
+      title: z.string().optional(),
+      summary: z.string().min(1),
+      roofCondition: z.string().optional(),
+      damageSignal: z.string().optional(),
+      severity: z.string().optional(),
+      confidence: z.number().optional(),
+      contactName: z.string().optional(),
+      contactRole: z.string().optional(),
+      nextStep: z.string().optional(),
+      location: z.object({ lat: z.number().optional(), lng: z.number().optional(), latitude: z.number().optional(), longitude: z.number().optional(), accuracyMeters: z.number().optional(), source: z.string().optional() }).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'management', 'crew'],
+    execute: async (args, contractorId, ctx) => {
+      const result = await recordFieldObservation(await buildTrustedToolTenantContext(contractorId, ctx), {
+        ...args,
+        metadata: { tool: 'record_field_observation_at_location' },
+      })
+      return {
+        success: true,
+        data: {
+          ...result,
+          card: {
+            cardType: 'property_observation',
+            propertyMemoryId: result.propertyMemoryId,
+            canvassingLeadId: result.canvassingLeadId,
+            type: args.type ?? args.outcome ?? 'field_observation',
+            title: args.title ?? 'Field observation saved',
+            summary: args.summary,
+            locationCaptured: result.locationCaptured,
+            matchedExisting: result.matchedExisting,
+          },
+        },
+      }
     },
   },
   {
