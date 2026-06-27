@@ -596,22 +596,42 @@ function PromptAssistantRail({ groups, onRun }: { groups: PromptGroup[]; onRun: 
   const activeTone = promptGroupTone(activeGroup.tone)
 
   const scrollToGroup = (index: number) => {
-    setActiveIndex(index)
+    setActiveIndex((index + groups.length) % groups.length)
   }
 
   return (
-    <div className="mb-2 -mx-3 border-t border-border/60 pt-2">
+    <div className="mb-1 -mx-3 border-t border-border/50 pt-1.5">
       <div className="mb-1 flex items-center justify-between gap-2 px-3">
         <button
           type="button"
           onClick={() => scrollToGroup((activeIndex + 1) % groups.length)}
-          className="flex min-w-0 items-baseline gap-2 text-left"
+          className="flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-2 text-left"
           aria-label="Switch shortcut section"
         >
           <div className={cn('truncate text-[11px] font-semibold uppercase tracking-[0.14em]', activeTone.label)}>{activeGroup.label}</div>
+          <span className={cn('text-xs leading-none', activeTone.label)} aria-hidden>›</span>
           <div className="hidden truncate text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55 min-[380px]:block">{activeGroup.reason}</div>
         </button>
-        <div className="shrink-0 text-[10px] font-medium text-muted-foreground/55">{activeIndex + 1}/{groups.length}</div>
+        {groups.length > 1 ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => scrollToGroup(activeIndex - 1)}
+              className="grid h-7 w-7 place-items-center rounded-full border border-border/70 bg-muted/30 text-sm text-muted-foreground transition-colors hover:bg-muted"
+              aria-label="Previous shortcut section"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToGroup(activeIndex + 1)}
+              className="grid h-7 w-7 place-items-center rounded-full border border-border/70 bg-muted/30 text-sm text-muted-foreground transition-colors hover:bg-muted"
+              aria-label="Next shortcut section"
+            >
+              ›
+            </button>
+          </div>
+        ) : null}
       </div>
       <div
         className="overflow-x-auto overscroll-x-contain px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
