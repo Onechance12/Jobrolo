@@ -19,7 +19,35 @@ function JobroloChatIcon({ size = 'md' }: { size?: 'sm' | 'md' }) {
   )
 }
 
-const FEATURE_PREVIEWS = [
+const OUTCOME_PREVIEWS = [
+  {
+    label: 'Win faster follow-up',
+    tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100 hover:border-blue-200/45 hover:bg-blue-500/20',
+    prompt: 'Show me how Jobrolo helps a contractor follow up faster, stop leads from slipping, and turn conversations into booked inspections or next steps.',
+  },
+  {
+    label: 'Protect revenue',
+    tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100 hover:border-emerald-200/45 hover:bg-emerald-500/20',
+    prompt: 'Show me how Jobrolo helps protect revenue by keeping scopes, photos, supplements, approvals, and job details from getting lost.',
+  },
+  {
+    label: 'Run cleaner jobs',
+    tone: 'border-cyan-300/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/45 hover:bg-cyan-500/20',
+    prompt: 'Show me how Jobrolo helps production, crews, subs, sales reps, and project managers stay aligned without digging through CRM menus.',
+  },
+  {
+    label: 'Look professional',
+    tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100 hover:border-amber-200/45 hover:bg-amber-500/20',
+    prompt: 'Show me how Jobrolo helps a contractor look more professional with customer updates, photo reports, roof reports, and organized job packets.',
+  },
+]
+
+const TOOL_PREVIEWS = [
+  {
+    label: 'AI operator',
+    tone: 'border-violet-300/20 bg-violet-500/10 text-violet-100 hover:border-violet-200/45 hover:bg-violet-500/20',
+    prompt: 'Explain Jobrolo as an AI operator for a contractor. What can I ask it to do, what needs approval, and what should it save or retrieve?',
+  },
   {
     label: 'Client files',
     tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100 hover:border-blue-200/45 hover:bg-blue-500/20',
@@ -46,6 +74,43 @@ const FEATURE_PREVIEWS = [
     prompt: 'Teach me how Jobrolo approvals work. Explain what actions need approval, why that matters, and how the user stays in control.',
   },
 ]
+
+function PreviewPillGroup({
+  title,
+  subtitle,
+  items,
+  onAsk,
+  disabled,
+}: {
+  title: string
+  subtitle: string
+  items: typeof TOOL_PREVIEWS
+  onAsk: (prompt: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="mt-3">
+      <div className="mb-2 flex items-baseline gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">{title}</span>
+        <span className="text-[10px] text-slate-500">{subtitle}</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map(item => (
+          <button
+            key={item.label}
+            type="button"
+            onClick={() => onAsk(item.prompt)}
+            disabled={disabled}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${item.tone}`}
+            aria-label={`Ask about ${item.label}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function cleanLobbyText(value: string) {
   return value
@@ -153,9 +218,9 @@ function EntryActionPills({
   disabled?: boolean
 }) {
   const prompts = [
-    { label: 'How it works', prompt: 'Walk me through how Jobrolo works like I am a roofing contractor seeing it for the first time. Keep it practical.' },
-    { label: 'Client files', prompt: 'Show me how client files work in Jobrolo, with an example from first lead to job packet.' },
-    { label: 'Field + photos', prompt: 'Show me how field notes, GPS, inspection photos, and reports work together in Jobrolo.' },
+    { label: 'Increase follow-up', prompt: 'Explain how Jobrolo helps improve follow-up, reduce dropped leads, and keep sales conversations moving.' },
+    { label: 'Automate busywork', prompt: 'Explain what contractor busywork Jobrolo can reduce through chat, tools, approvals, and saved records.' },
+    { label: 'Reports + trust', prompt: 'Explain how Jobrolo creates better customer-facing reports, updates, and job packets that build trust.' },
     { label: 'Invites + roles', prompt: 'Explain how inviting employees, crews, subcontractors, and homeowners works, including permissions.' },
     { label: 'Join with code', prompt: 'I have a Jobrolo invite code or link and need to join an existing company workspace.' },
   ]
@@ -429,20 +494,20 @@ export default function SignupPage() {
               <div className="mt-2 text-sm text-slate-300">
                 You can also ask me questions here before creating an account. I can explain what Jobrolo does, how invites work, and how setup flows — real company tools unlock after sign-in.
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {FEATURE_PREVIEWS.map(feature => (
-                  <button
-                    key={feature.label}
-                    type="button"
-                    onClick={() => void sendLobbyMessage(feature.prompt)}
-                    disabled={lobbySending}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${feature.tone}`}
-                    aria-label={`Ask about ${feature.label}`}
-                  >
-                    {feature.label}
-                  </button>
-                ))}
-              </div>
+              <PreviewPillGroup
+                title="Business wins"
+                subtitle="why it matters"
+                items={OUTCOME_PREVIEWS}
+                onAsk={prompt => void sendLobbyMessage(prompt)}
+                disabled={lobbySending}
+              />
+              <PreviewPillGroup
+                title="Tools"
+                subtitle="what it does"
+                items={TOOL_PREVIEWS}
+                onAsk={prompt => void sendLobbyMessage(prompt)}
+                disabled={lobbySending}
+              />
               <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-100">
                 If someone texted or emailed you an invite, use that invite link instead. That attaches you to the right company, chat, and permissions.
               </div>
