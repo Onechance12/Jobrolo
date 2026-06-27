@@ -185,8 +185,8 @@ export function useChat() {
           await refreshBusinessContext()
 
           // Upload success means "file saved". If the user also typed instructions
-          // about the upload, wait for analysis before starting the agent so it
-          // doesn't call get_document_content while the file is still processing.
+          // about the upload, give analysis a short head start, but do not let a
+          // slow document worker swallow the user's actual request.
           const docsNeedingAnalysis = data.documents
           if (docsNeedingAnalysis.length > 0) {
             updateMessage(userMessageId, {
@@ -215,7 +215,7 @@ export function useChat() {
               const results: DocumentPollResult[] = []
               for (const doc of docsNeedingAnalysis) {
                 if (abortRef.current || abortControllerRef.current.signal.aborted) break
-                const result = await pollDocumentStatus(doc.id, userMessageId, false, 18, abortControllerRef.current.signal)
+                const result = await pollDocumentStatus(doc.id, userMessageId, false, 6, abortControllerRef.current.signal)
                 results.push(result)
               }
               if (abortRef.current || abortControllerRef.current.signal.aborted) return { ok: false }
@@ -226,15 +226,11 @@ export function useChat() {
                   id: crypto.randomUUID(),
                   role: 'assistant',
                   content: timedOut
-                    ? `The file is saved. Analysis is still running, so I’m not going to guess from a half-processed document. I’ll keep the saved file card here; ask me to analyze the latest upload again in a minute if it has not updated.`
-                    : `The file is saved. Analysis finished with status: ${unfinished.map(r => r.status || 'unknown').join(', ')}. I can attach or route the saved file, but I don’t have reliable extracted scope text yet.`,
+                    ? `The file is saved. Analysis is still finishing, but I’ll continue with your request using the saved file record and I’ll tell you honestly if the extracted data is not ready yet.`
+                    : `The file is saved. Analysis finished with status: ${unfinished.map(r => r.status || 'unknown').join(', ')}. I’ll continue with your request using the saved file record and only claim extracted details if they are available.`,
                   createdAt: new Date().toISOString(),
                 })
-                clearUploadProgress()
-                setTyping(false)
-                setStreaming(false)
-                clearStreamingText()
-                return { ok: true }
+                setStreamingText('Checking saved upload...')
               }
             } else {
               void (async () => {

@@ -28,6 +28,15 @@ function sanitizeGeneratedStorageUrls(text: string) {
   return text.replace(/https?:\/\/yourdomain\.com(\/api\/storage\/[^\s)\]}]+)/gi, '$1')
 }
 
+function safeThinkingText(text: string, toolNames: string[] = []) {
+  if (toolNames.length > 0) return `Working on ${[...new Set(toolNames.map(n => n.replace(/_/g, ' ')))].join(', ')}…`
+  const clean = String(text ?? '').trim()
+  if (!clean || /You said "|MUST call|Common recovery examples|Respond as JSON only|Tool results:|\[UPLOADED DOCUMENTS|UNTRUSTED_CONTENT|narrated operational work/i.test(clean)) {
+    return 'Checking the right saved workflow…'
+  }
+  return clean.length > 140 ? `${clean.slice(0, 137)}…` : clean
+}
+
 function collectImageAttachmentsFromToolData(value: unknown): Array<{ type: string; name: string; url: string; thumbnailUrl?: string; documentId?: string }> {
   const found: Array<{ type: string; name: string; url: string; thumbnailUrl?: string; documentId?: string }> = []
   const visit = (node: unknown) => {
@@ -139,7 +148,7 @@ export async function processJob(jobId: string, opts: {
     messages.push({ role: 'user', content: message })
 
     job.heartbeat = 'Thinking...'
-    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { j.thinking.push({ text: iter.text, toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.error ?? (r.data ? JSON.stringify(r.data).slice(0, 80) : 'ok') })) }); j.heartbeat = iter.text } } } })
+    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { const toolNames = iter.toolCalls.map(tc => tc.name); j.thinking.push({ text: safeThinkingText(iter.text, toolNames), toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.success ? 'Done' : 'Needs attention' })) }); j.heartbeat = safeThinkingText(iter.text, toolNames) } } } })
     clearInterval(hb)
 
     const finalText = sanitizeGeneratedStorageUrls(loopResult.final.text || '(no response)')

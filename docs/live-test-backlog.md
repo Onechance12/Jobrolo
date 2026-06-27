@@ -456,3 +456,28 @@ If not saved:
 8. `Show me Timothy’s photos.`
 9. Paste scope text and say: `Save this scope breakdown to Timothy’s project.`
 10. `What needs my approval right now?`
+
+## Full trust audit — June 27, 2026
+
+### Fixed in the current hardening pass
+
+- Slow document analysis should no longer swallow a typed upload request. Upload success remains “file saved,” but the user’s message now continues into the agent with saved document IDs even when extraction is still finishing.
+- Internal recovery prompts such as “MUST call the correct tool” and “Common recovery examples” are sanitized before they appear in the visible activity log.
+- Optional `null` tool arguments are stripped before validation so partial company-profile updates do not fail just because the model included unused null fields.
+- Named/address potential leads now have a deterministic fallback to `create_canvassing_lead_at_location` instead of accidentally becoming an inspection flow or dead-ending without a tool call.
+
+### Still highest-risk before this feels like a real CRM replacement
+
+- Every visible card must be actionable: files need working open/download actions, approvals need clear payload details, and notifications need hide/archive/delete where role-safe.
+- Chat routing needs stronger state: private chats, job files, crew chats, customer chats, and referral/partner chats should each answer who can see it, what it is attached to, and how it can be invited/shared.
+- Field workflow needs a clean pipeline: potential lead → inspection lead → confirmed customer/project → job chats/report/scope. The app should never create an inspection without a lead, and it should never create a customer/project without confirmation when property data conflicts.
+- Company profile research should remain chat-first: show source/logo/review previews, let the owner save/edit/remove from the card or by chat, and preserve corrected canonical names such as “SONS ROOFING.”
+- Property research is only production-ready after a real provider/web-search path is configured and tested for address, owner, property, and county/CAD-style lookup behavior.
+
+### Trust tests required before calling the app “live-operator ready”
+
+1. Upload a large carrier estimate/scope and ask Jobrolo to summarize, create customer, create project, and save the scope.
+2. Upload roof photos by section and confirm they save, render, can be attached to a customer/project/report, and can be removed from a report without deleting source files.
+3. Ask to create a potential lead, then convert it into an inspection lead, then convert only after confirmation into a customer/project.
+4. Create separate roofing, gutter, window, customer, and referral/agent chats for one job; confirm each has the right invite/link/visibility behavior.
+5. Ask “what is actually saved?” for company profile, customers, projects, documents, photos, reports, approvals, and notifications; each answer must be database-grounded.

@@ -4303,6 +4303,17 @@ function approvalRoleForTool(name: string) {
   return 'project_manager'
 }
 
+function stripNullishToolArgs(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNullishToolArgs)
+  if (!value || typeof value !== 'object') return value
+  const cleaned: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (child === null || typeof child === 'undefined') continue
+    cleaned[key] = stripNullishToolArgs(child)
+  }
+  return cleaned
+}
+
 // Execute a tool call with validation + permissioning
 // ---------------------------------------------------------------------------
 
@@ -4321,7 +4332,7 @@ export async function executeTool(
   }
 
   // Schema validation happens before approval so the approval card stores a safe, typed payload.
-  const parsed = tool.schema.safeParse(args)
+  const parsed = tool.schema.safeParse(stripNullishToolArgs(args))
   if (!parsed.success) {
     return { success: false, data: null, error: `Invalid args: ${parsed.error.issues.map(i => i.message).join('; ')}` }
   }

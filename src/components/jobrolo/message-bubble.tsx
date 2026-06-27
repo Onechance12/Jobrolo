@@ -219,21 +219,28 @@ function ActionRow({ result }: { result: ActionResult }) {
 
 function ThinkingSteps({ steps }: { steps: ThinkingStep[] }) {
   const [expanded, setExpanded] = useState(false)
+  const safeStepText = (text: string) => {
+    if (/You said "|MUST call|Common recovery examples|Respond as JSON only|Tool results:|\[UPLOADED DOCUMENTS|UNTRUSTED_CONTENT|narrated operational work/i.test(text)) {
+      return 'Checking the right saved workflow…'
+    }
+    return text.length > 140 ? `${text.slice(0, 137)}…` : text
+  }
+  const labelTool = (name: string) => name.replace(/_/g, ' ')
   return (
     <div className="mb-2 rounded-lg border border-border bg-muted/60 overflow-hidden w-full sm:max-w-md">
       <button onClick={() => setExpanded(v => !v)} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted">
         <Brain className="w-3.5 h-3.5 text-violet-500" />
-        <span>Thought process ({steps.length})</span>
+        <span>Activity ({steps.length})</span>
         <ChevronRight className={cn('w-3 h-3 ml-auto transition-transform', expanded && 'rotate-90')} />
       </button>
       {expanded && (
         <div className="px-3 pb-2 space-y-1.5">
           {steps.map((step, i) => (
             <div key={i} className="text-xs space-y-1 border-l-2 border-border pl-2.5">
-              <div className="text-muted-foreground italic">{step.text}</div>
+              <div className="text-muted-foreground italic">{safeStepText(step.text)}</div>
               {step.toolCalls?.map((tc, j) => (
                 <div key={j} className="flex items-start gap-1.5 text-muted-foreground">
-                  <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded">{tc.name}</span>
+                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded capitalize">{labelTool(tc.name)}</span>
                 </div>
               ))}
             </div>

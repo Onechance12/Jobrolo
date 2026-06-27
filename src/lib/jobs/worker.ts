@@ -6,7 +6,7 @@
 import { db } from '@/lib/db'
 import { type ChatMessage } from '@/lib/ai'
 import { buildCommandCenterPrompt, buildChannelPrompt } from '@/lib/prompts'
-import { runAgentLoop } from '@/lib/agent-loop'
+import { runAgentLoop, type AgentIteration } from '@/lib/agent-loop'
 import { executeActions } from '@/lib/actions'
 import { heartbeat, appendThinking, completeJob, failJob, isJobCancelled } from '@/lib/jobs/queue'
 import { wrapUntrusted, sanitizeAIOutput, validateAction } from '@/lib/security/prompt-defense'
@@ -23,6 +23,63 @@ interface AgentJobRow {
   chatId: string | null
   conversationId: string | null
   userId: string | null
+}
+
+const INTERNAL_WORK_PATTERNS = [
+  /You said "/i,
+  /MUST call/i,
+  /Common recovery examples/i,
+  /Respond as JSON only/i,
+  /Tool results:/i,
+  /\[UPLOADED DOCUMENTS/i,
+  /UNTRUSTED_CONTENT/i,
+  /correct tool or include the correct action/i,
+  /narrated operational work/i,
+]
+
+function humanToolLabel(name: string) {
+  const labels: Record<string, string> = {
+    list_customers: 'saved clients',
+    get_customer_file: 'customer file',
+    get_document_content: 'uploaded document',
+    get_upload_status: 'upload status',
+    get_recent_uploads: 'recent uploads',
+    link_document_to_customer: 'file attachment',
+    create_project_for_customer: 'project/job',
+    create_project_chat: 'chat setup',
+    invite_user_to_chat: 'chat invite',
+    get_contractor_profile: 'company profile',
+    update_contractor_profile: 'company profile',
+    research_contractor_website: 'company research',
+    research_property_now: 'property research',
+    resolve_field_location: 'field location',
+    start_field_inspection_lead: 'field inspection lead',
+    create_canvassing_lead_at_location: 'field lead',
+    review_price_sheet_items: 'price sheet rows',
+    import_price_sheet_items: 'price sheet import',
+    decide_pending_action_requests: 'pending approval',
+    decide_action_request: 'approval',
+  }
+  return labels[name] ?? name.replace(/_/g, ' ')
+}
+
+function safeWorkText(iter: AgentIteration) {
+  const toolNames = [...new Set(iter.toolCalls.map(tc => humanToolLabel(tc.name)))]
+  if (toolNames.length > 0) return `Working on ${toolNames.join(', ')}…`
+  const text = String(iter.text ?? '').trim()
+  if (!text || INTERNAL_WORK_PATTERNS.some(pattern => pattern.test(text))) {
+    return 'Checking the right saved workflow…'
+  }
+  return text.length > 140 ? `${text.slice(0, 137)}…` : text
+}
+
+function safeToolResultSummary(result: { name: string; success: boolean; data: unknown; error?: string }) {
+  if (!result.success) return 'Needs attention'
+  const data = result.data as Record<string, any> | null
+  if (data?.message && typeof data.message === 'string') return data.message.slice(0, 100)
+  if (data?.card?.cardType) return `Prepared ${String(data.card.cardType).replace(/_/g, ' ')}`
+  if (data?.cardType) return `Prepared ${String(data.cardType).replace(/_/g, ' ')}`
+  return 'Done'
 }
 
 function isPlaceholderUrl(value: string) {
@@ -398,9 +455,9 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
       onIteration: (iter) => {
         if (!iter.final) {
           appendThinking(job.id, {
-            text: iter.text,
+            text: safeWorkText(iter),
             toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })),
-            toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.error ?? (r.data ? JSON.stringify(r.data).slice(0, 80) : 'ok') })),
+            toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: safeToolResultSummary(r) })),
           }).catch(() => {})
         }
       },

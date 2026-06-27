@@ -566,6 +566,35 @@ function isFieldInspectionLeadRequest(text: string) {
   return hasLocation && hasInspectionIntent
 }
 
+function isCreatePotentialLeadRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!/\b(create|add|save|start)\b.{0,30}\blead\b|\blead\b.{0,30}\b(create|add|save|start)\b/.test(lower)) return false
+  return !/\b(inspection|inspect|appointment|project|job|customer file)\b/.test(lower)
+}
+
+function extractPotentialLeadArgs(text: string) {
+  const clean = plainMessageText(text)
+    .replace(/\[BROWSER_LOCATION\][\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const phoneMatch = clean.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}\b/) ?? clean.match(/\b\d{10,12}\b/)
+  const phone = phoneMatch?.[0]?.trim()
+  const afterLead = clean.replace(/^.*?\blead(?:\s+for\s+me|\s+for)?\s*/i, '').trim()
+  const phoneIndex = phone ? afterLead.indexOf(phone) : -1
+  const beforePhone = phone && phoneIndex >= 0 ? afterLead.slice(0, phoneIndex).trim() : afterLead
+  const afterPhone = phone && phoneIndex >= 0 ? afterLead.slice(phoneIndex + phone.length).trim() : ''
+  const nameWords = beforePhone.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}/)?.[0]
+  const addressFromAfterPhone = afterPhone.replace(/\b(speech|period|comma|please)$/i, '').trim()
+  const addressFromBeforePhone = beforePhone.replace(nameWords ?? '', '').trim()
+  return {
+    homeownerName: nameWords,
+    phone,
+    address: addressFromAfterPhone || addressFromBeforePhone || undefined,
+    notes: clean.slice(0, 800),
+    status: 'new',
+  }
+}
+
 function isFieldLocationResolveRequest(messages: ChatMessage[]) {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return false
@@ -658,6 +687,18 @@ function buildFieldInspectionLeadToolCall(userText: string, fallbackLocation?: R
   }
 }
 
+function buildPotentialLeadToolCall(userText: string): ToolCall {
+  const location = browserLocationFromText(userText)
+  const args = extractPotentialLeadArgs(userText)
+  return {
+    name: 'create_canvassing_lead_at_location',
+    args: {
+      ...args,
+      ...(location ? { location } : {}),
+    },
+  }
+}
+
 function buildFieldResearchContinuationToolCall(messages: ChatMessage[]): ToolCall {
   const latestUser = lastExternalUserMessage(messages)
   const userText = latestUser ? plainMessageText(latestUser.message.content) : ''
@@ -693,6 +734,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (opts?.documentIds?.length && isCompanyLogoUploadRequest(userText)) {
     return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
   }
+  if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadToolCall(userText, mostRecentBrowserLocation(messages))
   if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationToolCall(messages)
