@@ -121,10 +121,27 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   useEffect(() => {
     const load = () => {
       try {
-        setShortcuts(parseStoredCommandShortcuts(
+        const local = parseStoredCommandShortcuts(
           window.localStorage.getItem(COMMAND_SHORTCUTS_KEY),
           window.localStorage.getItem(LEGACY_CUSTOM_SHORTCUTS_KEY),
-        ))
+        )
+        setShortcuts(local)
+        fetch('/api/command-shortcuts')
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (!data?.shortcuts?.length) return
+            const remote = parseStoredCommandShortcuts(JSON.stringify(data.shortcuts))
+            setShortcuts(remote)
+            window.localStorage.setItem(COMMAND_SHORTCUTS_KEY, JSON.stringify(remote))
+            if (data.source === 'defaults' && local.some(shortcut => !DEFAULT_COMMAND_SHORTCUTS.some(base => base.id === shortcut.id))) {
+              fetch('/api/command-shortcuts', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shortcuts: local, scope: 'user' }),
+              }).catch(() => null)
+            }
+          })
+          .catch(() => null)
       } catch {}
     }
     load()
@@ -275,6 +292,9 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
   const runShortcut = (shortcut: CommandShortcut) => {
+    if (!shortcut.id.startsWith('custom-')) {
+      fetch(`/api/command-shortcuts/${encodeURIComponent(shortcut.id)}`, { method: 'POST' }).catch(() => null)
+    }
     if (shortcut.icon === 'field' || shortcut.id.startsWith('field-')) {
       runFieldQuickPrompt(shortcut, openInspectionIntake, setText)
       return

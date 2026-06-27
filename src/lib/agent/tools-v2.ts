@@ -29,6 +29,7 @@ import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservati
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { researchCompany } from '@/lib/onboarding/research'
 import { sanitizeHtml } from '@/lib/security/html'
+import { createCommandShortcut, deleteCommandShortcut, listCommandShortcuts, updateCommandShortcut } from '@/lib/command-shortcuts-db'
 import type { TenantContext } from '@/lib/security/context'
 import { normalizeRole } from '@/lib/security/permissions'
 import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
@@ -994,6 +995,177 @@ export const TOOLS: ToolDef[] = [
             cardType: 'company_profile',
             profile: publicProfile,
             status: 'updated',
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'list_command_shortcuts',
+    description: 'List saved command shortcuts / prompt assistant buttons for this user and company. Use when the user asks what shortcuts exist, wants to edit shortcuts, or asks to change field/sales/company prompt buttons.',
+    schema: z.object({}),
+    allowedChannels: 'all',
+    execute: async (_args, contractorId, ctx) => {
+      const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      const result = await listCommandShortcuts(tenant)
+      return {
+        success: true,
+        data: {
+          ...result,
+          card: {
+            cardType: 'command_shortcuts',
+            status: result.source === 'defaults' ? 'defaults' : 'saved',
+            shortcuts: result.shortcuts,
+            guidance: 'These shortcuts are saved prompts. Tell Jobrolo what to add, remove, rename, or rewrite.',
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'create_command_shortcut',
+    description: 'Create a saved command shortcut / prompt button from chat. Use when the user says add/save/create a shortcut, field shortcut, sales prompt, company prompt, roof photo prompt, or any reusable Jobrolo command.',
+    schema: z.object({
+      label: z.string().min(1).max(60),
+      prompt: z.string().min(1).max(2000),
+      icon: z.enum(['attention', 'building', 'globe', 'field', 'client', 'job', 'crew', 'customer', 'invite', 'template', 'roof', 'file']).optional(),
+      group: z.string().max(80).optional(),
+      scope: z.enum(['user', 'company', 'role']).optional().default('user'),
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'production', 'crew', 'field_crew'],
+    execute: async (args, contractorId, ctx) => {
+      const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      const result = await createCommandShortcut(tenant, args)
+      console.log(`[tools-v2] command shortcut created contractorId=${contractorId} label=${args.label}`)
+      return {
+        success: true,
+        data: {
+          ...result,
+          message: `Saved shortcut "${args.label}".`,
+          card: {
+            cardType: 'command_shortcuts',
+            status: 'updated',
+            shortcuts: result.shortcuts,
+            highlightedShortcutId: result.shortcut.id,
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'update_command_shortcut',
+    description: 'Update an existing saved command shortcut / prompt button. Use when the user says change/edit/rename/rewrite a shortcut. If the user only names the shortcut, use matchLabel to find it.',
+    schema: z.object({
+      id: z.string().optional(),
+      matchLabel: z.string().max(120).optional(),
+      label: z.string().min(1).max(60).optional(),
+      prompt: z.string().min(1).max(2000).optional(),
+      icon: z.enum(['attention', 'building', 'globe', 'field', 'client', 'job', 'crew', 'customer', 'invite', 'template', 'roof', 'file']).optional(),
+      group: z.string().max(80).optional(),
+      active: z.boolean().optional(),
+    }).refine(v => Boolean(v.id || v.matchLabel), 'id or matchLabel is required'),
+    allowedChannels: ['main', 'management', 'sales', 'production', 'crew', 'field_crew'],
+    execute: async (args, contractorId, ctx) => {
+      const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      const current = await listCommandShortcuts(tenant)
+      let id = args.id as string | undefined
+      if (!id && args.matchLabel) {
+        const needle = String(args.matchLabel).toLowerCase().trim()
+        const matches = current.shortcuts.filter(shortcut => {
+          const label = shortcut.label.toLowerCase()
+          return label === needle || label.includes(needle) || needle.includes(label)
+        })
+        if (matches.length > 1) {
+          return {
+            success: true,
+            data: {
+              needsClarification: true,
+              candidates: matches,
+              message: `I found ${matches.length} matching shortcuts. Which one should I update?`,
+            },
+          }
+        }
+        id = matches[0]?.id
+      }
+      if (!id) {
+        return {
+          success: false,
+          data: { shortcuts: current.shortcuts },
+          error: 'Shortcut not found. Ask the user which shortcut to update or call list_command_shortcuts first.',
+        }
+      }
+      const result = await updateCommandShortcut(tenant, id, {
+        label: args.label,
+        prompt: args.prompt,
+        icon: args.icon,
+        group: args.group,
+        active: args.active,
+      })
+      console.log(`[tools-v2] command shortcut updated contractorId=${contractorId} id=${id}`)
+      return {
+        success: true,
+        data: {
+          ...result,
+          message: `Updated shortcut "${result.shortcut.label}".`,
+          card: {
+            cardType: 'command_shortcuts',
+            status: 'updated',
+            shortcuts: result.shortcuts,
+            highlightedShortcutId: result.shortcut.id,
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'delete_command_shortcut',
+    description: 'Delete/remove a saved command shortcut / prompt button. Use when the user asks to delete or remove a shortcut. If the user only names it, use matchLabel.',
+    schema: z.object({
+      id: z.string().optional(),
+      matchLabel: z.string().max(120).optional(),
+    }).refine(v => Boolean(v.id || v.matchLabel), 'id or matchLabel is required'),
+    allowedChannels: ['main', 'management', 'sales', 'production', 'crew', 'field_crew'],
+    execute: async (args, contractorId, ctx) => {
+      const tenant = await buildTrustedToolTenantContext(contractorId, ctx)
+      const current = await listCommandShortcuts(tenant)
+      let id = args.id as string | undefined
+      if (!id && args.matchLabel) {
+        const needle = String(args.matchLabel).toLowerCase().trim()
+        const matches = current.shortcuts.filter(shortcut => {
+          const label = shortcut.label.toLowerCase()
+          return label === needle || label.includes(needle) || needle.includes(label)
+        })
+        if (matches.length > 1) {
+          return {
+            success: true,
+            data: {
+              needsClarification: true,
+              candidates: matches,
+              message: `I found ${matches.length} matching shortcuts. Which one should I delete?`,
+            },
+          }
+        }
+        id = matches[0]?.id
+      }
+      if (!id) {
+        return {
+          success: false,
+          data: { shortcuts: current.shortcuts },
+          error: 'Shortcut not found. Ask the user which shortcut to delete or call list_command_shortcuts first.',
+        }
+      }
+      const removed = current.shortcuts.find(shortcut => shortcut.id === id)
+      const result = await deleteCommandShortcut(tenant, id)
+      console.log(`[tools-v2] command shortcut deleted contractorId=${contractorId} id=${id}`)
+      return {
+        success: true,
+        data: {
+          ...result,
+          message: `Removed shortcut "${removed?.label || id}".`,
+          card: {
+            cardType: 'command_shortcuts',
+            status: 'updated',
+            shortcuts: result.shortcuts,
           },
         },
       }

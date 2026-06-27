@@ -139,10 +139,27 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
 
   useEffect(() => {
     const load = () => {
-      setShortcuts(parseStoredCommandShortcuts(
-        window.localStorage.getItem(COMMAND_SHORTCUTS_KEY),
-        window.localStorage.getItem(LEGACY_CUSTOM_SHORTCUTS_KEY),
-      ))
+      const local = parseStoredCommandShortcuts(
+          window.localStorage.getItem(COMMAND_SHORTCUTS_KEY),
+          window.localStorage.getItem(LEGACY_CUSTOM_SHORTCUTS_KEY),
+        )
+      setShortcuts(local)
+      fetch('/api/command-shortcuts')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (!data?.shortcuts?.length) return
+          const remote = parseStoredCommandShortcuts(JSON.stringify(data.shortcuts))
+          setShortcuts(remote)
+          window.localStorage.setItem(COMMAND_SHORTCUTS_KEY, JSON.stringify(remote))
+          if (data.source === 'defaults' && local.some(shortcut => !DEFAULT_COMMAND_SHORTCUTS.some(base => base.id === shortcut.id))) {
+            fetch('/api/command-shortcuts', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shortcuts: local, scope: 'user' }),
+            }).catch(() => null)
+          }
+        })
+        .catch(() => null)
     }
     load()
     window.addEventListener(COMMAND_SHORTCUTS_UPDATED_EVENT, load)
@@ -181,6 +198,11 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
     setShortcuts(safe)
     window.localStorage.setItem(COMMAND_SHORTCUTS_KEY, JSON.stringify(safe))
     window.dispatchEvent(new Event(COMMAND_SHORTCUTS_UPDATED_EVENT))
+    fetch('/api/command-shortcuts', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shortcuts: safe, scope: 'user' }),
+    }).catch(() => null)
   }
 
   const addShortcut = () => {

@@ -51,6 +51,7 @@ model Contractor {
   onboardingSession OnboardingSession?
   insights      Insight[]
   profile       ContractorProfile?
+  commandShortcuts CommandShortcut[]
 }
 
 model User {
@@ -86,6 +87,7 @@ model User {
   createdMessages  WorkspaceMessage[] @relation("WorkspaceMessageCreator")
   auditLogs        AuditLog[]       @relation("AuditActor")
   apiKeys          ApiKey[]         @relation("ApiKeyOwner")
+  commandShortcuts CommandShortcut[] @relation("CommandShortcutOwner")
   @@index([contractorId, status])
 }
 
@@ -889,6 +891,31 @@ model ContractorProfile {
   updatedAt          DateTime @updatedAt
   contractor         Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
   @@index([contractorId])
+}
+
+model CommandShortcut {
+  id           String   @id @default(cuid())
+  contractorId String
+  userId       String?
+  scope        String   @default("user") // user, company, role
+  role         String?
+  group        String?  // shortcuts, field, sales, files, company, custom
+  label        String
+  prompt       String
+  icon         String?
+  sortOrder    Int      @default(0)
+  active       Boolean  @default(true)
+  usageCount   Int      @default(0)
+  lastUsedAt   DateTime?
+  createdById  String?
+  metadataJson String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  user         User?      @relation("CommandShortcutOwner", fields: [userId], references: [id], onDelete: Cascade)
+  @@index([contractorId, userId, active, sortOrder])
+  @@index([contractorId, scope, role, active, sortOrder])
+  @@index([contractorId, group])
 }
 
 // =============================================================================
