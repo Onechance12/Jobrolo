@@ -28,6 +28,7 @@ import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanv
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, recordFieldObservation, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { researchCompany } from '@/lib/onboarding/research'
+import { getCompanyIntelligence, getCompanyKpis } from '@/lib/company-intelligence'
 import { sanitizeHtml } from '@/lib/security/html'
 import { createCommandShortcut, deleteCommandShortcut, listCommandShortcuts, updateCommandShortcut } from '@/lib/command-shortcuts-db'
 import type { TenantContext } from '@/lib/security/context'
@@ -897,6 +898,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({
       website: z.string().max(500).optional(),
       companyName: z.string().max(200).optional(),
+      searchMode: z.enum(['cheap', 'normal', 'deep']).optional(),
     }).refine(v => Boolean(v.website?.trim() || v.companyName?.trim()), 'website or companyName is required'),
     allowedChannels: ['main', 'management'],
     execute: async (args, contractorId, ctx) => {
@@ -912,6 +914,7 @@ export const TOOLS: ToolDef[] = [
         companyName: args.companyName || savedCompanyName || undefined,
         preferredCompanyName,
         includeWebPresence: true,
+        searchMode: args.searchMode || 'normal',
       })
       if (!research) {
         return {
@@ -962,6 +965,92 @@ export const TOOLS: ToolDef[] = [
             guidance: 'Review these suggested company profile updates. If anything is wrong, tell Jobrolo in chat and it will update the profile from your correction.',
           },
           message: 'Website research completed. If the user wants this saved, call update_contractor_profile with suggestedProfileUpdate fields.',
+        },
+      }
+    },
+  },
+  {
+    name: 'get_company_kpis',
+    description: 'Get saved Jobrolo company KPIs from the database: leads, customers, projects, appointments, files, pending actions, review items, and AI/web-search usage. Use for questions like “How many leads did we get this week?” or “How are our leads looking?” This does not use chat memory.',
+    schema: z.object({
+      periodDays: z.number().int().min(1).max(90).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId) => {
+      const kpis = await getCompanyKpis(contractorId, args.periodDays || 7)
+      return {
+        success: true,
+        data: {
+          kpis,
+          message: `Loaded company KPIs from saved Jobrolo records for the last ${kpis.periodDays} day(s).`,
+        },
+      }
+    },
+  },
+  {
+    name: 'get_company_intelligence',
+    description: 'Show the owner/manager company health snapshot: profile readiness, internal Jobrolo KPIs, public web/social presence if already researched, setup gaps, recommendations, and next actions. Use for “Show company health”, “What should I do this week to grow?”, or “What changed online?” If fresh public research is requested, set includePublicResearch=true.',
+    schema: z.object({
+      includePublicResearch: z.boolean().optional(),
+      searchMode: z.enum(['cheap', 'normal', 'deep']).optional(),
+      periodDays: z.number().int().min(1).max(90).optional(),
+      website: z.string().max(500).optional(),
+      companyName: z.string().max(200).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      if (args.includePublicResearch && !canManageCompanyProfile(ctx)) {
+        return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can run public company research from chat.' }
+      }
+      const snapshot = await getCompanyIntelligence({
+        contractorId,
+        periodDays: args.periodDays,
+        includePublicResearch: Boolean(args.includePublicResearch),
+        searchMode: args.searchMode || 'normal',
+        website: args.website,
+        companyName: args.companyName,
+      })
+      return {
+        success: true,
+        data: {
+          ...snapshot,
+          card: snapshot,
+          message: args.includePublicResearch
+            ? 'Company intelligence loaded with fresh public web/social research.'
+            : 'Company intelligence loaded from saved Jobrolo records and the latest saved research snapshot.',
+        },
+      }
+    },
+  },
+  {
+    name: 'research_company_presence',
+    description: 'Run public company web/social research and return a Company Intelligence card. Searches visible website, Google-visible reviews, BBB, Facebook, Instagram, TikTok, YouTube, LinkedIn, blogs, mentions, directories, and source previews. It does not claim private traffic or attribution without integrations.',
+    schema: z.object({
+      website: z.string().max(500).optional(),
+      companyName: z.string().max(200).optional(),
+      searchMode: z.enum(['cheap', 'normal', 'deep']).default('normal'),
+      periodDays: z.number().int().min(1).max(90).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      if (!canManageCompanyProfile(ctx)) {
+        return { success: false, data: null, error: 'Only an owner, admin, manager, project manager, or coordinator can run public company research from chat.' }
+      }
+      console.log(`[tools-v2] research_company_presence requested contractorId=${contractorId} mode=${args.searchMode}`)
+      const snapshot = await getCompanyIntelligence({
+        contractorId,
+        periodDays: args.periodDays,
+        includePublicResearch: true,
+        searchMode: args.searchMode,
+        website: args.website,
+        companyName: args.companyName,
+      })
+      return {
+        success: true,
+        data: {
+          ...snapshot,
+          card: snapshot,
+          message: 'Public company web/social research completed. Save profile updates only after the user confirms.',
         },
       }
     },

@@ -103,6 +103,19 @@ type CompanyProfileLike = {
   profile?: Record<string, unknown> | null
 } & Record<string, unknown>
 
+type CompanyIntelligenceLike = {
+  status?: string
+  searchMode?: string
+  usageNote?: string
+  analyticsNote?: string
+  profile?: Record<string, unknown> | null
+  profileReadiness?: { score?: number; missing?: string[] }
+  kpis?: any
+  publicPresence?: any
+  recommendations?: Array<{ title?: string; detail?: string; prompt?: string; priority?: string }>
+  profileSuggestions?: Record<string, unknown>
+}
+
 type CustomerFileDocumentLike = {
   id?: string
   originalName?: string
@@ -334,6 +347,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('company_research')) {
     return <CompanyResearchReviewCard data={contextData as any} />
+  }
+  if (cardType.includes('company_intelligence')) {
+    return <CompanyIntelligenceCard data={contextData as CompanyIntelligenceLike} />
   }
   if (cardType.includes('company_profile')) {
     return <CompanyProfileCard data={contextData as CompanyProfileLike} />
@@ -1062,6 +1078,171 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
         <Button size="sm" variant="ghost" onClick={() => setStatus('hidden')}><XCircle className="mr-1.5 h-3.5 w-3.5" />Remove</Button>
       </CardFooter>
     </Card>
+  )
+}
+
+export function CompanyIntelligenceCard({ data }: { data?: CompanyIntelligenceLike | null }) {
+  if (!data) return null
+  const profile = data.profile ?? {}
+  const publicPresence = data.publicPresence ?? {}
+  const kpis = data.kpis ?? {}
+  const readiness = data.profileReadiness ?? {}
+  const recommendations = Array.isArray(data.recommendations) ? data.recommendations : []
+  const name = textValue(profile.displayName) || textValue(profile.companyName) || textValue(profile.legalName) || 'Company intelligence'
+  const logoUrl = textValue(profile.logoUrl) || textValue(publicPresence.logoUrl)
+  const missing = Array.isArray(readiness.missing) ? readiness.missing.filter(Boolean).slice(0, 6) : []
+  const sources = dedupeResearchSources(Array.isArray(publicPresence.sources) ? publicPresence.sources : [])
+  const socialSignals = Array.isArray(publicPresence.socialSignals) ? publicPresence.socialSignals.slice(0, 5) : []
+  const contentSignals = Array.isArray(publicPresence.contentSignals) ? publicPresence.contentSignals.slice(0, 4) : []
+  const googleReviews = publicPresence.googleReviews
+  const bbb = publicPresence.bbb
+
+  function prompt(text?: string) {
+    if (text) insertJobroloPrompt(text)
+  }
+
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-cyan-200 bg-cyan-50/60 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20 sm:max-w-xl">
+      <CardHeader className="border-b border-cyan-200/70 bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-violet-500/10 pb-3 dark:border-cyan-900/60">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {logoUrl ? (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-sm">
+                <img src={logoUrl} alt={`${name} logo`} className="max-h-full max-w-full object-contain" />
+              </div>
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-100 text-cyan-700 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-200">
+                <Sparkles className="h-6 w-6" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base text-cyan-950 dark:text-cyan-100">{name}</CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">Company health · public presence · Jobrolo KPIs</p>
+            </div>
+          </div>
+          <Badge variant="secondary" className="shrink-0 text-[10px]">{textValue(data.status) || 'snapshot'}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <KpiTile label="Profile ready" value={`${Number(readiness.score ?? 0)}%`} />
+          <KpiTile label="Leads" value={String(kpis.leads?.thisPeriod ?? 0)} hint={`last ${kpis.periodDays ?? 7}d`} />
+          <KpiTile label="Active jobs" value={String(kpis.projects?.active ?? 0)} />
+          <KpiTile label="Needs attention" value={String((kpis.operations?.pendingActions ?? 0) + (kpis.operations?.failedOrReviewItems ?? 0))} />
+        </div>
+
+        {missing.length ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="font-medium">Setup gaps</div>
+            <div className="mt-1">Missing: {missing.join(', ')}.</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => prompt('Show my company profile setup gaps and give me chat prompts to fill each one.')}>Fix setup</Button>
+              <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => prompt('Research my company online and suggest missing company profile updates. Show what is new before saving.')}>Research</Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <SignalBox
+            title="Internal Jobrolo KPIs"
+            items={[
+              `${kpis.leads?.thisPeriod ?? 0} new lead(s) this period`,
+              `${kpis.customers?.addedThisPeriod ?? 0} customer(s) added`,
+              `${kpis.appointments?.inspectionsUpcoming14Days ?? 0} inspection(s) scheduled soon`,
+              `${kpis.files?.priceSheetsPendingReview ?? 0} price sheet(s) pending review`,
+            ]}
+          />
+          <SignalBox
+            title="Public web/social"
+            items={[
+              publicPresence.summary || (publicPresence.researched ? 'Public search completed.' : 'No fresh public research in this card yet.'),
+              googleReviews?.found ? `Google reviews: ${[googleReviews.rating, googleReviews.reviewCount ? `${googleReviews.reviewCount} reviews` : null].filter(Boolean).join(' · ')}` : 'Google review details not verified',
+              bbb?.found ? `BBB: ${[bbb.rating, bbb.notes].filter(Boolean).join(' · ')}` : 'BBB not verified',
+            ]}
+          />
+        </div>
+
+        {socialSignals.length ? (
+          <div className="rounded-lg border bg-background/70 p-2 text-xs">
+            <div className="mb-1 font-medium text-foreground">Social/content signals</div>
+            <div className="space-y-1.5">
+              {socialSignals.map((signal: any, index: number) => {
+                const url = textValue(signal.url)
+                const label = [textValue(signal.platform), textValue(signal.status)].filter(Boolean).join(' · ') || 'Social signal'
+                const notes = textValue(signal.recentActivity) || textValue(signal.notes)
+                return (
+                  <a key={`${url || label}-${index}`} href={url || '#'} target={url ? '_blank' : undefined} rel="noreferrer" className="block rounded-md border bg-muted/30 p-2 hover:bg-muted/50">
+                    <div className="flex items-center justify-between gap-2 font-medium text-foreground">
+                      <span className="truncate">{label}</span>
+                      {url ? <ExternalLink className="h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-300" /> : null}
+                    </div>
+                    {notes ? <div className="mt-0.5 line-clamp-2 text-muted-foreground">{notes}</div> : null}
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {contentSignals.length ? <TagBox title="Content opportunities" items={contentSignals.map((item: any) => textValue(item.title) || textValue(item.channel) || textValue(item.notes)).filter(Boolean)} /> : null}
+
+        {recommendations.length ? (
+          <div className="space-y-1.5 text-xs">
+            <div className="font-medium text-foreground">Recommended next moves</div>
+            {recommendations.map((item, index) => (
+              <button key={`${item.title}-${index}`} type="button" onClick={() => prompt(item.prompt)} className="block w-full rounded-lg border bg-background/70 p-2 text-left transition hover:bg-muted/50">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">{item.title}</span>
+                  <Badge variant={item.priority === 'high' ? 'destructive' : 'secondary'} className="text-[10px]">{item.priority || 'normal'}</Badge>
+                </div>
+                {item.detail ? <div className="mt-1 text-muted-foreground">{item.detail}</div> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {sources.length ? <ResearchSourceList sources={sources} /> : null}
+
+        <div className="rounded-lg border border-cyan-200 bg-background/70 p-2 text-xs text-muted-foreground dark:border-cyan-900/60">
+          {textValue(data.analyticsNote) || 'Traffic, attribution, ad performance, and exact private analytics require future integrations.'}
+          {data.usageNote ? <div className="mt-1 font-medium text-foreground">{data.usageNote}</div> : null}
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" onClick={() => prompt('What should I do next to grow? Use my saved Jobrolo KPIs, public company research, and setup gaps.')}>
+          <Sparkles className="mr-1.5 h-3.5 w-3.5" />Next moves
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => prompt('Run a deep company research scan. Include website, Google-visible reviews, BBB, Facebook, Instagram, TikTok, YouTube, LinkedIn, directories, blogs, and mentions. Label public-search evidence clearly.')}>
+          <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research deeper
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => prompt('How many leads did we get this week? Only use saved Jobrolo database records.')}>Show leads</Button>
+        {data.profileSuggestions ? (
+          <Button size="sm" variant="outline" onClick={() => prompt('Save the company profile updates from the latest company intelligence research, but show me exactly what will change first.')}>
+            Save profile updates
+          </Button>
+        ) : null}
+      </CardFooter>
+    </Card>
+  )
+}
+
+function KpiTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-2">
+      <div className="text-lg font-semibold leading-none text-foreground">{value}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground">{label}{hint ? ` · ${hint}` : ''}</div>
+    </div>
+  )
+}
+
+function SignalBox({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-2 text-xs">
+      <div className="mb-1 font-medium text-foreground">{title}</div>
+      <div className="space-y-1 text-muted-foreground">
+        {items.filter(Boolean).slice(0, 5).map((item, index) => <div key={`${item}-${index}`}>{item}</div>)}
+      </div>
+    </div>
   )
 }
 

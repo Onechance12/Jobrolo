@@ -472,6 +472,7 @@ If not saved:
 - Chat routing needs stronger state: private chats, job files, crew chats, customer chats, and referral/partner chats should each answer who can see it, what it is attached to, and how it can be invited/shared.
 - Field workflow needs a clean pipeline: potential lead → inspection lead → confirmed customer/project → job chats/report/scope. The app should never create an inspection without a lead, and it should never create a customer/project without confirmation when property data conflicts.
 - Company profile research should remain chat-first: show source/logo/review previews, let the owner save/edit/remove from the card or by chat, and preserve corrected canonical names such as “the corrected company name.”
+- Company Intelligence should remain separate from Company Profile: profile is document readiness and saved company setup; intelligence is saved Jobrolo KPIs plus public web/social/reputation signals, with clear labels when findings are public-search evidence versus private analytics that require future integrations.
 - Property research is only production-ready after a real provider/web-search path is configured and tested for address, owner, property, and county/CAD-style lookup behavior.
 
 ### Trust tests required before calling the app “live-operator ready”
@@ -481,3 +482,5 @@ If not saved:
 3. Ask to create a potential lead, then convert it into an inspection lead, then convert only after confirmation into a customer/project.
 4. Create separate roofing, gutter, window, customer, and referral/agent chats for one job; confirm each has the right invite/link/visibility behavior.
 5. Ask “what is actually saved?” for company profile, customers, projects, documents, photos, reports, approvals, and notifications; each answer must be database-grounded.
+6. Ask “Research my company online and social media” and confirm Jobrolo uses a Company Intelligence card, dedupes sources, shows social/review/public-presence signals, and does not claim traffic attribution without integrations.
+7. Ask “How many leads did we get this week?” and confirm Jobrolo uses saved database KPIs, not chat memory or public search.

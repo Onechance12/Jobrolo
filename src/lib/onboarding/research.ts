@@ -31,6 +31,8 @@ export interface CompanyWebPresence {
   logoUrl?: string
   googleReviews?: { found?: boolean; rating?: string; reviewCount?: string; url?: string; notes?: string }
   reviews?: Array<{ source?: string; rating?: string; reviewCount?: string; url?: string; notes?: string }>
+  socialSignals?: Array<{ platform?: string; url?: string; status?: string; notes?: string; recentActivity?: string }>
+  contentSignals?: Array<{ channel?: string; title?: string; url?: string; notes?: string }>
   directoryListings?: Array<{ source?: string; url?: string; notes?: string }>
   mentions?: Array<{ title?: string; url?: string; notes?: string }>
   backlinksOrBlogs?: Array<{ title?: string; url?: string; notes?: string }>
@@ -58,6 +60,8 @@ export interface CompanyResearch {
   webPresence?: CompanyWebPresence
   rawSnippet?: string    // first 2000 chars of extracted text
 }
+
+export type CompanyResearchMode = 'cheap' | 'normal' | 'deep'
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -318,7 +322,13 @@ function filterRelevantEntries<T extends { url?: string | null }>(entries: T[] |
   return out
 }
 
-async function researchCompanyWebPresence(input: { companyName?: string; website?: string; location?: string }): Promise<CompanyWebPresence> {
+function searchConfigForMode(mode: CompanyResearchMode | undefined) {
+  if (mode === 'cheap') return { searchContextSize: 'low' as const, maxOutputTokens: 1400 }
+  if (mode === 'deep') return { searchContextSize: 'high' as const, maxOutputTokens: 3200 }
+  return { searchContextSize: 'medium' as const, maxOutputTokens: 2200 }
+}
+
+async function researchCompanyWebPresence(input: { companyName?: string; website?: string; location?: string; searchMode?: CompanyResearchMode }): Promise<CompanyWebPresence> {
   if (!isOpenAIWebSearchConfigured()) {
     return {
       enabled: false,
@@ -341,12 +351,13 @@ Look for:
 - Google Business Profile / Google review rating and review count if visible in search results
 - Google/Yelp/Facebook/Angi/HomeAdvisor/other review signals when available
 - BBB profile or BBB rating when available
-- social profiles
+- social profiles and visible public activity signals from Facebook, Instagram, TikTok, YouTube, LinkedIn, and X when available
+- recent public content/post/video/blog signals if visible; never claim exact counts unless source-backed
 - directory listings
 - blogs/articles/news/backlinks/mentions about the company
 - service areas and services
 
-Do not invent ratings, review counts, BBB status, or mentions. If unavailable, say unavailable.
+Do not invent ratings, review counts, BBB status, exact social post counts, traffic, attribution, or private analytics. If unavailable, say unavailable.
 Return JSON only:
 {
   "summary": "short practical summary",
@@ -355,6 +366,8 @@ Return JSON only:
   "logoUrl": "official logo or brand image URL if found",
   "googleReviews": {"found": true, "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."},
   "reviews": [{"source":"...", "rating":"...", "reviewCount":"...", "url":"...", "notes":"..."}],
+  "socialSignals": [{"platform":"Facebook|Instagram|TikTok|YouTube|LinkedIn|X|Other", "url":"...", "status":"active|inactive|found|not_found|uncertain", "recentActivity":"what is visibly recent if source-backed", "notes":"..."}],
+  "contentSignals": [{"channel":"blog|video|social|directory|news", "title":"...", "url":"...", "notes":"..."}],
   "directoryListings": [{"source":"...", "url":"...", "notes":"..."}],
   "mentions": [{"title":"...", "url":"...", "notes":"..."}],
   "backlinksOrBlogs": [{"title":"...", "url":"...", "notes":"..."}],
@@ -362,9 +375,10 @@ Return JSON only:
   "warnings": ["anything uncertain, conflicting, or requiring human review"]
 }`
 
+  const searchConfig = searchConfigForMode(input.searchMode)
   const result = await openAIWebSearch(prompt, {
-    searchContextSize: 'high',
-    maxOutputTokens: 2200,
+    searchContextSize: searchConfig.searchContextSize,
+    maxOutputTokens: searchConfig.maxOutputTokens,
     forceSearch: true,
   })
 
@@ -386,6 +400,8 @@ Return JSON only:
     logoUrl: typeof parsed.logoUrl === 'string' ? parsed.logoUrl : undefined,
     googleReviews,
     reviews: Array.isArray(parsed.reviews) ? filterRelevantEntries(parsed.reviews, filterInput, 10) : [],
+    socialSignals: Array.isArray(parsed.socialSignals) ? filterRelevantEntries(parsed.socialSignals, filterInput, 12) : [],
+    contentSignals: Array.isArray(parsed.contentSignals) ? filterRelevantEntries(parsed.contentSignals, filterInput, 12) : [],
     directoryListings: Array.isArray(parsed.directoryListings) ? filterRelevantEntries(parsed.directoryListings, filterInput, 10) : [],
     mentions: Array.isArray(parsed.mentions) ? filterRelevantEntries(parsed.mentions, filterInput, 10) : [],
     backlinksOrBlogs: Array.isArray(parsed.backlinksOrBlogs) ? filterRelevantEntries(parsed.backlinksOrBlogs, filterInput, 10) : [],
@@ -399,7 +415,7 @@ Return JSON only:
  * Research a company by website URL.
  * Returns structured findings or null if the website couldn't be fetched.
  */
-export async function researchCompanyByUrl(url: string, opts: { preferredCompanyName?: string; includeWebPresence?: boolean } = {}): Promise<CompanyResearch | null> {
+export async function researchCompanyByUrl(url: string, opts: { preferredCompanyName?: string; includeWebPresence?: boolean; searchMode?: CompanyResearchMode } = {}): Promise<CompanyResearch | null> {
   const normalized = normalizeUrl(url)
   console.log(`[onboarding/research] fetching ${normalized}...`)
   const fetched = await fetchWebsite(normalized)
@@ -477,6 +493,7 @@ Only include fields you can confidently identify from the text. Omit fields you 
       companyName: opts.preferredCompanyName || companyName,
       website: fetched.finalUrl,
       location: aiExtract.location,
+      searchMode: opts.searchMode,
     }).catch(err => ({
       enabled: true,
       sources: [],
@@ -493,7 +510,7 @@ Only include fields you can confidently identify from the text. Omit fields you 
  * Research a company by name only (no website). Uses AI to make educated guesses
  * based on the name — much lower confidence than website research.
  */
-export async function researchCompanyByName(name: string, opts: { includeWebPresence?: boolean } = {}): Promise<CompanyResearch | null> {
+export async function researchCompanyByName(name: string, opts: { includeWebPresence?: boolean; searchMode?: CompanyResearchMode } = {}): Promise<CompanyResearch | null> {
   if (!name || name.trim().length < 2) return null
   console.log(`[onboarding/research] inferring business type from name: "${name}"`)
 
@@ -525,7 +542,7 @@ This is a best-guess inference from the name only — keep confidence modest.`,
       source: 'ai_inference',
     }
     if (opts.includeWebPresence !== false) {
-      result.webPresence = await researchCompanyWebPresence({ companyName: name }).catch(err => ({
+      result.webPresence = await researchCompanyWebPresence({ companyName: name, searchMode: opts.searchMode }).catch(err => ({
         enabled: true,
         sources: [],
         error: err instanceof Error ? err.message : String(err),
@@ -544,14 +561,14 @@ This is a best-guess inference from the name only — keep confidence modest.`,
 /**
  * Main entry: try website research first, fall back to name inference.
  */
-export async function researchCompany(args: { website?: string; companyName?: string; preferredCompanyName?: string; includeWebPresence?: boolean }): Promise<CompanyResearch | null> {
+export async function researchCompany(args: { website?: string; companyName?: string; preferredCompanyName?: string; includeWebPresence?: boolean; searchMode?: CompanyResearchMode }): Promise<CompanyResearch | null> {
   const preferredCompanyName = args.preferredCompanyName || args.companyName
   if (args.website) {
-    const result = await researchCompanyByUrl(args.website, { preferredCompanyName, includeWebPresence: args.includeWebPresence })
+    const result = await researchCompanyByUrl(args.website, { preferredCompanyName, includeWebPresence: args.includeWebPresence, searchMode: args.searchMode })
     if (result) return result
   }
   if (args.companyName) {
-    return await researchCompanyByName(args.companyName, { includeWebPresence: args.includeWebPresence })
+    return await researchCompanyByName(args.companyName, { includeWebPresence: args.includeWebPresence, searchMode: args.searchMode })
   }
   return null
 }

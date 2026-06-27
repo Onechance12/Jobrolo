@@ -107,7 +107,10 @@ function usageFromResponses(data: any) {
 export async function openAIWebSearch(prompt: string, opts: OpenAIWebSearchOptions = {}): Promise<OpenAIWebSearchResult> {
   const apiKey = process.env.LLM_API_KEY
   const baseUrl = openAIBaseUrl()
-  const model = process.env.LLM_WEB_SEARCH_MODEL || process.env.OPENAI_WEB_SEARCH_MODEL || 'gpt-4.1-mini'
+  // Keep chat on LLM_MODEL, but default public web research to the current
+  // Responses API web-search model. Render can override with LLM_WEB_SEARCH_MODEL
+  // if pricing/model availability needs to be tuned.
+  const model = process.env.LLM_WEB_SEARCH_MODEL || process.env.OPENAI_WEB_SEARCH_MODEL || 'gpt-5.5'
   const searchContextSize = opts.searchContextSize || (process.env.LLM_WEB_SEARCH_CONTEXT as 'low' | 'medium' | 'high' | undefined) || 'medium'
 
   if (!isOpenAIWebSearchConfigured() || !apiKey) {
