@@ -15,9 +15,9 @@ import {
   type CommandShortcut,
 } from '@/lib/command-shortcuts'
 
-interface Props { onNewChat: () => void; onNavigate?: () => void }
+interface Props { onNewChat: () => void; onNavigate?: () => void; onCollapse?: () => void }
 
-export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
+export function WorkspaceSidebar({ onNewChat, onNavigate, onCollapse }: Props) {
   const conversations = useChatStore(s => s.conversations)
   const conversationId = useChatStore(s => s.conversationId)
   const selectConversation = useChatStore(s => s.selectConversation)
@@ -282,11 +282,18 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
               <div className="text-[10px] leading-tight text-muted-foreground">Command Center</div>
             </div>
           </div>
-          {onNavigate && (
-            <button onClick={onNavigate} className="md:hidden p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors">
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {onCollapse && (
+              <button onClick={onCollapse} className="hidden lg:inline-flex p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors" aria-label="Collapse menu">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+            {onNavigate && (
+              <button onClick={onNavigate} className="md:hidden p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors" aria-label="Close menu">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

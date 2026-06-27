@@ -53,6 +53,7 @@ function isInspectionPhotoWorkflowRequest(text: string) {
 export default function Page() {
   const [initialLoading, setInitialLoading] = useState(true)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const [autoTTS, setAutoTTS] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [startMenuOpen, setStartMenuOpen] = useState(false)
@@ -549,9 +550,10 @@ export default function Page() {
   return (
     <div className="h-dvh w-full max-w-full flex bg-background text-foreground overflow-hidden">
       {/* LEFT PANEL — Navigation (desktop) */}
+      {!desktopSidebarCollapsed && (
       <div className="hidden lg:flex h-full w-64 flex-shrink-0">
         <div className="w-full flex flex-col h-full">
-          <WorkspaceSidebar onNewChat={handleNewChat} />
+          <WorkspaceSidebar onNewChat={handleNewChat} onCollapse={() => setDesktopSidebarCollapsed(true)} />
           <div className="p-2 border-t border-border">
             <button
               onClick={handleLogout}
@@ -563,6 +565,7 @@ export default function Page() {
           </div>
         </div>
       </div>
+      )}
 
       {/* LEFT PANEL — Mobile drawer */}
       {leftDrawerOpen && (
@@ -588,11 +591,15 @@ export default function Page() {
         >
           <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              {/* Mobile menu */}
+              {/* Menu: mobile opens drawer, desktop collapses/expands sidebar */}
               <button
-                onClick={() => setLeftDrawerOpen(true)}
-                className="lg:hidden p-2 -ml-2 rounded-md hover:bg-muted text-foreground"
-                aria-label="Menu"
+                onClick={() => {
+                  if (window.matchMedia('(min-width: 1024px)').matches) setDesktopSidebarCollapsed(v => !v)
+                  else setLeftDrawerOpen(true)
+                }}
+                className="p-2 -ml-2 rounded-md hover:bg-muted text-foreground"
+                aria-label={desktopSidebarCollapsed ? 'Expand menu' : 'Menu'}
+                title={desktopSidebarCollapsed ? 'Expand menu' : 'Menu'}
               >
                 <Menu className="w-5 h-5" />
               </button>

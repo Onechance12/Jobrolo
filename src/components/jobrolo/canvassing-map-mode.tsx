@@ -51,6 +51,7 @@ export function CanvassingMapMode() {
   const [location, setLocation] = useState<BrowserLocation | null>(null)
   const [locating, setLocating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mapRefreshKey, setMapRefreshKey] = useState(0)
 
   async function locateMe() {
     setError(null)
@@ -66,13 +67,14 @@ export function CanvassingMapMode() {
           lng: pos.coords.longitude,
           accuracyMeters: pos.coords.accuracy,
         })
+        setMapRefreshKey(key => key + 1)
         setLocating(false)
       },
       () => {
         setError('Location permission was denied or unavailable.')
         setLocating(false)
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     )
   }
 
@@ -80,7 +82,7 @@ export function CanvassingMapMode() {
     void locateMe()
   }, [])
 
-  const mapUrl = useMemo(() => isValidLocation(location) ? openStreetMapEmbedUrl(location) : null, [location])
+  const mapUrl = useMemo(() => isValidLocation(location) ? `${openStreetMapEmbedUrl(location)}&refresh=${mapRefreshKey}` : null, [location, mapRefreshKey])
   const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
 
   return (
@@ -110,6 +112,7 @@ export function CanvassingMapMode() {
       <div className="relative flex-1 pt-[72px]">
         {mapUrl ? (
           <iframe
+            key={`field-map-${mapRefreshKey}`}
             title="Current field location map"
             src={mapUrl}
             className="h-full w-full border-0"
