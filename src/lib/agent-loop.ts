@@ -214,6 +214,10 @@ function shouldForceToolRetry(parsed: ParsedAIResponse, toolCallCount: number, e
   return hasOperationalIntent(parsed.text) || hasCompletionClaim(parsed.text)
 }
 
+function recentPlainMessages(messages: ChatMessage[], limit = 6) {
+  return messages.slice(Math.max(0, messages.length - limit)).map(m => plainMessageText(m.content)).join('\n')
+}
+
 function looksLikeApprovalReplayFailure(text: string) {
   return /approval (?:request|command|options).*(?:could not|failed|error|did not accept|not accepted|cannot be processed|could not be processed)/i.test(text)
     || /system did not accept the approval/i.test(text)
@@ -504,9 +508,23 @@ function isFieldInspectionLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
   if (/\b(open|show|pull up|display)\b.{0,40}\bmap\b/.test(lower)) return false
-  const hasLocation = lower.includes('[browser_location]') || /\b(where i am|where i'm at|current location|here|this house)\b/.test(lower)
+  const hasLocation = lower.includes('[browser_location]') || /\b(use my location|my location|where i am|where i'm at|current location|near me|nearby|gps|here|this house|this property)\b/.test(lower)
   const hasInspectionIntent = /\b(landed|got|set|start|walking up|arrived|outside|mowing|inspection|inspect|appointment|field check|property lookup|search customer info|search property)\b/.test(lower)
   return hasLocation && hasInspectionIntent && /\binspection|inspect|property|customer info|current house|this house\b/.test(lower)
+}
+
+function isFieldLocationResolveRequest(messages: ChatMessage[]) {
+  const latestUser = lastMessageByRole(messages, 'user')
+  if (!latestUser) return false
+  const latest = plainMessageText(latestUser.message.content)
+  const lower = latest.toLowerCase()
+  if (!browserLocationFromText(latest)) return false
+  if (/\b(open|show|pull up|display)\b.{0,40}\bmap\b/.test(lower)) return false
+  const wantsLocationLookup = /\b(use my location|my location|current location|where i am|where i'm at|gps|here|near me|nearby)\b/.test(lower)
+  if (!wantsLocationLookup) return false
+  const recent = recentPlainMessages(messages, 8).toLowerCase()
+  return /\b(do i have|any|check|find|look for|search|lookup|look up)\b[\s\S]{0,120}\b(inspection|appointment|job|project|customer|client|lead)\b/.test(recent)
+    || /\b(inspection|appointment|jobsite|job site|field visit|current house|this house|this property)\b/.test(recent)
 }
 
 function buildFieldInspectionLeadInstruction(userText: string) {
@@ -525,6 +543,53 @@ Call start_field_inspection_lead now with {"searchPropertyInfo": true${locationA
 After the tool returns, ask the user to confirm any property/homeowner match and offer the inspection photo workflow/sections. Respond as JSON only.`
 }
 
+function buildFieldLocationResolveInstruction(userText: string) {
+  const location = browserLocationFromText(userText)
+  const locationArgs = location
+    ? `"currentLocation": ${JSON.stringify(location)}, `
+    : ''
+  return `The latest user reply provides browser GPS for a field/location lookup:
+"${userText.slice(0, 500)}"
+
+Do not narrate "checking" as a final answer.
+Call resolve_field_location now with {${locationArgs}"mode":"inspection_check"}.
+
+After the tool returns, tell the user whether a saved inspection/project/customer/lead appears to match this location. If nothing matches, say that honestly and offer to start a new field inspection lead. Respond as JSON only.`
+}
+
+function buildFieldInspectionLeadToolCall(userText: string): ToolCall {
+  const location = browserLocationFromText(userText)
+  return {
+    name: 'start_field_inspection_lead',
+    args: {
+      searchPropertyInfo: true,
+      ...(location ? { location } : {}),
+      notes: userText.slice(0, 800),
+    },
+  }
+}
+
+function buildFieldLocationResolveToolCall(userText: string): ToolCall | null {
+  const location = browserLocationFromText(userText)
+  if (!location) return null
+  return {
+    name: 'resolve_field_location',
+    args: {
+      currentLocation: location,
+      mode: 'inspection_check',
+    },
+  }
+}
+
+function buildDeterministicToolCall(messages: ChatMessage[]): ToolCall | null {
+  const latestUser = lastMessageByRole(messages, 'user')
+  if (!latestUser) return null
+  const userText = plainMessageText(latestUser.message.content)
+  if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
+  if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveToolCall(userText)
+  return null
+}
+
 function documentHintFromPriceSheetText(text: string) {
   const clean = plainMessageText(text)
   const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
@@ -540,6 +605,7 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
+  if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveInstruction(userText)
   if (isPriceSheetReviewRequest(userText)) {
     const filename = documentHintFromPriceSheetText(userText)
     return `The latest user request is a read-only supplier/material price sheet review request:
@@ -658,8 +724,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const normalizedWork = normalizeParsedWork(parsed)
     const parsedToolCallCount = (parsed.tool_calls?.length ?? 0) + normalizedWork.convertedToolCalls.length
     const parsedActionCount = normalizedWork.executableActions.length
+    const deterministicToolCall = parsedToolCallCount === 0 && parsedActionCount === 0
+      ? buildDeterministicToolCall(messages)
+      : null
+    if (deterministicToolCall) {
+      console.warn(`[agent-loop] injected deterministic tool call '${deterministicToolCall.name}' iteration=${i} contractorId=${opts.contractorId}`)
+    }
 
-    if (!opts.workspaceId && parsedActionCount > 0 && parsedToolCallCount === 0) {
+    if (!opts.workspaceId && parsedActionCount > 0 && parsedToolCallCount === 0 && !deterministicToolCall) {
       lastBlockedReason = 'The assistant produced chat actions, but this main chat has no workspace context to execute them.'
       console.warn(`[agent-loop] blocked executable actions without workspace context iteration=${i} contractorId=${opts.contractorId}`)
       messages.push({ role: 'assistant', content: raw })
@@ -686,7 +758,7 @@ Respond as JSON only.`,
       continue
     }
 
-    if (shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
+    if (!deterministicToolCall && shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
       lastBlockedReason = 'The assistant narrated operational work without a valid executable tool call.'
       console.warn(`[agent-loop] blocked narrated action without tool iteration=${i} contractorId=${opts.contractorId}`)
       console.warn(`[agent-loop] forced retry for missing tool call iteration=${i} contractorId=${opts.contractorId}`)
@@ -695,7 +767,7 @@ Respond as JSON only.`,
       continue
     }
 
-    let toolCalls = [...(parsed.tool_calls ?? []), ...normalizedWork.convertedToolCalls]
+    let toolCalls = [...(parsed.tool_calls ?? []), ...normalizedWork.convertedToolCalls, ...(deterministicToolCall ? [deterministicToolCall] : [])]
     const blockedToolResults: NonNullable<AgentIteration['toolResults']> = [...normalizedWork.blockedResults]
     if (normalizedWork.blockedResults.length > 0) {
       lastBlockedReason = normalizedWork.blockedResults.map(r => r.error).filter(Boolean).join('; ')
