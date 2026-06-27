@@ -23,6 +23,7 @@ export interface AuthUser {
   contractorId: string
   name: string
   email: string
+  avatar?: string | null
   role: string
   status: string
 }
@@ -135,6 +136,7 @@ async function contextFromSession(token: string): Promise<TenantContext | null> 
       contractorId: user.contractorId,
       name: user.name,
       email: user.email,
+      avatar: user.avatar ?? null,
       role: user.role,
       status: user.status,
     },
@@ -149,7 +151,7 @@ async function contextFromApiKey(apiKey: string, req: NextRequest): Promise<Tena
     where: { keyHash },
     include: {
       contractor: true,
-      user: { select: { id: true, contractorId: true, name: true, email: true, role: true, status: true } },
+      user: { select: { id: true, contractorId: true, name: true, email: true, avatar: true, role: true, status: true } },
     },
   })
   if (!record || record.revokedAt || (record.expiresAt && record.expiresAt < new Date())) {
@@ -202,6 +204,7 @@ async function contextFromDemo(): Promise<TenantContext | null> {
       contractorId: user.contractorId,
       name: user.name,
       email: user.email,
+      avatar: user.avatar ?? null,
       role: user.role,
       status: user.status,
     } : null,

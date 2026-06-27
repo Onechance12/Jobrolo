@@ -11,6 +11,8 @@ export type UploadedDocument = {
   status: string
   url: string | null
   thumbnailUrl?: string | null
+  avatarUrl?: string | null
+  companyLogoUrl?: string | null
 }
 
 export type UploadBatchResult = {

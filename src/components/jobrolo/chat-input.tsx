@@ -92,7 +92,7 @@ function shouldCaptureLocationForUpload(input: {
 }) {
   if (!input.files.length) return false
   const fields = input.uploadFields ?? {}
-  if (['company_logo', 'company_pricing', 'company_document', 'company_profile'].includes(fields.uploadPurpose)) return false
+  if (['company_logo', 'company_pricing', 'company_document', 'company_profile', 'user_avatar'].includes(fields.uploadPurpose)) return false
   if (fields.uploadPurpose === 'inspection_photo' || fields.photoSection || fields.photoSectionLabel) return true
   const lower = `${input.prompt} ${input.files.map(file => file.name).join(' ')}`.toLowerCase()
   const hasImage = input.files.some(file => file.type.startsWith('image/'))

@@ -462,7 +462,9 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
   const phone = textValue(profile.phone)
   const email = textValue(profile.email)
   const address = textValue(profile.address)
-  const logo = textValue(profile.logoUrl) || textValue(profile.logoDocumentId)
+  const logoUrl = textValue(profile.logoUrl)
+  const logoDocumentId = textValue(profile.logoDocumentId)
+  const hasLogo = Boolean(logoUrl || logoDocumentId)
   const licenseNumber = textValue(profile.licenseNumber)
   const ownerName = textValue(profile.ownerName)
   const contact = [textValue(profile.publicContactName), textValue(profile.publicContactTitle)].filter(Boolean).join(' · ')
@@ -471,7 +473,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     !phone ? 'phone' : null,
     !email ? 'email' : null,
     !address ? 'address' : null,
-    !logo ? 'logo' : null,
+    !hasLogo ? 'logo' : null,
   ].filter(Boolean)
 
   function insertPrompt(text: string) {
@@ -480,17 +482,26 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
 
   return (
     <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="flex min-w-0 items-center gap-2 text-sm text-blue-950 dark:text-blue-100">
-            {logo && /^https?:\/\//i.test(logo) ? (
-              <img src={logo} alt={`${name} logo`} className="h-8 w-8 rounded-lg border bg-white object-contain p-1" />
+      <CardHeader className="border-b border-blue-200/70 bg-gradient-to-br from-blue-500/10 via-transparent to-cyan-500/10 pb-3 dark:border-blue-900/60">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {logoUrl ? (
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-sm">
+                <img src={logoUrl} alt={`${name} logo`} className="max-h-full max-w-full object-contain" />
+              </div>
             ) : (
-              <Building2 className="h-4 w-4 flex-shrink-0" />
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+                <Building2 className="h-6 w-6" />
+              </div>
             )}
-            <span className="min-w-0 truncate">{name}</span>
-          </CardTitle>
-          <Badge variant="secondary" className="text-[10px]">{data?.status === 'updated' ? 'updated' : 'saved profile'}</Badge>
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base text-blue-950 dark:text-blue-100">{name}</CardTitle>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                Company profile for estimates, invoices, reports, contracts, and signatures
+              </p>
+            </div>
+          </div>
+          <Badge variant="secondary" className="shrink-0 text-[10px]">{data?.status === 'updated' ? 'updated' : 'saved'}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -517,7 +528,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company website and suggest updates to my company profile: ${website || ''}`.trim())}>
           <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research website
         </Button>
-        {!logo ? (
+        {!hasLogo ? (
           <Button size="sm" variant="outline" onClick={() => insertPrompt('I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.')}>
             Add logo
           </Button>

@@ -13,6 +13,9 @@ type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: strin
 
 function uploadIntentFields(text: string, attachments: File[] = []): Record<string, string> {
   const lower = `${text} ${attachments.map(f => f.name).join(' ')}`.toLowerCase()
+  if (/\b(profile photo|profile picture|account photo|account picture|avatar|my photo|my picture|user photo|headshot)\b/.test(lower)) {
+    return { uploadPurpose: 'user_avatar' }
+  }
   if (/\blogo\b/.test(lower) && /\b(company|profile|brand|branding|estimate|invoice|report|contract|signature)\b/.test(lower)) {
     return { uploadPurpose: 'company_logo' }
   }
@@ -20,6 +23,10 @@ function uploadIntentFields(text: string, attachments: File[] = []): Record<stri
     return { uploadPurpose: 'company_pricing' }
   }
   return {}
+}
+
+function isInstantProfileUpload(doc: { fileType?: string }) {
+  return doc.fileType === 'user_avatar' || doc.fileType === 'company_logo'
 }
 
 async function pollDoc(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 18, signal?: AbortSignal): Promise<DocumentPollResult> {
@@ -132,7 +139,7 @@ export function useWorkspaceChat() {
       try {
         const ws = store.getCurrentWorkspace()
         const intentFields = uploadIntentFields(text, attachments)
-        const isCompanyLevelUpload = intentFields.uploadPurpose === 'company_logo' || intentFields.uploadPurpose === 'company_pricing'
+        const isCompanyLevelUpload = intentFields.uploadPurpose === 'company_logo' || intentFields.uploadPurpose === 'company_pricing' || intentFields.uploadPurpose === 'user_avatar'
         const data = await uploadFilesSequentially(attachments, {
           signal: abortControllerRef.current.signal,
           fields: {
@@ -157,6 +164,10 @@ export function useWorkspaceChat() {
           uploadedDocIds = data.documents.map(x => x.id)
           serverAttachments = data.documents.map(attachmentFromDocument)
           updateLastMessage({ attachments: serverAttachments })
+          const avatarUrl = data.documents.find(d => d.fileType === 'user_avatar')?.avatarUrl
+          if (avatarUrl) {
+            window.dispatchEvent(new CustomEvent('jobrolo:user-avatar-updated', { detail: { avatarUrl } }))
+          }
           for (const doc of data.documents) {
             const locationResolution = (doc as any).locationResolution
             if (locationResolution) {
@@ -187,7 +198,18 @@ export function useWorkspaceChat() {
           // Upload success means "file saved". If the user also typed instructions
           // about the upload, give analysis a short head start, but do not let a
           // slow document worker swallow the user's actual request.
-          const docs = data.documents
+          const docs = data.documents.filter(doc => !isInstantProfileUpload(doc))
+          const instantProfileDocs = data.documents.filter(isInstantProfileUpload)
+          if (instantProfileDocs.length > 0) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: instantProfileDocs.some(doc => doc.fileType === 'user_avatar')
+                ? 'Saved your profile photo and updated your account avatar.'
+                : 'Saved your company logo and updated the company profile.',
+              createdAt: new Date().toISOString(),
+            })
+          }
           if (docs.length > 0) {
             updateMessage(userMessageId, {
               attachments: serverAttachments.map(a => ({

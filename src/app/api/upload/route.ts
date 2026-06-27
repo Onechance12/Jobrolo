@@ -37,6 +37,7 @@ function fileTypeFor(name: string, mimeType: string): string {
 }
 
 function statusFor(fileType: string) {
+  if (fileType === 'company_logo' || fileType === 'user_avatar') return 'reviewed'
   return fileType === 'photo' ? 'queued' : 'queued'
 }
 
@@ -48,7 +49,11 @@ function storageKeyPrefix(input: { contractorId: string; documentId: string; pro
 }
 
 function isCompanyLevelUpload(uploadPurpose: string) {
-  return ['company_logo', 'company_pricing', 'company_document', 'company_profile'].includes(uploadPurpose)
+  return ['company_logo', 'company_pricing', 'company_document', 'company_profile', 'user_avatar'].includes(uploadPurpose)
+}
+
+function isSimpleProfileAsset(fileType: string) {
+  return fileType === 'company_logo' || fileType === 'user_avatar'
 }
 
 function numberField(value: FormDataEntryValue | null) {
@@ -144,6 +149,8 @@ export async function POST(req: NextRequest) {
       status: string
       url: string | null
       thumbnailUrl: string | null
+      avatarUrl?: string | null
+      companyLogoUrl?: string | null
       locationResolution?: unknown
     }> = []
 
@@ -165,9 +172,11 @@ export async function POST(req: NextRequest) {
       const detectedFileType = fileTypeFor(originalName, mimeType)
       const fileType = uploadPurpose === 'company_logo'
         ? 'company_logo'
-        : uploadPurpose === 'company_pricing'
-          ? 'price_sheet'
-          : detectedFileType
+        : uploadPurpose === 'user_avatar'
+          ? 'user_avatar'
+          : uploadPurpose === 'company_pricing'
+            ? 'price_sheet'
+            : detectedFileType
       const uploadContext = uploadPurpose || photoSection || photoSectionLabel
         ? {
             uploadContext: {
@@ -199,6 +208,11 @@ export async function POST(req: NextRequest) {
           thumbnailPath: saved.thumbnailPath,
           fileType,
           status: statusFor(fileType),
+          aiSummary: fileType === 'company_logo'
+            ? 'Company logo uploaded for profile documents.'
+            : fileType === 'user_avatar'
+              ? 'User profile photo uploaded.'
+              : undefined,
           extractedData: uploadContext ? JSON.stringify(uploadContext) : undefined,
           workspaceId,
           projectId,
@@ -206,6 +220,42 @@ export async function POST(req: NextRequest) {
         },
       })
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
+
+      let appliedAvatarUrl: string | null = null
+      if (fileType === 'user_avatar') {
+        appliedAvatarUrl = thumbnailUrl(saved) || toFileUrl(document.filePath)
+        await db.user.update({
+          where: { id: ctx.user.id },
+          data: { avatar: appliedAvatarUrl },
+        })
+        console.log(`[upload] updated user avatar requestId=${requestId} userId=${ctx.user.id} documentId=${document.id}`)
+      }
+
+      let appliedCompanyLogoUrl: string | null = null
+      if (fileType === 'company_logo') {
+        appliedCompanyLogoUrl = toFileUrl(document.filePath)
+        await db.contractorProfile.upsert({
+          where: { contractorId: ctx.contractorId },
+          update: {
+            logoUrl: appliedCompanyLogoUrl,
+            logoDocumentId: document.id,
+          },
+          create: {
+            contractorId: ctx.contractorId,
+            companyName: ctx.contractor.company ?? ctx.contractor.name,
+            displayName: ctx.contractor.company ?? ctx.contractor.name,
+            logoUrl: appliedCompanyLogoUrl,
+            logoDocumentId: document.id,
+            country: 'US',
+            brandPrimaryColor: '#2563EB',
+            brandAccentColor: '#06B6D4',
+            brandMode: 'dark',
+            reportDisclaimer: 'This roof report documents visible conditions observed at the time of inspection. It is not a determination of insurance coverage, carrier liability, code compliance, or claim approval. Hidden damage, latent defects, and conditions not visible during inspection may exist.',
+            legalFooter: 'Review all agreement language before use. Final terms are subject to the contractor\'s approved documents and applicable law.',
+          },
+        })
+        console.log(`[upload] updated company logo requestId=${requestId} contractorId=${ctx.contractorId} documentId=${document.id}`)
+      }
 
       let locationResolution: unknown = undefined
       if (!companyLevelUpload && captureLocation) {
@@ -229,19 +279,23 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      try {
-        const analysisJob = await enqueueAgentJob({
-          contractorId: ctx.contractorId,
-          userId: ctx.user.id,
-          type: 'doc_analysis',
-          input: { documentId: document.id, heicConversionNeeded: saved.needsConversion },
-          workspaceId,
-          priority: 4,
-        })
-        kickAgentJob(analysisJob.id, `upload:${requestId}`)
-        console.log(`[upload] queued analysis requestId=${requestId} documentId=${document.id} jobId=${analysisJob.id}`)
-      } catch (err) {
-        console.error('[upload] queue analysis failed:', err)
+      if (isSimpleProfileAsset(fileType)) {
+        console.log(`[upload] skipped analysis requestId=${requestId} documentId=${document.id} type=${fileType}`)
+      } else {
+        try {
+          const analysisJob = await enqueueAgentJob({
+            contractorId: ctx.contractorId,
+            userId: ctx.user.id,
+            type: 'doc_analysis',
+            input: { documentId: document.id, heicConversionNeeded: saved.needsConversion },
+            workspaceId,
+            priority: 4,
+          })
+          kickAgentJob(analysisJob.id, `upload:${requestId}`)
+          console.log(`[upload] queued analysis requestId=${requestId} documentId=${document.id} jobId=${analysisJob.id}`)
+        } catch (err) {
+          console.error('[upload] queue analysis failed:', err)
+        }
       }
 
       documents.push({
@@ -253,6 +307,8 @@ export async function POST(req: NextRequest) {
         status: document.status,
         url: toFileUrl(document.filePath),
         thumbnailUrl: thumbnailUrl(saved),
+        ...(appliedAvatarUrl ? { avatarUrl: appliedAvatarUrl } : {}),
+        ...(appliedCompanyLogoUrl ? { companyLogoUrl: appliedCompanyLogoUrl } : {}),
         ...(locationResolution ? { locationResolution } : {}),
       })
     }
@@ -263,14 +319,17 @@ export async function POST(req: NextRequest) {
       ...(companyLevelUpload ? {
         needsLink: false,
         deferLinkPrompt: true,
-        suggestedPrompt: uploadPurpose === 'company_logo'
-          ? 'Saved the logo upload. I’ll attach it to the company profile instead of a customer file.'
-          : 'Saved the company-level upload. I’ll keep it out of customer files unless you ask me to attach it.',
+        suggestedPrompt: uploadPurpose === 'user_avatar'
+          ? 'Saved your profile photo and updated your account avatar.'
+          : uploadPurpose === 'company_logo'
+            ? 'Saved your company logo and updated the company profile.'
+            : 'Saved the company-level upload. I’ll keep it out of customer files unless you ask me to attach it.',
         uploadContext: {
           documentIds: documents.map(d => d.id),
           filenames: documents.map(d => d.originalName),
           fileTypes: documents.map(d => d.fileType),
           uploadPurpose,
+          avatarUrl: documents.find(d => (d as any).avatarUrl)?.avatarUrl,
         },
       } : needsLink ? {
         needsLink: true,

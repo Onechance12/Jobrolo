@@ -63,6 +63,7 @@ export default function Page() {
   const [fieldCopilotOpen, setFieldCopilotOpen] = useState(false)
   const proactiveRunKey = useRef<string | null>(null)
   const [userName, setUserName] = useState('')
+  const [userAvatar, setUserAvatar] = useState<string | null>(null)
   const uploadProgress = useChatStore(s => s.uploadProgress)
   const messages = useChatStore(s => s.messages)
   const isTyping = useChatStore(s => s.isTyping)
@@ -128,6 +129,7 @@ export default function Page() {
           if (!me.authenticated) { window.location.href = '/signup'; return }
           if (!me.onboardingComplete) { window.location.href = '/onboarding'; return }
           setUserName(me.user?.name || 'there')
+          setUserAvatar(me.user?.avatar || null)
           currentUserRole = me.user?.role || currentUserRole
         }
         const [dr, cr, wr] = await Promise.all([
@@ -138,7 +140,6 @@ export default function Page() {
           const d = await dr.json()
           setBusinessContext(d.businessContext)
           if (d.conversationId) setConversationId(d.conversationId)
-          if (d.contractor?.name) setUserName(d.contractor.name)
         }
         if (cr.ok) {
           const d = await cr.json()
@@ -517,6 +518,15 @@ export default function Page() {
     return () => { document.body.style.overflow = '' }
   }, [leftDrawerOpen])
 
+  useEffect(() => {
+    function onUserAvatarUpdated(event: Event) {
+      const avatarUrl = (event as CustomEvent<{ avatarUrl?: string }>).detail?.avatarUrl
+      if (avatarUrl) setUserAvatar(avatarUrl)
+    }
+    window.addEventListener('jobrolo:user-avatar-updated', onUserAvatarUpdated)
+    return () => window.removeEventListener('jobrolo:user-avatar-updated', onUserAvatarUpdated)
+  }, [])
+
   const displayMessages = isInWorkspace ? workspaceMessages : messages
   const inputDisabled = isInWorkspace ? isWorkspaceTyping : (isStreaming && !uploadProgress.length)
   const isAIWorking = isInWorkspace ? isWorkspaceTyping : (isTyping || isStreaming)
@@ -720,10 +730,14 @@ export default function Page() {
               <div className="relative">
                 <button
                   onClick={() => setProfileMenuOpen(v => !v)}
-                  className="w-8 h-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-semibold hover:bg-muted/80"
+                  className="w-8 h-8 overflow-hidden rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-semibold hover:bg-muted/80"
                   aria-label="Profile menu"
                 >
-                  {userName ? getInitials(userName) : 'U'}
+                  {userAvatar ? (
+                    <img src={userAvatar} alt={userName || 'Profile'} className="h-full w-full object-cover" />
+                  ) : (
+                    userName ? getInitials(userName) : 'U'
+                  )}
                 </button>
                 {profileMenuOpen && (
                   <div className="absolute right-0 top-10 z-30 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-xl">
@@ -731,6 +745,12 @@ export default function Page() {
                       <div className="text-sm font-semibold">{userName || 'Jobrolo user'}</div>
                       <div className="text-xs text-muted-foreground">Profile & settings</div>
                     </div>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); handleStartPrompt('I want to update my account profile photo/avatar.') }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"
+                    >
+                      <Upload className="h-4 w-4" /> Profile photo
+                    </button>
                     <button
                       onClick={() => { setProfileMenuOpen(false); handleStartPrompt('Show my saved company profile. If anything important is missing for estimates, invoices, roof reports, contracts, signatures, or customer-facing documents, show it as a company profile card.') }}
                       className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-muted"

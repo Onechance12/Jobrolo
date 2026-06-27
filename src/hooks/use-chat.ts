@@ -14,6 +14,9 @@ type DocumentPollResult = { reviewed: boolean; terminal: boolean; status?: strin
 
 function uploadIntentFields(text: string, attachments: File[] = []): Record<string, string> {
   const lower = `${text} ${attachments.map(f => f.name).join(' ')}`.toLowerCase()
+  if (/\b(profile photo|profile picture|account photo|account picture|avatar|my photo|my picture|user photo|headshot)\b/.test(lower)) {
+    return { uploadPurpose: 'user_avatar' }
+  }
   if (/\blogo\b/.test(lower) && /\b(company|profile|brand|branding|estimate|invoice|report|contract|signature)\b/.test(lower)) {
     return { uploadPurpose: 'company_logo' }
   }
@@ -21,6 +24,10 @@ function uploadIntentFields(text: string, attachments: File[] = []): Record<stri
     return { uploadPurpose: 'company_pricing' }
   }
   return {}
+}
+
+function isInstantProfileUpload(doc: { fileType?: string }) {
+  return doc.fileType === 'user_avatar' || doc.fileType === 'company_logo'
 }
 
 async function pollDocumentStatus(docId: string, userMessageId: string, postAnalysisFollowup = false, maxAttempts = 18, signal?: AbortSignal): Promise<DocumentPollResult> {
@@ -167,6 +174,10 @@ export function useChat() {
         uploadedDocIds = data.documents.map(d => d.id)
         serverAttachments = data.documents.map(attachmentFromDocument)
           updateMessage(userMessageId, { attachments: serverAttachments })
+          const avatarUrl = data.documents.find(d => d.fileType === 'user_avatar')?.avatarUrl
+          if (avatarUrl) {
+            window.dispatchEvent(new CustomEvent('jobrolo:user-avatar-updated', { detail: { avatarUrl } }))
+          }
           for (const doc of data.documents) {
             const locationResolution = (doc as any).locationResolution
             if (locationResolution) {
@@ -198,7 +209,18 @@ export function useChat() {
           // Upload success means "file saved". If the user also typed instructions
           // about the upload, give analysis a short head start, but do not let a
           // slow document worker swallow the user's actual request.
-          const docsNeedingAnalysis = data.documents
+          const docsNeedingAnalysis = data.documents.filter(doc => !isInstantProfileUpload(doc))
+          const instantProfileDocs = data.documents.filter(isInstantProfileUpload)
+          if (instantProfileDocs.length > 0) {
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: instantProfileDocs.some(doc => doc.fileType === 'user_avatar')
+                ? 'Saved your profile photo and updated your account avatar.'
+                : 'Saved your company logo and updated the company profile.',
+              createdAt: new Date().toISOString(),
+            })
+          }
           if (docsNeedingAnalysis.length > 0) {
             updateMessage(userMessageId, {
               attachments: serverAttachments.map(a => ({
