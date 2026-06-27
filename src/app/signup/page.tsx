@@ -11,11 +11,31 @@ type EntryMode = 'signup' | 'login'
 type LobbyMessage = { role: 'user' | 'assistant'; content: string }
 
 const FEATURE_PREVIEWS = [
-  { label: 'Client files', tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100' },
-  { label: 'Field notes', tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100' },
-  { label: 'Shared chats', tone: 'border-cyan-300/20 bg-cyan-500/10 text-cyan-100' },
-  { label: 'Reports', tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100' },
-  { label: 'Approvals', tone: 'border-violet-300/20 bg-violet-500/10 text-violet-100' },
+  {
+    label: 'Client files',
+    tone: 'border-blue-300/20 bg-blue-500/10 text-blue-100 hover:border-blue-200/45 hover:bg-blue-500/20',
+    prompt: 'Show me how Jobrolo helps with client files. Explain it like I am deciding whether to use it.',
+  },
+  {
+    label: 'Field notes',
+    tone: 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100 hover:border-emerald-200/45 hover:bg-emerald-500/20',
+    prompt: 'Show me how Jobrolo helps with field notes, inspections, photos, and job-site updates.',
+  },
+  {
+    label: 'Shared chats',
+    tone: 'border-cyan-300/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-200/45 hover:bg-cyan-500/20',
+    prompt: 'Show me how Jobrolo shared chats work for crews, customers, sales reps, and project managers.',
+  },
+  {
+    label: 'Reports',
+    tone: 'border-amber-300/20 bg-amber-500/10 text-amber-100 hover:border-amber-200/45 hover:bg-amber-500/20',
+    prompt: 'Show me how Jobrolo helps create roof reports, scope breakdowns, and customer-facing summaries.',
+  },
+  {
+    label: 'Approvals',
+    tone: 'border-violet-300/20 bg-violet-500/10 text-violet-100 hover:border-violet-200/45 hover:bg-violet-500/20',
+    prompt: 'Show me how Jobrolo approvals work so risky actions do not happen without permission.',
+  },
 ]
 
 function cleanLobbyText(value: string) {
@@ -158,11 +178,11 @@ export default function SignupPage() {
     setLockedNotice(`${label} unlocks after you sign in and finish setup. For now, I can help you sign in, create a workspace, or explain how Jobrolo works.`)
   }
 
-  const sendLobbyMessage = async () => {
-    const text = lobbyInput.trim()
+  const sendLobbyMessage = async (overrideText?: string) => {
+    const text = (overrideText ?? lobbyInput).trim()
     if (!text || lobbySending) return
 
-    setLobbyInput('')
+    if (!overrideText) setLobbyInput('')
     setLockedNotice(null)
     setLobbyMessages(prev => [...prev, { role: 'user', content: text }])
     setLobbySending(true)
@@ -263,9 +283,16 @@ export default function SignupPage() {
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {FEATURE_PREVIEWS.map(feature => (
-                  <span key={feature.label} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${feature.tone}`}>
+                  <button
+                    key={feature.label}
+                    type="button"
+                    onClick={() => void sendLobbyMessage(feature.prompt)}
+                    disabled={lobbySending}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${feature.tone}`}
+                    aria-label={`Ask about ${feature.label}`}
+                  >
                     {feature.label}
-                  </span>
+                  </button>
                 ))}
               </div>
               <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-100">
