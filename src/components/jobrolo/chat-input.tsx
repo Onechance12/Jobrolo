@@ -247,7 +247,12 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       setSubmitting(false)
     }
   }, [text, pendingFiles, disabled, submitting, onSend, selectedInspectionSection])
-  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
   const handleFiles = (files: FileList | null) => {
     if (!files) return
     const selected = Array.from(files).filter(file => file.size > 0)
