@@ -254,7 +254,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate }: Props) {
           <Plus className="w-4 h-4 text-blue-500" /> New private chat
         </button>
 
-        <div className="overflow-hidden rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-card to-blue-500/10 p-2 shadow-sm">
+        <div className="space-y-1">
           <SectionToggle
             icon={<FileText className="h-4 w-4" />}
             label="Command shortcuts"
