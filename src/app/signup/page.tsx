@@ -307,7 +307,7 @@ export default function SignupPage() {
             <img src="/logo.png" alt="Jobrolo" className="h-10 w-10 rounded-xl object-cover shadow-[0_0_24px_rgba(37,99,235,0.45)]" />
             <div>
               <div className="text-sm font-semibold text-white">Jobrolo</div>
-              <div className="text-xs text-slate-400">Account entry · setup mode</div>
+              <div className="text-xs text-slate-400">Account entry</div>
             </div>
           </div>
           <div className="flex items-center gap-1.5">

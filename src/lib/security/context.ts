@@ -17,7 +17,6 @@ import { createHash, timingSafeEqual, randomBytes } from 'node:crypto'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { getSessionCookie, verifySession } from './session'
-import { markCommandCenterOnboardingReady } from '@/lib/onboarding/command-center-ready'
 
 export interface AuthUser {
   id: string
@@ -42,17 +41,6 @@ export interface TenantContext {
   user: AuthUser | null // null when API key without user impersonation
   actor: string // for audit logs: 'user:email', 'api:prefix', 'system', 'ai'
   authMethod: 'session' | 'api_key' | 'system' | 'demo'
-}
-
-const ONBOARDING_ALLOWED_PATH_PREFIXES = [
-  '/api/auth',
-  '/api/onboarding',
-  '/api/health',
-]
-
-function isOnboardingAllowedPath(req: NextRequest): boolean {
-  const path = req.nextUrl?.pathname || ''
-  return ONBOARDING_ALLOWED_PATH_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
 }
 
 // Demo bypass: dev only. SECURITY: Crashes in production if JOBROLO_DEMO=1 is set.
@@ -234,19 +222,6 @@ export function getClientIp(req: NextRequest): string {
 export async function requireContext(req: NextRequest): Promise<TenantContext> {
   const ctx = await getContext(req)
   if (!ctx) throw new UnauthorizedError('Authentication required')
-  if (!isOnboardingAllowedPath(req) && ctx.authMethod === 'session' && ctx.user) {
-    const onboarding = await db.onboardingSession.findUnique({
-      where: { contractorId: ctx.contractorId },
-      select: { status: true },
-    })
-    if (!onboarding || onboarding.status !== 'completed') {
-      await markCommandCenterOnboardingReady({
-        contractorId: ctx.contractorId,
-        userId: ctx.user.id,
-        companyName: ctx.contractor.company || ctx.contractor.name,
-      })
-    }
-  }
   return ctx
 }
 
