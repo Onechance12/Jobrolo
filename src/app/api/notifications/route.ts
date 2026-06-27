@@ -5,6 +5,7 @@ import { requireContext } from '@/lib/security/context'
 import { checkBodySize } from '@/lib/security/body-size'
 import { createRoleNotification, listNotifications } from '@/lib/notifications'
 import { hasCompanyWideAccess } from '@/lib/security/ownership'
+import { toFileUrl, toThumbnailUrl } from '@/lib/file-url'
 
 const CreateNotificationSchema = z.object({
   role: z.string().min(1).max(80),
@@ -19,6 +20,11 @@ const CreateNotificationSchema = z.object({
   relatedId: z.string().optional().nullable(),
   payload: z.record(z.string(), z.unknown()).optional().nullable(),
 })
+
+function safeJson(value: string | null | undefined) {
+  if (!value) return null
+  try { return JSON.parse(value) } catch { return null }
+}
 
 export async function GET(req: NextRequest) {
   const ctx = await requireContext(req).catch(e => e)
@@ -55,7 +61,7 @@ async function buildSyntheticActionItems(contractorId: string, role: string) {
       where: { contractorId, status: { in: ['pending', 'needs_approval', 'approved'] } },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       take: 15,
-      select: { id: true, type: true, title: true, summary: true, priority: true, requestedRole: true, projectId: true, customerId: true, status: true, createdAt: true },
+      select: { id: true, type: true, title: true, summary: true, priority: true, requestedRole: true, projectId: true, customerId: true, status: true, payloadJson: true, createdAt: true },
     }),
     db.document.findMany({
       where: {
@@ -76,6 +82,10 @@ async function buildSyntheticActionItems(contractorId: string, role: string) {
         aiSummary: true,
         extractionConfidence: true,
         conflictFlags: true,
+        mimeType: true,
+        size: true,
+        filePath: true,
+        thumbnailPath: true,
         projectId: true,
         customerId: true,
         createdAt: true,
@@ -83,23 +93,32 @@ async function buildSyntheticActionItems(contractorId: string, role: string) {
     }),
   ])
 
-  const actionItems = actionRequests.map(item => ({
-    id: `synthetic:action:${item.id}`,
-    type: 'pending_action',
-    title: item.title,
-    summary: item.summary,
-    priority: item.priority,
-    status: item.status,
-    role: item.requestedRole,
-    projectId: item.projectId,
-    customerId: item.customerId,
-    actionRequestId: item.id,
-    relatedType: 'action_request',
-    relatedId: item.id,
-    payloadJson: JSON.stringify({ actionRequestId: item.id, cardType: 'action_request', synthetic: true }),
-    createdAt: item.createdAt,
-    synthetic: true,
-  }))
+  const actionItems = actionRequests.map(item => {
+    const payload = safeJson(item.payloadJson) as Record<string, any> | null
+    return {
+      id: `synthetic:action:${item.id}`,
+      type: 'pending_action',
+      title: item.title,
+      summary: item.summary,
+      priority: item.priority,
+      status: item.status,
+      role: item.requestedRole,
+      projectId: item.projectId,
+      customerId: item.customerId,
+      actionRequestId: item.id,
+      relatedType: 'action_request',
+      relatedId: item.id,
+      payloadJson: JSON.stringify({
+        actionRequestId: item.id,
+        cardType: 'action_request',
+        toolName: payload?.toolName,
+        approvalDetails: payload?.approvalDetails,
+        synthetic: true,
+      }),
+      createdAt: item.createdAt,
+      synthetic: true,
+    }
+  })
 
   const docItems = reviewDocs.map(doc => ({
     id: `synthetic:document:${doc.id}`,
@@ -115,8 +134,15 @@ async function buildSyntheticActionItems(contractorId: string, role: string) {
     relatedId: doc.id,
     payloadJson: JSON.stringify({
       documentId: doc.id,
+      filename: doc.originalName,
       fileType: doc.fileType,
+      mimeType: doc.mimeType,
+      size: doc.size,
       status: doc.status,
+      fileUrl: toFileUrl(doc.filePath),
+      thumbnailUrl: toThumbnailUrl(doc.thumbnailPath),
+      summary: doc.aiSummary,
+      confidence: doc.extractionConfidence,
       cardType: doc.fileType === 'price_sheet' ? 'price_sheet_review' : 'document_review',
       synthetic: true,
     }),

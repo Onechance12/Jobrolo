@@ -13,7 +13,7 @@ import { FieldCopilotDrawer } from '@/components/jobrolo/field-copilot-drawer'
 import { FieldEntryStrip } from '@/components/jobrolo/field-entry-strip'
 import { Button } from '@/components/ui/button'
 import { cn, getInitials } from '@/lib/utils'
-import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
 
@@ -877,7 +877,31 @@ function ActionNeededMenu({
   onRefresh: () => void | Promise<void>
   onClose: () => void
 }) {
-  const visible = items.filter(item => !['actioned', 'archived'].includes(String(item.status ?? ''))).slice(0, 12)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+  const [busyDecisionId, setBusyDecisionId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const hiddenStatuses = new Set(['actioned', 'archived', 'completed', 'rejected', 'cancelled'])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem('jobrolo.actionCenter.dismissed.v1')
+      if (raw) setDismissedIds(new Set(JSON.parse(raw)))
+    } catch {}
+  }, [])
+
+  function saveDismissed(next: Set<string>) {
+    setDismissedIds(next)
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem('jobrolo.actionCenter.dismissed.v1', JSON.stringify([...next].slice(-200))) } catch {}
+    }
+  }
+
+  const visible = items
+    .filter(item => !hiddenStatuses.has(String(item.status ?? '').toLowerCase()))
+    .filter(item => !dismissedIds.has(item.id))
+    .slice(0, 12)
 
   async function mark(id: string, status: 'read' | 'actioned' | 'archived') {
     await fetch(`/api/notifications/${id}`, {
@@ -886,6 +910,46 @@ function ActionNeededMenu({
       body: JSON.stringify({ status }),
     }).catch(() => null)
     await onRefresh()
+  }
+
+  async function hideItem(item: ActionNeededItem) {
+    setMessage(null)
+    if (item.synthetic || item.id.startsWith('synthetic:')) {
+      saveDismissed(new Set([...dismissedIds, item.id]))
+      return
+    }
+    await mark(item.id, 'archived')
+  }
+
+  async function hideVisible() {
+    setMessage(null)
+    const synthetic = visible.filter(item => item.synthetic || item.id.startsWith('synthetic:')).map(item => item.id)
+    const real = visible.filter(item => !item.synthetic && !item.id.startsWith('synthetic:')).map(item => item.id)
+    if (synthetic.length) saveDismissed(new Set([...dismissedIds, ...synthetic]))
+    await Promise.all(real.map(id => mark(id, 'archived').catch(() => null)))
+    await onRefresh()
+  }
+
+  async function decide(item: ActionNeededItem, decision: 'approved' | 'rejected') {
+    if (!item.actionRequestId) return
+    setBusyDecisionId(`${item.id}:${decision}`)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/action-requests/${item.actionRequestId}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(String(data?.error || 'Decision failed'))
+      setMessage(decision === 'approved' ? 'Approved. If this action can run now, Jobrolo is running it.' : 'Rejected. Jobrolo will not run this action.')
+      saveDismissed(new Set([...dismissedIds, item.id]))
+      await onRefresh()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Could not update this request.')
+    } finally {
+      setBusyDecisionId(null)
+    }
   }
 
   function openItem(item: ActionNeededItem) {
@@ -915,13 +979,14 @@ function ActionNeededMenu({
       <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border p-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold">Action Needed</div>
-          <div className="text-xs text-muted-foreground">Approvals, review items, invites, failed work, and routed tasks.</div>
+          <div className="text-xs text-muted-foreground">Tap an item to review, approve, open, or hide it.</div>
         </div>
         <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close action needed">
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="max-h-[calc(100dvh-14rem)] overflow-y-auto overflow-x-hidden p-2 sm:max-h-[60vh]">
+        {message ? <div className="mb-2 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-200">{message}</div> : null}
         {loading && !visible.length ? (
           <div className="flex items-center gap-2 rounded-xl px-3 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading action items…
@@ -932,25 +997,77 @@ function ActionNeededMenu({
         ) : null}
         {visible.map(item => {
           const payload = parseActionPayload(item)
-          const canOpen = Boolean(payload.workspaceId || payload.chatUrl || item.actionRequestId)
+          const expanded = expandedId === item.id
+          const fileUrl = typeof payload.fileUrl === 'string' ? payload.fileUrl : null
+          const thumbnailUrl = typeof payload.thumbnailUrl === 'string' ? payload.thumbnailUrl : null
+          const mimeType = typeof payload.mimeType === 'string' ? payload.mimeType : ''
+          const fileType = typeof payload.fileType === 'string' ? payload.fileType : ''
+          const isImage = mimeType.startsWith('image/') || fileType === 'photo'
+          const approvalDetails = payload.approvalDetails && typeof payload.approvalDetails === 'object' ? payload.approvalDetails as Record<string, any> : null
+          const detailRows = Array.isArray(approvalDetails?.details) ? approvalDetails.details.slice(0, 8) as Array<{ label?: string; value?: unknown }> : []
           return (
-            <div key={item.id} className="mb-2 min-w-0 rounded-xl border border-border bg-card p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{item.title || actionLabel(item.type)}</div>
-                  <div className="mt-0.5 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            <div key={item.id} className="mb-2 min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => setExpandedId(expanded ? null : item.id)}
+                className="flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-muted/40"
+              >
+                <span className="mt-0.5 shrink-0 text-muted-foreground">{expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{item.title || actionLabel(item.type)}</span>
+                  <span className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
                     <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.type)}</span>
                     {item.priority ? <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.priority)}</span> : null}
                     {item.role ? <span className="rounded-full bg-muted px-2 py-0.5">{actionLabel(item.role)}</span> : null}
+                  </span>
+                </span>
+              </button>
+              {expanded ? (
+                <div className="border-t border-border px-3 py-3">
+                  {thumbnailUrl && isImage ? (
+                    <a href={fileUrl || thumbnailUrl} target="_blank" rel="noopener noreferrer" className="mb-3 block overflow-hidden rounded-xl border border-border bg-muted">
+                      <img src={thumbnailUrl} alt={String(payload.filename || item.title || 'Document preview')} className="h-32 w-full object-cover" />
+                    </a>
+                  ) : null}
+                  {item.summary ? <p className="break-words text-xs leading-5 text-muted-foreground">{item.summary}</p> : null}
+                  {approvalDetails ? (
+                    <div className="mt-3 rounded-xl border border-border bg-background/60 p-2 text-xs">
+                      {approvalDetails.destructive ? <div className="mb-2 rounded-lg bg-rose-500/10 px-2 py-1 font-medium text-rose-600">This is destructive. Review before approving.</div> : null}
+                      {approvalDetails.targetLabel ? <div className="mb-1"><span className="text-muted-foreground">Target:</span> <span className="font-medium">{String(approvalDetails.targetLabel)}</span></div> : null}
+                      {detailRows.map((row, idx) => (
+                        <div key={idx} className="flex gap-2 border-t border-border/60 py-1 first:border-t-0">
+                          <span className="w-20 shrink-0 text-muted-foreground">{row.label || 'Detail'}</span>
+                          <span className="min-w-0 flex-1 break-words font-medium">{row.value == null ? '—' : String(row.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {fileUrl ? (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> {isImage ? 'View image' : 'View file'}
+                        </a>
+                      </Button>
+                    ) : null}
+                    {item.actionRequestId ? (
+                      <>
+                        <Button size="sm" disabled={!!busyDecisionId} onClick={() => decide(item, 'approved')}>
+                          {busyDecisionId === `${item.id}:approved` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+                          Approve
+                        </Button>
+                        <Button size="sm" variant="outline" disabled={!!busyDecisionId} onClick={() => decide(item, 'rejected')}>
+                          {busyDecisionId === `${item.id}:rejected` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-1.5 h-3.5 w-3.5" />}
+                          Reject
+                        </Button>
+                      </>
+                    ) : null}
+                    <Button size="sm" variant="ghost" onClick={() => openItem(item)}>Ask Jobrolo</Button>
+                    <Button size="sm" variant="ghost" onClick={() => hideItem(item)}>{item.synthetic ? 'Hide' : 'Archive'}</Button>
+                    {!item.synthetic && !item.id.startsWith('synthetic:') ? <Button size="sm" variant="ghost" onClick={() => mark(item.id, 'read')}>Mark read</Button> : null}
                   </div>
                 </div>
-              </div>
-              {item.summary ? <p className="mt-2 line-clamp-3 break-words text-xs text-muted-foreground">{item.summary}</p> : null}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {canOpen ? <Button size="sm" onClick={() => openItem(item)}>Open</Button> : null}
-                {!item.synthetic ? <Button size="sm" variant="outline" onClick={() => mark(item.id, 'read')}>Mark read</Button> : null}
-                {!item.synthetic ? <Button size="sm" variant="ghost" onClick={() => mark(item.id, 'archived')}>Archive</Button> : null}
-              </div>
+              ) : null}
             </div>
           )
         })}
@@ -959,6 +1076,11 @@ function ActionNeededMenu({
         <button onClick={() => onRefresh()} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
           Refresh
         </button>
+        {visible.length ? (
+          <button onClick={() => hideVisible()} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+            Hide shown
+          </button>
+        ) : null}
         <button onClick={() => window.location.assign('/settings/notifications')} className="rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
           Notification settings
         </button>
