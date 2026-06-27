@@ -165,6 +165,10 @@ function sanitizeToolArgs(value: unknown, path = 'args'): { value: unknown; remo
     const next: Record<string, unknown> = {}
     const removed: string[] = []
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (child === null || child === undefined) {
+        removed.push(`${path}.${key}`)
+        continue
+      }
       if (isIdLikeKey(key) && (child === null || child === undefined || child === '')) {
         removed.push(`${path}.${key}`)
         continue
