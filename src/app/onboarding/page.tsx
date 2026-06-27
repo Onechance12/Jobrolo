@@ -104,9 +104,11 @@ export default function OnboardingPage() {
     })
   }, [messages, sending])
 
-  // Focus input when ready
+  // Focus input when ready on desktop. On mobile, forced focus after a long
+  // Jobrolo answer can yank the user to the bottom and open the keyboard.
   useEffect(() => {
-    if (!loading && !sending && inputRef.current) inputRef.current.focus()
+    const canAutoFocus = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px) and (pointer: fine)').matches
+    if (canAutoFocus && !loading && !sending && inputRef.current) inputRef.current.focus()
   }, [loading, sending])
 
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -160,7 +162,8 @@ export default function OnboardingPage() {
   }, [input, sending, router])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    const desktopEnter = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px) and (pointer: fine)').matches
+    if (e.key === 'Enter' && !e.shiftKey && ((e.metaKey || e.ctrlKey) || desktopEnter)) {
       e.preventDefault()
       handleSend()
     }

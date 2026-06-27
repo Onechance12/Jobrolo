@@ -443,7 +443,8 @@ export default function SignupPage() {
             value={lobbyInput}
             onChange={e => setLobbyInput(e.target.value)}
             onKeyDown={e => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              const desktopEnter = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px) and (pointer: fine)').matches
+              if (e.key === 'Enter' && !e.shiftKey && ((e.metaKey || e.ctrlKey) || desktopEnter)) {
                 e.preventDefault()
                 void sendLobbyMessage()
               }

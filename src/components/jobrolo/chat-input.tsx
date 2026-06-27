@@ -247,7 +247,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     }
   }, [text, pendingFiles, disabled, submitting, onSend, selectedInspectionSection])
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    const desktopEnter = typeof window !== 'undefined' && window.matchMedia('(min-width: 768px) and (pointer: fine)').matches
+    if (e.key === 'Enter' && !e.shiftKey && ((e.metaKey || e.ctrlKey) || desktopEnter)) {
       e.preventDefault()
       handleSend()
     }
