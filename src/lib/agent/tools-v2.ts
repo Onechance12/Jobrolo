@@ -29,6 +29,7 @@ import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservati
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { researchCompany } from '@/lib/onboarding/research'
 import { getCompanyIntelligence, getCompanyKpis } from '@/lib/company-intelligence'
+import { getBrainContext, recordBrainLesson, reflectOnBrain, saveBrainMemory } from '@/lib/memory/brain'
 import { sanitizeHtml } from '@/lib/security/html'
 import { createCommandShortcut, deleteCommandShortcut, listCommandShortcuts, updateCommandShortcut } from '@/lib/command-shortcuts-db'
 import type { TenantContext } from '@/lib/security/context'
@@ -93,7 +94,7 @@ function canRunDirectWithoutApproval(name: string, ctx: ToolContext, args?: Reco
   if (!TRUSTED_DIRECT_ROLES.has(normalizeRole(ctx.userRole))) return false
 
   if (name === 'link_document_to_project') {
-    const role = String(args?.role ?? '').toLowerCase()
+    const role = normalizeDocumentLinkRole(String(args?.role ?? ''))
     const safeFieldRoles = new Set(['inspection_photo', 'report_photo', 'evidence'])
     const documentId = typeof args?.documentId === 'string' ? args.documentId : ''
     if (!safeFieldRoles.has(role)) return false
@@ -101,6 +102,20 @@ function canRunDirectWithoutApproval(name: string, ctx: ToolContext, args?: Reco
   }
 
   return true
+}
+
+function normalizeDocumentLinkRole(role: string) {
+  const raw = String(role || '').trim()
+  const normalized = raw.toLowerCase().replace(/[\s-]+/g, '_')
+  if (['inspection_photo', 'report_photo', 'evidence'].includes(normalized)) return normalized
+  if (
+    /\b(front|rear|left|right|all)_?elevation/.test(normalized) ||
+    /\b(roof|slope|facet|ridge|hip|valley|penetration|shingle|hail|wind|damage|soft_metal|gutter|vent|interior|attic|detached)\b/.test(normalized) ||
+    /\binspection_?photo|photo_?inspection|field_?photo\b/.test(normalized)
+  ) {
+    return 'inspection_photo'
+  }
+  return normalized || 'attachment'
 }
 
 function canManageCompanyProfile(ctx: ToolContext) {
@@ -311,6 +326,53 @@ function normalizeMaterialItems(value: unknown) {
 function safeJsonParse<T = Record<string, unknown>>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback
   try { return JSON.parse(value) as T } catch { return fallback }
+}
+
+function looksLikeDocumentReference(value: string) {
+  const trimmed = value.trim()
+  if (/^[\w.-]+\.(pdf|docx?|txt|csv|xlsx?|png|jpe?g|webp)$/i.test(trimmed)) return true
+  if (/^[a-z0-9]{20,}$/i.test(trimmed) && !/\s/.test(trimmed)) return true
+  if (/\bdocumentId\b/i.test(trimmed) && trimmed.length < 120) return true
+  return false
+}
+
+function isTemplateLikeCompanyDocument(doc: { originalName?: string | null; fileType?: string | null; aiCategory?: string | null }) {
+  const name = String(doc.originalName ?? '').toLowerCase()
+  const type = String(doc.fileType ?? '').toLowerCase()
+  const category = String(doc.aiCategory ?? '').toLowerCase()
+  return (
+    type.includes('template') ||
+    category.includes('template') ||
+    /\b(template|agreement|contract|contingency|warranty|terms|disclaimer|invoice template|estimate template|roof report template)\b/i.test(name)
+  )
+}
+
+function isScopeEstimateDocument(doc: { originalName?: string | null; fileType?: string | null; aiCategory?: string | null; extractedData?: string | null }) {
+  const name = String(doc.originalName ?? '').toLowerCase()
+  const type = String(doc.fileType ?? '').toLowerCase()
+  const category = String(doc.aiCategory ?? '').toLowerCase()
+  if (type === 'scope_of_loss' || type === 'estimate' || category === 'estimate' || category === 'scope_of_loss') return true
+  if (/\b(xactimate|symbility|scope|estimate|loss|claim)\b/i.test(name)) return true
+  const data = safeJsonParse<Record<string, any>>(doc.extractedData, {})
+  return Array.isArray(data.lineItems) && data.lineItems.length > 0
+}
+
+async function isContractorCompanyName(contractorId: string, value?: string | null) {
+  const normalized = normalizeText(value)
+  if (!normalized) return false
+  const contractor = await db.contractor.findUnique({
+    where: { id: contractorId },
+    select: { name: true, company: true },
+  }).catch(() => null)
+  const profile = await getOrCreateContractorProfile(contractorId).catch(() => null)
+  const names = [
+    contractor?.name,
+    contractor?.company,
+    profile?.companyName,
+    profile?.displayName,
+    profile?.legalName,
+  ].map(normalizeText).filter(Boolean)
+  return names.some(name => name === normalized || (name.length > 4 && normalized.includes(name)) || (normalized.length > 4 && name.includes(normalized)))
 }
 
 async function replayStoredToolApproval(input: {
@@ -1057,6 +1119,160 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'save_brain_memory',
+    description: 'Save durable Jobrolo brain memory at company, customer, or project level. Use when the user says to remember/learn/save a preference, lesson, operating rule, customer context, project decision, or recurring pattern. Do NOT use this instead of operational tools for real records like customers, projects, documents, appointments, uploads, price imports, or deletes.',
+    schema: z.object({
+      layer: z.enum(['company', 'customer', 'project']).default('company'),
+      content: z.string().min(3).max(4000),
+      category: z.string().max(80).optional(),
+      source: z.enum(['ai', 'user', 'system', 'import']).optional(),
+      importance: z.number().int().min(1).max(10).optional(),
+      customerId: z.string().optional(),
+      projectId: z.string().optional(),
+      tags: z.array(z.string().max(80)).max(20).optional(),
+      reason: z.string().max(500).optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId, ctx) => {
+      const saved = await saveBrainMemory({
+        contractorId,
+        layer: args.layer,
+        content: args.content,
+        category: args.category,
+        source: args.source,
+        importance: args.importance,
+        customerId: args.customerId,
+        projectId: args.projectId,
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        userId: ctx.userId,
+        tags: args.tags,
+        reason: args.reason,
+      })
+      return {
+        success: true,
+        data: {
+          ...saved,
+          card: {
+            cardType: 'brain_memory_saved',
+            ...saved,
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'get_brain_context',
+    description: 'Retrieve saved Jobrolo brain context from company, customer, project, agent lessons, and conversation summaries. Use for “what do you remember?”, “what have we learned?”, “use our company brain”, “what should Jobrolo know about this job/customer?”, and context questions. This uses saved database memory, not chat guesswork.',
+    schema: z.object({
+      customerId: z.string().optional(),
+      projectId: z.string().optional(),
+      includeLessons: z.boolean().optional(),
+      includeSummaries: z.boolean().optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId, ctx) => {
+      const context = await getBrainContext({
+        contractorId,
+        customerId: args.customerId,
+        projectId: args.projectId,
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        includeLessons: args.includeLessons,
+        includeSummaries: args.includeSummaries,
+        limit: args.limit,
+      })
+      return {
+        success: true,
+        data: {
+          ...context,
+          card: {
+            cardType: 'brain_context',
+            counts: context.counts,
+            companyMemory: context.companyMemory.slice(0, 8),
+            customerMemory: context.customerMemory.slice(0, 8),
+            projectMemory: context.projectMemory.slice(0, 8),
+            lessons: context.lessons.slice(0, 8),
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'reflect_on_brain',
+    description: 'Reflect on saved Jobrolo brain memory and agent lessons to find patterns, risks, recommendations, missing context, and next improvements. Use for “what are we learning?”, “what should we improve?”, “how should Jobrolo adapt?”, or owner strategy/brain questions. This is not an operational mutation unless saveInsight=true.',
+    schema: z.object({
+      customerId: z.string().optional(),
+      projectId: z.string().optional(),
+      focus: z.string().max(1000).optional(),
+      saveInsight: z.boolean().optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const reflection = await reflectOnBrain({
+        contractorId,
+        customerId: args.customerId,
+        projectId: args.projectId,
+        chatId: ctx.chatId,
+        userId: ctx.userId,
+        focus: args.focus,
+        saveInsight: args.saveInsight,
+      })
+      return {
+        success: true,
+        data: {
+          ...reflection,
+          card: {
+            cardType: 'brain_reflection',
+            reflection: reflection.reflection,
+            counts: reflection.context?.counts,
+            savedInsight: reflection.savedInsight,
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'record_agent_lesson',
+    description: 'Save a durable Jobrolo agent lesson from a bug, tester note, owner correction, repeated workflow problem, or “note to Cody/Codex”. Use this when feedback should change how Jobrolo behaves next time. This is separate from normal job/customer notes.',
+    schema: z.object({
+      agentName: z.string().max(80).optional(),
+      lessonType: z.enum(['success', 'failure', 'pattern', 'preference', 'correction']).optional(),
+      trigger: z.string().min(1).max(1000),
+      action: z.string().min(1).max(1000),
+      outcome: z.string().min(1).max(1000),
+      correction: z.string().max(1000).optional(),
+      tags: z.array(z.string().max(80)).max(20).optional(),
+    }),
+    allowedChannels: 'all',
+    execute: async (args, contractorId, ctx) => {
+      const lesson = await recordBrainLesson({
+        contractorId,
+        agentName: args.agentName,
+        lessonType: args.lessonType,
+        trigger: args.trigger,
+        action: args.action,
+        outcome: args.outcome,
+        correction: args.correction,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        tags: args.tags,
+      })
+      return {
+        success: true,
+        data: {
+          ...lesson,
+          card: {
+            cardType: 'agent_lesson_saved',
+            lesson: lesson.lesson,
+          },
+        },
+      }
+    },
+  },
+  {
     name: 'update_contractor_profile',
     description: 'Update the contractor company profile from chat: company name, logo URL/document, contact info, website, address, license, brand colors, legal footer, default terms, warranty text, report/contract/estimate disclaimers. Use when the owner/admin asks to update company info. Role-limited; not for customer records.',
     schema: z.object({
@@ -1684,6 +1900,7 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId) => {
       const project = await db.project.findFirst({ where: { id: args.projectId, contractorId }, select: { id: true, customerId: true } })
       if (!project) return { success: false, data: null, error: 'Project not found' }
+      const normalizedRole = normalizeDocumentLinkRole(args.role)
       const link = await linkDocumentToJobPacket({
         contractorId,
         documentId: args.documentId,
@@ -1691,13 +1908,13 @@ export const TOOLS: ToolDef[] = [
         customerId: args.customerId ?? project.customerId ?? null,
         entityType: args.entityType,
         entityId: args.entityId ?? args.projectId,
-        role: args.role,
-        label: args.label,
+        role: normalizedRole,
+        label: args.label ?? (normalizedRole !== args.role ? args.role : undefined),
         notes: args.notes,
         source: 'ai',
       })
       if (!link) return { success: false, data: null, error: 'Document not found or does not belong to this contractor' }
-      return { success: true, data: { link } }
+      return { success: true, data: { link, role: normalizedRole, label: args.label ?? null } }
     },
   },
   {
@@ -2070,7 +2287,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_tester_feedback',
-    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "(note to Cody)", "(note to Codex)", "note for Cody", "tell Cody", or similar feedback about bugs, confusing UX, broken workflows, logs to review, or desired fixes. This is for product/dev feedback, not normal customer/job notes.',
+    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "(note to Cody)", "(note to Codex)", "hey Cody", "hey Codex", "note for Cody", "tell Cody", or similar feedback about bugs, confusing UX, broken workflows, logs to review, or desired fixes. This is for product/dev feedback, not normal customer/job notes.',
     schema: z.object({
       content: z.string().min(1).max(8000),
       source: z.enum(['note_to_cody', 'note_to_codex', 'tester_feedback']).optional(),
@@ -2117,6 +2334,22 @@ export const TOOLS: ToolDef[] = [
           capturedAt: new Date().toISOString(),
         },
       })
+      const lesson = await recordBrainLesson({
+        contractorId,
+        agentName: 'jobrolo',
+        lessonType: 'correction',
+        trigger: `Tester feedback about ${area}`,
+        action: 'Capture feedback as a product/debug note and avoid executing unrelated workflows from the note.',
+        outcome: summary,
+        correction: content,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        tags: ['tester_feedback', area, inferredSeverity],
+      }).catch(error => {
+        console.warn(`[tester-feedback] failed to record brain lesson contractorId=${contractorId}`, error)
+        return null
+      })
       console.log(`[tester-feedback] saved contractorId=${contractorId} inboxItemId=${item.id} area=${area} severity=${inferredSeverity}`)
       return {
         success: true,
@@ -2130,6 +2363,7 @@ export const TOOLS: ToolDef[] = [
             area,
             createdAt: item.createdAt,
           },
+          brainLesson: lesson?.lesson ?? null,
           card: {
             cardType: 'tester_feedback',
             title: item.title,
@@ -2905,6 +3139,207 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'create_scope_from_document',
+    description: 'Save an already-uploaded estimate/scope document as a real job scope by documentId. Use for uploaded PDFs/files and Save Scope buttons. Never pass a filename as rawText to create_scope_from_text; call this tool for saved documents.',
+    schema: z.object({
+      documentId: z.string().min(1).max(200),
+      customerId: z.string().max(200).optional(),
+      customerName: z.string().max(300).optional(),
+      projectId: z.string().max(200).optional(),
+      scopeType: z.enum(['carrier_estimate', 'scope_of_loss', 'xactimate', 'symbility', 'other']).optional(),
+      title: z.string().max(300).optional(),
+      notes: z.string().max(1000).optional(),
+    }),
+    allowedChannels: ['main', 'management', 'sales', 'insurance'],
+    execute: async (args, contractorId, ctx) => {
+      const doc = await db.document.findFirst({
+        where: { id: args.documentId, contractorId },
+        select: {
+          id: true,
+          originalName: true,
+          fileType: true,
+          aiCategory: true,
+          aiSummary: true,
+          status: true,
+          extractedData: true,
+          ocrText: true,
+          embeddedText: true,
+          visionText: true,
+          extractionConfidence: true,
+          customerId: true,
+          projectId: true,
+        },
+      })
+      if (!doc) return { success: false, data: null, error: 'Document not found.' }
+
+      if (isPriceSheetDocument(doc)) {
+        return {
+          success: true,
+          data: {
+            needsCompanyPricingReview: true,
+            documentId: doc.id,
+            fileType: doc.fileType,
+            message: `${doc.originalName} looks like a company price sheet/material price list. Review or import it through price sheet tools instead of saving it as a customer scope.`,
+          },
+        }
+      }
+
+      if (isTemplateLikeCompanyDocument(doc) && !isScopeEstimateDocument(doc)) {
+        return {
+          success: true,
+          data: {
+            needsCompanyTemplateWorkflow: true,
+            documentId: doc.id,
+            fileType: doc.fileType,
+            message: `${doc.originalName} looks like a company template/agreement document. Route it to the company template workflow instead of saving it as a customer scope.`,
+          },
+        }
+      }
+
+      const extractedData = safeJsonParse<Record<string, any>>(doc.extractedData, {})
+      const rawText = [doc.ocrText, doc.embeddedText, doc.visionText]
+        .map(value => String(value ?? '').trim())
+        .find(value => value.length >= 20) ?? ''
+      const existingLineItems = Array.isArray(extractedData.lineItems) ? extractedData.lineItems : []
+
+      if (!rawText && existingLineItems.length === 0) {
+        const stillProcessing = ['pending', 'processing', 'analyzing', 'uploaded', 'queued'].some(status => String(doc.status).toLowerCase().includes(status))
+        return {
+          success: true,
+          data: {
+            needsProcessing: true,
+            documentId: doc.id,
+            status: doc.status,
+            message: stillProcessing
+              ? 'File is saved. Analysis is still processing. You can keep working; try Save Scope again when extraction is ready.'
+              : 'File is saved, but I do not see extracted text or scope line items yet. I cannot create a fake scope from the filename.',
+          },
+        }
+      }
+
+      let customerId = args.customerId || doc.customerId || undefined
+      let projectId = args.projectId || doc.projectId || undefined
+      let customer: { id: string; name: string; email?: string | null; phone?: string | null; address?: string | null } | null = null
+      let project: { id: string; title: string; customerId: string | null; address: string | null; workspace?: { id: string } | null } | null = null
+
+      if (args.customerName && await isContractorCompanyName(contractorId, args.customerName)) {
+        return {
+          success: true,
+          data: {
+            needsClarification: true,
+            documentId: doc.id,
+            message: `${args.customerName} appears to be your contractor/company profile, not a homeowner/customer. Is this a company template/price list, or should I save it to a specific customer/job?`,
+          },
+        }
+      }
+
+      if (!customerId && args.customerName) {
+        const resolved = await resolveCustomerForTool(contractorId, { customerName: args.customerName })
+        if ('error' in resolved || 'notFound' in resolved) {
+          return { success: true, data: { needsCustomer: true, documentId: doc.id, message: `No saved customer found for ${args.customerName}. Which customer or job should this scope be saved to?` } }
+        }
+        if ('needsClarification' in resolved) {
+          return { success: true, data: { needsClarification: true, documentId: doc.id, matches: resolved.matches, message: `Multiple customers matched ${args.customerName}. Which customer should this uploaded scope attach to?` } }
+        }
+        customer = resolved.customer
+        customerId = resolved.customer.id
+      }
+
+      if (projectId) {
+        const p = await db.project.findFirst({
+          where: { id: projectId, contractorId },
+          select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } } },
+        })
+        if (!p) return { success: false, data: null, error: 'Project not found.' }
+        project = p
+        customerId = customerId ?? p.customerId ?? undefined
+      } else if (customerId) {
+        customer = customer ?? await db.customer.findFirst({ where: { id: customerId, contractorId }, select: { id: true, name: true, email: true, phone: true, address: true } })
+        if (!customer) return { success: false, data: null, error: 'Customer not found.' }
+        const projects = await db.project.findMany({
+          where: { contractorId, customerId, status: { not: 'closed' } },
+          orderBy: { updatedAt: 'desc' },
+          take: 3,
+          select: { id: true, title: true, customerId: true, address: true, workspace: { select: { id: true } } },
+        })
+        if (projects.length === 0) {
+          return { success: true, data: { needsProject: true, documentId: doc.id, customer, message: `No active project/job exists for ${customer.name}. Create or select a project before saving this uploaded scope.` } }
+        }
+        if (projects.length > 1) {
+          return { success: true, data: { needsClarification: true, documentId: doc.id, customer, projects, message: `Multiple active projects found for ${customer.name}. Which project should this uploaded scope attach to?` } }
+        }
+        project = projects[0]
+        projectId = project.id
+      } else {
+        return { success: true, data: { needsCustomer: true, documentId: doc.id, message: 'Which customer or job should this uploaded scope be saved to?' } }
+      }
+
+      if (rawText && existingLineItems.length === 0) {
+        const parsedLineItems = scopeLineItemsFromText(rawText)
+        const mergedData = {
+          ...extractedData,
+          source: 'uploaded',
+          lineItems: parsedLineItems,
+          rawLength: rawText.length,
+          reviewNotes: parsedLineItems.length ? extractedData.reviewNotes ?? [] : ['No structured line items were parsed. Review this uploaded scope manually.'],
+        }
+        await db.document.update({
+          where: { id: doc.id },
+          data: {
+            extractedData: JSON.stringify(mergedData),
+            fileType: doc.fileType === 'other' ? 'scope_of_loss' : doc.fileType,
+            aiCategory: doc.aiCategory ?? 'scope_of_loss',
+            status: parsedLineItems.length ? 'reviewed' : 'needs_review',
+          },
+        })
+      }
+
+      const updatedDocument = await db.document.update({
+        where: { id: doc.id },
+        data: {
+          customerId: customerId ?? null,
+          projectId: projectId ?? null,
+          workspaceId: project?.workspace?.id ?? null,
+          fileType: doc.fileType === 'other' ? 'scope_of_loss' : doc.fileType,
+          aiCategory: doc.aiCategory ?? 'scope_of_loss',
+        },
+      })
+
+      await linkDocumentToJobPacket({
+        contractorId,
+        documentId: doc.id,
+        projectId: projectId ?? null,
+        customerId: customerId ?? null,
+        entityType: projectId ? 'project' : 'customer',
+        entityId: projectId ?? customerId ?? doc.id,
+        role: args.scopeType ?? 'carrier_estimate',
+        label: args.title ?? doc.originalName,
+        source: 'ai',
+        confidence: typeof doc.extractionConfidence === 'number' ? doc.extractionConfidence / 100 : undefined,
+        metadata: { linkedVia: 'create_scope_from_document', notes: args.notes ?? null },
+      }).catch(err => console.warn(`[tools-v2] create_scope_from_document: document link failed for ${doc.id}:`, err))
+
+      const scope = await initScopeAnalysis(doc.id, contractorId).catch(() => null)
+      return {
+        success: true,
+        data: {
+          saved: true,
+          documentId: updatedDocument.id,
+          documentName: updatedDocument.originalName,
+          projectId,
+          customerId,
+          scopeAnalysisCreated: Boolean(scope),
+          lineItemCount: scope?.lineItems?.length ?? existingLineItems.length,
+          selectedRcv: scope?.selectedRcv ?? null,
+          retrievable: true,
+          message: scope
+            ? `Saved ${doc.originalName} as a job scope with ${scope.lineItems.length} line item(s).`
+            : `Linked ${doc.originalName} to the job file. Scope analysis needs review because structured line items were not available.`,
+        },
+      }
+    },
+  },
+  {
     name: 'create_scope_from_text',
     description: 'Save pasted scope/estimate text as a real Document and ScopeAnalysis linked to a customer/project. Use when the user pastes scope text and asks to save it, create a scope breakdown, or attach it to a customer/job file.',
     schema: z.object({
@@ -2917,12 +3352,30 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: ['main', 'management', 'sales', 'insurance'],
     execute: async (args, contractorId, ctx) => {
+      if (looksLikeDocumentReference(args.rawText)) {
+        return {
+          success: true,
+          data: {
+            needsDocumentTool: true,
+            message: 'That looks like a filename or document reference, not pasted scope text. Use create_scope_from_document with the saved documentId instead of passing the filename as rawText.',
+          },
+        }
+      }
       let customerId = args.customerId || undefined
       let projectId = args.projectId || undefined
       let customer: { id: string; name: string; address: string | null } | null = null
       let project: { id: string; title: string; customerId: string | null; address: string | null } | null = null
 
       if (!customerId && args.customerName) {
+        if (await isContractorCompanyName(contractorId, args.customerName)) {
+          return {
+            success: true,
+            data: {
+              needsClarification: true,
+              message: `${args.customerName} appears to be your contractor/company profile, not a homeowner/customer. Should this be saved as a company template/price list, or attached to a specific customer/job?`,
+            },
+          }
+        }
         const customerQuery = normalizeCustomerFileQuery(args.customerName) || args.customerName
         const matches = await db.customer.findMany({
           where: { contractorId, name: containsInsensitive(customerQuery) },
@@ -3260,6 +3713,16 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
+      if (await isContractorCompanyName(contractorId, args.customerName)) {
+        return {
+          success: true,
+          data: {
+            needsClarification: true,
+            customerName: args.customerName,
+            message: `${args.customerName} appears to be your contractor/company profile, not a homeowner/customer. If this upload is a company logo, profile document, template, agreement, or price list, use the company profile/template/pricing workflow instead. If it belongs to a homeowner, tell me the customer/job name.`,
+          },
+        }
+      }
       let doc = args.documentId
         ? await db.document.findFirst({ where: { id: args.documentId, contractorId } })
         : null

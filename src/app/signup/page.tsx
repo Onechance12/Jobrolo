@@ -622,7 +622,7 @@ export default function SignupPage() {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-emerald-300/15 bg-emerald-500/10 p-3 text-xs leading-relaxed text-emerald-100">
-                  You can also type it naturally, like: “My name is Frank Thomas and I’m joining Sons Roofing. My invite code is …”
+                  You can also type it naturally, like: “My name is [your name] and I’m joining my roofing company. My invite code is …”
                 </div>
                 <div className="mt-4">
                   <Label htmlFor="invite-code" className="text-slate-200">Invite link or one-time code</Label>

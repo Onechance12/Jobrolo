@@ -28,40 +28,36 @@ export function FieldEntryStrip({ workspace, onOpenFieldCopilot, onSendPrompt, o
   const project = workspace?.project
   const projectId = workspace?.projectId ?? project?.id
   if (!projectId || !project) return null
+  const projectTitle = project.title
 
   async function markArrived() {
     setArriving(true)
     setStatus(null)
     try {
       const location = await getCurrentLocation().catch(() => null)
-      const res = await fetch(`/api/projects/${projectId}/field-copilot/actions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'arrived',
-          mode: 'field',
-          location: location ?? undefined,
-        }),
-      })
-      if (!res.ok) throw new Error('Could not log arrival')
+      const locationBlock = location ? browserLocationBlock(location) : ''
+      onSendPrompt?.(
+        `I'm here at ${projectTitle}. Log my arrival to the job timeline, attach this GPS if available, and tell me what saved.${locationBlock}`,
+      )
       onFieldEvent?.({
-        action: 'arrived',
-        title: `Arrived — ${project!.title}`,
-        summary: location ? 'Arrival logged with GPS and added to the job timeline.' : 'Arrival logged and added to the job timeline.',
+        action: 'arrival_prompt_drafted',
+        title: `Arrival prompt — ${projectTitle}`,
+        summary: location ? 'Arrival prompt drafted with GPS.' : 'Arrival prompt drafted. GPS was unavailable or skipped.',
         mode: 'field',
       })
-      setStatus(location ? 'Arrival logged with GPS.' : 'Arrival logged. GPS was unavailable or skipped.')
+      setStatus(location ? 'Drafted arrival prompt with GPS.' : 'Drafted arrival prompt. GPS was unavailable or skipped.')
     } catch {
-      setStatus('Could not log arrival. Try again or tell Jobrolo you arrived.')
+      onSendPrompt?.(`I'm here at ${projectTitle}. Log my arrival to the job timeline and tell me what saved.`)
+      setStatus('Drafted arrival prompt without GPS.')
     } finally {
       setArriving(false)
     }
   }
 
-  const fieldPrompt = `Open the field briefing for ${project.title}. Tell me what matters before I walk up, what is missing, what documents are pending, and what I should log next.`
-  const materialPrompt = `Crew/field update for ${project.title}: I need extra material. Ask me for material, quantity, reason, and photos if needed, then create the right material request for PM approval.`
-  const signingPrompt = `I am at ${project.title} for signing. Show pending signature documents, explain what should be signed, and help me log the outcome.`
-  const productionPrompt = `Production update for ${project.title}. Show crew/material/scope notes and help me log any issue, extra material, completion item, or customer concern.`
+  const fieldPrompt = `Open the field briefing for ${projectTitle}. Tell me what matters before I walk up, what is missing, what documents are pending, and what I should log next.`
+  const materialPrompt = `Crew/field update for ${projectTitle}: I need extra material. Ask me for material, quantity, reason, and photos if needed, then create the right material request for PM approval.`
+  const signingPrompt = `I am at ${projectTitle} for signing. Show pending signature documents, explain what should be signed, and help me log the outcome.`
+  const productionPrompt = `Production update for ${projectTitle}. Show crew/material/scope notes and help me log any issue, extra material, completion item, or customer concern.`
   const openInspectionPhotos = (section?: string) => {
     window.dispatchEvent(new CustomEvent('jobrolo:open-inspection-photo-intake', { detail: { section } }))
   }
@@ -106,6 +102,10 @@ function FieldPill({ icon, label, onClick, disabled }: { icon: ReactNode; label:
       {label}
     </button>
   )
+}
+
+function browserLocationBlock(location: LocationPayload) {
+  return `\n\n[BROWSER_LOCATION]\nlatitude: ${location.lat}\nlongitude: ${location.lng}\naccuracyMeters: ${Math.round(Number(location.accuracyMeters || 0))}\nsource: ${location.source}\ncapturedAt: ${new Date().toISOString()}\nUse this location for this field/jobsite action.`
 }
 
 function getCurrentLocation(): Promise<LocationPayload> {

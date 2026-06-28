@@ -43,21 +43,11 @@ export function FieldCopilotDrawer({ open, onOpenChange, projectId, appointmentI
     setActionLoading(action.key)
     try {
       const position = await getCurrentPosition().catch(() => null)
-      const res = await fetch(`/api/projects/${projectId}/field-copilot/actions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: action.key,
-          appointmentId,
-          fieldVisitId: briefing?.activeVisit?.id,
-          location: position ? { lat: position.coords.latitude, lng: position.coords.longitude, accuracyMeters: position.coords.accuracy, source: 'browser_gps' } : undefined,
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setBriefing(data?.briefing ?? data?.briefing?.briefing ?? data?.result?.briefing ?? data?.briefing ?? null)
-        if (data?.briefing) setBriefing(data.briefing)
-      }
+      const locationBlock = position ? `\n\n[BROWSER_LOCATION]\nlatitude: ${position.coords.latitude}\nlongitude: ${position.coords.longitude}\naccuracyMeters: ${Math.round(position.coords.accuracy)}\nsource: browser_gps\ncapturedAt: ${new Date().toISOString()}\nUse this location for this field/jobsite action.` : ''
+      insertJobroloPrompt(
+        `Run this field action in chat: ${action.label}. Project ID: ${projectId}. Appointment ID: ${appointmentId || 'unknown'}. Field visit ID: ${briefing?.activeVisit?.id || 'unknown'}. Tell me what will be saved, then save it if safe.${locationBlock}`,
+      )
+      onOpenChange(false)
     } finally {
       setActionLoading(null)
     }
@@ -91,6 +81,11 @@ export function FieldCopilotDrawer({ open, onOpenChange, projectId, appointmentI
       </DrawerContent>
     </Drawer>
   )
+}
+
+function insertJobroloPrompt(text: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
 }
 
 function getCurrentPosition(): Promise<GeolocationPosition> {

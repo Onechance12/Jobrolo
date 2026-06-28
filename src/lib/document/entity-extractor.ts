@@ -101,7 +101,7 @@ export function extractEntities(text: string): ExtractedEntities {
   }
 
   // ----- Insured name (homeowner) -----
-  // "Insured: John Smith" / "Insured Name: Jane Doe"
+  // "Insured: Example Customer" / "Insured Name: Example Customer"
   const insuredM = text.match(/insured(?:\s+name)?\s*[:]\s*([A-Z][a-zA-Z\s\-\.]{2,40})/)
   if (insuredM) {
     const name = insuredM[1].trim().replace(/\s+(?:Property|Address|Claim|Policy|Date).*/i, '')

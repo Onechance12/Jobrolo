@@ -992,7 +992,6 @@ function ActionNeededMenu({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
-  const [busyDecisionId, setBusyDecisionId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const hiddenStatuses = new Set(['actioned', 'archived', 'completed', 'rejected', 'cancelled'])
 
@@ -1053,26 +1052,16 @@ function ActionNeededMenu({
     await onRefresh()
   }
 
-  async function decide(item: ActionNeededItem, decision: 'approved' | 'rejected') {
+  function decide(item: ActionNeededItem, decision: 'approved' | 'rejected') {
     if (!item.actionRequestId) return
-    setBusyDecisionId(`${item.id}:${decision}`)
-    setMessage(null)
-    try {
-      const res = await fetch(`/api/action-requests/${item.actionRequestId}/decision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(String(data?.error || 'Decision failed'))
-      setMessage(decision === 'approved' ? 'Approved. If this action can run now, Jobrolo is running it.' : 'Rejected. Jobrolo will not run this action.')
-      saveDismissed(new Set([...dismissedIds, item.id]))
-      await onRefresh()
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Could not update this request.')
-    } finally {
-      setBusyDecisionId(null)
-    }
+    const verb = decision === 'approved' ? 'Approve' : 'Reject'
+    const safety = decision === 'approved'
+      ? 'Show me exactly what will happen first, then run it only if it is still pending and safe.'
+      : 'Show me exactly what this request is, then reject it if it is still pending.'
+    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', {
+      detail: { text: `${verb} action request ${item.actionRequestId}. ${safety}` },
+    }))
+    onClose()
   }
 
   function openItem(item: ActionNeededItem) {
@@ -1175,12 +1164,12 @@ function ActionNeededMenu({
                     ) : null}
                     {item.actionRequestId ? (
                       <>
-                        <Button size="sm" disabled={!!busyDecisionId} onClick={() => decide(item, 'approved')}>
-                          {busyDecisionId === `${item.id}:approved` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+                        <Button size="sm" onClick={() => decide(item, 'approved')}>
+                          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                           Approve
                         </Button>
-                        <Button size="sm" variant="outline" disabled={!!busyDecisionId} onClick={() => decide(item, 'rejected')}>
-                          {busyDecisionId === `${item.id}:rejected` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-1.5 h-3.5 w-3.5" />}
+                        <Button size="sm" variant="outline" onClick={() => decide(item, 'rejected')}>
+                          <XCircle className="mr-1.5 h-3.5 w-3.5" />
                           Reject
                         </Button>
                       </>

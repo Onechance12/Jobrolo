@@ -169,6 +169,11 @@ export async function openAIWebSearch(prompt: string, opts: OpenAIWebSearchOptio
 
     if (!res.ok) {
       const error = `OpenAI web search error ${res.status}: ${textBody.slice(0, 500)}`
+      console.warn('[web-search] openai error', {
+        model,
+        status: res.status,
+        errorPreview: textBody.slice(0, 500),
+      })
       await logAIUsage({
         contractorId: opts.contractorId,
         userId: opts.userId,

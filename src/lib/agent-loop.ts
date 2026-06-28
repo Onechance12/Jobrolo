@@ -5,6 +5,9 @@
 import { chatComplete, type ChatMessage } from '@/lib/ai'
 import { executeTool, getToolDefinitions, isToolAllowedInChannel } from '@/lib/agent/tools-v2'
 import { parseAIResponse, type ParsedAIResponse, type ToolCall } from '@/lib/prompts'
+import { buildSkillRoutingContext } from '@/lib/skills/context'
+import { selectSkills } from '@/lib/skills/select-skill'
+import { renderSkillInstructions } from '@/lib/skills/render-skill-instructions'
 import type { ChannelType } from '@/lib/types'
 
 export interface AgentIteration {
@@ -141,6 +144,15 @@ function looksLikePlaceholder(value: string, key: string) {
   return false
 }
 
+function looksLikeDocumentReferenceArg(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  if (/^[\w ().-]+\.(pdf|docx?|txt|csv|xlsx?|png|jpe?g|webp)$/i.test(trimmed)) return true
+  if (/^[a-z0-9_-]{20,}$/i.test(trimmed) && !/\s/.test(trimmed)) return true
+  if (/\bdocumentId\b/i.test(trimmed) && trimmed.length < 160) return true
+  return false
+}
+
 function sanitizeToolArgs(value: unknown, path = 'args'): { value: unknown; removed: string[]; invalid?: string } {
   if (typeof value === 'string') {
     const key = path.split('.').pop() ?? ''
@@ -254,6 +266,8 @@ function isInternalAgentInstruction(text: string) {
     clean.startsWith('The latest user reply') ||
     clean.startsWith('A recent assistant message asked') ||
     clean.startsWith('The user asked:') ||
+    clean.startsWith('Selected Jobrolo skills for this turn:') ||
+    clean.startsWith('JOBROLO SELECTED SKILLS') ||
     clean.includes('Common recovery examples:') ||
     clean.includes('Respond as JSON only.')
   )
@@ -524,7 +538,7 @@ Only say linked/attached after the tool result confirms success. Respond as JSON
 
 function isPriceSheetReviewRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
-  if (!/\b(price\s*sheet|supplier|material|materials|unit price|unit and price|pending import|imported|first\s+\d+\s+(?:rows|items))\b/.test(lower)) return false
+  if (!/\b(price\s*(?:sheet|list)|supplier|material|materials|unit price|unit and price|pending import|imported|first\s+\d+\s+(?:rows|items))\b/.test(lower)) return false
   if (/\b(delete|detach|remove|unassign|clear|replace|import these|import them|import rows|import items)\b/.test(lower)) return false
   return /\b(review|show|list|tell me|first|rows|items|unit|price|pending|imported|saved)\b/.test(lower)
 }
@@ -571,6 +585,8 @@ function testerFeedbackFromText(text: string): { content: string; source: 'note_
   if (!clean) return null
   const marker = clean.match(/^\s*\(?\s*note\s+to\s+(cody|codex)\s*\)?\s*[:\-–—]?\s*/i)
     ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(cody|codex)\s*[:\-–—]?\s*/i)
+    ?? clean.match(/^\s*(?:tell|send|save)\s+(cody|codex)\s+(?:this\s+)?[:\-–—]?\s*/i)
+    ?? clean.match(/^\s*\(?\s*hey\s+(cody|codex)\s*\)?\s*[:,\-–—]?\s*/i)
   if (!marker) return null
   const audience = String(marker[1] || '').toLowerCase()
   const content = clean.slice(marker[0].length).trim()
@@ -625,6 +641,51 @@ function testerFeedbackFollowUpText(feedback: { content: string; source: 'note_t
   }
 
   return `Captured that note for ${audience}. ${workaround}`
+}
+
+function toolResultCardPayload(data: unknown): { contextType: string; contextData: Record<string, unknown> } | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const record = data as Record<string, unknown>
+  const nestedCard = record.card
+  if (nestedCard && typeof nestedCard === 'object' && !Array.isArray(nestedCard)) {
+    const nested = nestedCard as Record<string, unknown>
+    const nestedType = typeof nested.cardType === 'string'
+      ? nested.cardType
+      : typeof nested.type === 'string'
+        ? nested.type
+        : null
+    if (nestedType) return { contextType: nestedType, contextData: nested }
+  }
+  const contextData = record.contextData
+  const contextType = typeof record.contextType === 'string' ? record.contextType : null
+  if (contextType && contextData && typeof contextData === 'object' && !Array.isArray(contextData)) {
+    return { contextType, contextData: contextData as Record<string, unknown> }
+  }
+  const rawType = typeof record.type === 'string' ? record.type : ''
+  const cardType = typeof record.cardType === 'string'
+    ? record.cardType
+    : rawType && (
+        rawType.includes('_card') ||
+        rawType.includes('scope_') ||
+        rawType.includes('company_') ||
+        rawType.includes('customer_') ||
+        rawType.includes('field_') ||
+        rawType.includes('report_')
+      )
+      ? rawType
+      : null
+  if (!cardType) return null
+  return { contextType: cardType, contextData: record }
+}
+
+function attachToolCardFallback(response: ParsedAIResponse, card: { contextType: string; contextData: Record<string, unknown> } | null): ParsedAIResponse {
+  if (!card || response.contextType || response.contextData) return response
+  console.log(`[agent-loop] attached deterministic card payload contextType=${card.contextType}`)
+  return {
+    ...response,
+    contextType: card.contextType,
+    contextData: card.contextData,
+  }
 }
 
 function isFieldInspectionLeadRequest(text: string) {
@@ -1044,6 +1105,19 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const messages = [...opts.messages]
   const latestUserAtStart = lastExternalUserMessage(messages)
   const activeTesterFeedback = latestUserAtStart ? testerFeedbackFromText(plainMessageText(latestUserAtStart.message.content)) : null
+  if (latestUserAtStart) {
+    const skillContext = buildSkillRoutingContext({
+      latestText: plainMessageText(latestUserAtStart.message.content),
+      documentIds: opts.documentIds,
+    })
+    const skillSelections = selectSkills(skillContext)
+    const skillInstruction = renderSkillInstructions(skillSelections, skillContext)
+    if (skillInstruction) {
+      const insertAt = Math.max(0, messages.length - 1)
+      console.log(`[agent-loop] selected skills contractorId=${opts.contractorId} skills=${skillSelections.map(s => s.skill.id).join(',')}`)
+      messages.splice(insertAt, 0, { role: 'system', content: skillInstruction })
+    }
+  }
   const continuationInstruction = buildAffirmativeContinuationInstruction(messages) ?? buildUploadLinkContinuationInstruction(messages)
   if (continuationInstruction) {
     const insertAt = Math.max(0, messages.length - 1)
@@ -1060,6 +1134,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let totalToolCalls = 0
   let lastBlockedReason: string | null = null
   let testerFeedbackSaved = false
+  let lastToolCard: { contextType: string; contextData: Record<string, unknown> } | null = null
   const injectedDeterministicToolCalls = new Set<string>()
 
   for (let i = 0; i < maxIterations; i++) {
@@ -1154,6 +1229,47 @@ Respond as JSON only.`,
       }
     }
 
+    // Uploaded estimates/scopes are saved documents, not pasted raw text.
+    // If the model tries the old failure path (create_scope_from_text with a PDF filename/document id),
+    // reroute to the document-aware scope tool when the current upload context provides a real documentId.
+    if (toolCalls.some(tc => tc.name === 'create_scope_from_text')) {
+      const rerouted: typeof toolCalls = []
+      for (const tc of toolCalls) {
+        const rawText = tc.name === 'create_scope_from_text' && typeof tc.args?.rawText === 'string' ? tc.args.rawText : ''
+        if (!rawText || !looksLikeDocumentReferenceArg(rawText)) {
+          rerouted.push(tc)
+          continue
+        }
+
+        const args = tc.args ?? {}
+        const explicitDocumentId = typeof args.documentId === 'string' ? args.documentId : undefined
+        const contextDocumentId = opts.documentIds?.length === 1 ? opts.documentIds[0] : undefined
+        const documentId = explicitDocumentId || contextDocumentId
+
+        if (!documentId) {
+          const error = 'Invalid tool args: rawText appears to be a filename or document reference. Use create_scope_from_document with a saved documentId instead.'
+          console.warn(`[agent-loop] blocked filename rawText for create_scope_from_text contractorId=${opts.contractorId}`)
+          blockedToolResults.push({ name: tc.name, success: false, data: null, error })
+          lastBlockedReason = error
+          continue
+        }
+
+        console.warn(`[agent-loop] rerouted filename rawText from create_scope_from_text to create_scope_from_document contractorId=${opts.contractorId} documentId=${documentId}`)
+        rerouted.push({
+          name: 'create_scope_from_document',
+          args: {
+            documentId,
+            customerId: args.customerId,
+            customerName: args.customerName,
+            projectId: args.projectId,
+            title: args.title,
+            notes: 'Rerouted from create_scope_from_text because rawText was a document filename/reference.',
+          },
+        })
+      }
+      toolCalls = rerouted
+    }
+
     // Filter out tools not allowed in this channel (security: per-channel permissioning)
     if (opts.channelType) {
       toolCalls = toolCalls.filter(tc => {
@@ -1215,10 +1331,27 @@ Respond as JSON only.`,
         if (tc.name === 'record_tester_feedback' && result.success) {
           testerFeedbackSaved = true
         }
+        if (result.success) {
+          const card = toolResultCardPayload(result.data)
+          if (card) lastToolCard = card
+        }
         totalToolCalls++
       }
       iteration.toolResults = results
       opts.onIteration?.(iteration)
+      if (activeTesterFeedback && toolCalls.some(tc => tc.name === 'record_tester_feedback')) {
+        const feedbackResult = results.find(r => r.name === 'record_tester_feedback')
+        const finalText = feedbackResult?.success
+          ? testerFeedbackFollowUpText(activeTesterFeedback)
+          : `I tried to capture that note for ${activeTesterFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}, but it did not save. ${feedbackResult?.error ? `Error: ${feedbackResult.error}` : 'Please try again with “hey Cody:” and the bug details.'}`
+        iterations.push(iteration)
+        console.log(`[agent-loop] tester feedback turn ended after feedback tool contractorId=${opts.contractorId} success=${Boolean(feedbackResult?.success)}`)
+        return {
+          final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+          iterations,
+          totalToolCalls,
+        }
+      }
       messages.push({ role: 'assistant', content: JSON.stringify({ text: parsed.text, tool_calls: toolCalls, final: false }) })
       const toolResultsFormatted = results.map(r =>
         `TOOL RESULT: ${r.name}\n${r.success ? JSON.stringify(r.data, null, 2).slice(0, 3000) : `ERROR: ${r.error}`}`
@@ -1250,9 +1383,10 @@ Respond as JSON only.`,
         console.log(`[agent-loop] final answer without mutation contractorId=${opts.contractorId} toolCalls=0 actions=${parsedActionCount}`)
         if (totalToolCalls > 0) console.log(`[agent-loop] final answer based on tool results contractorId=${opts.contractorId}`)
       }
+      const final = totalToolCalls > 0 ? attachToolCardFallback(parsed, lastToolCard) : parsed
       opts.onIteration?.(iteration)
       iterations.push(iteration)
-      return { final: parsed, iterations, totalToolCalls }
+      return { final, iterations, totalToolCalls }
     }
   }
   const fallback: ParsedAIResponse = {

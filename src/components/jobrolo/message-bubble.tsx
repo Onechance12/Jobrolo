@@ -22,13 +22,50 @@ export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Prop
   const isUser = message.role === 'user'
   const content = isUser ? message.content : stripJsonWrapper(message.content)
   const cardType = String((message.contextData as any)?.cardType || (message.contextData as any)?.type || message.contextType || '').toLowerCase()
-  const preferStructuredCard = !isUser && (cardType.includes('company_profile') || cardType.includes('company_research') || cardType.includes('customer_file')) && content.length > 180
+  const structuredOnlyCard = (
+    cardType.includes('company_profile') ||
+    cardType.includes('company_research') ||
+    cardType.includes('company_intelligence') ||
+    cardType.includes('customer_file') ||
+    cardType.includes('scope_breakdown') ||
+    cardType.includes('document_review') ||
+    cardType.includes('document_link_review') ||
+    cardType.includes('action_center') ||
+    cardType.includes('report_photo_picker') ||
+    cardType.includes('roof_report') ||
+    cardType.includes('report_share') ||
+    cardType.includes('field_inspection_lead') ||
+    cardType.includes('property_research') ||
+    cardType.includes('canvassing_lead') ||
+    cardType.includes('canvassing_session') ||
+    cardType.includes('property_memory') ||
+    cardType.includes('property_observation') ||
+    cardType.includes('door_attempt') ||
+    cardType.includes('schedule_calendar') ||
+    cardType.includes('created_chat') ||
+    cardType.includes('chat_invite')
+  )
+  const preferStructuredCard = !isUser && structuredOnlyCard && content.length > 180
   const visibleContent = preferStructuredCard
     ? cardType.includes('company_research')
       ? 'I found company profile suggestions. Review the card below and tell me what to save or change.'
-      : cardType.includes('customer_file')
-        ? 'Here’s the saved customer file.'
-        : 'Here’s the saved company profile.'
+      : cardType.includes('company_intelligence')
+        ? 'Here’s the company intelligence snapshot.'
+        : cardType.includes('customer_file')
+          ? 'Here’s the saved customer file.'
+          : cardType.includes('scope_breakdown')
+            ? 'Here’s the saved scope breakdown.'
+            : cardType.includes('action_center')
+              ? 'Here’s what needs attention.'
+              : cardType.includes('field_inspection_lead')
+                ? 'Here’s the field inspection lead.'
+                : cardType.includes('roof_report')
+                  ? 'Here’s the roof report workspace.'
+                  : cardType.includes('created_chat') || cardType.includes('chat_invite')
+                    ? 'Here’s the shared chat.'
+                    : cardType.includes('company_profile')
+                      ? 'Here’s the saved company profile.'
+                      : 'Here’s the card.'
     : content
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>

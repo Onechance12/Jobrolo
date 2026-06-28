@@ -7,6 +7,7 @@ import { MAX_FILES_PER_UPLOAD, validateUpload, safeFilename } from '@/lib/securi
 import { enqueueAgentJob, kickAgentJob } from '@/lib/jobs/queue'
 import { toFileUrl } from '@/lib/file-url'
 import { resolveFieldEntity } from '@/lib/field-copilot'
+import { classifyUploadForSkills } from '@/lib/skills/context'
 import { v4 as uuidv4 } from 'uuid'
 
 export const runtime = 'nodejs'
@@ -15,25 +16,7 @@ export const maxDuration = 60
 const MULTIPART_MAX_BYTES = MAX_FILES_PER_UPLOAD * 25 * 1024 * 1024
 
 function fileTypeFor(name: string, mimeType: string): string {
-  const lower = name.toLowerCase()
-  if (mimeType.startsWith('image/')) return 'photo'
-  if (mimeType === 'application/pdf') {
-    if (/estimate|xactimate|scope/.test(lower)) return lower.includes('scope') ? 'scope_of_loss' : 'estimate'
-    if (/contract|agreement|authorization/.test(lower)) return 'contract'
-    if (/invoice/.test(lower)) return 'invoice'
-    if (/claim|insurance|carrier/.test(lower)) return 'insurance_claim'
-    if (/permit/.test(lower)) return 'permit'
-    if (/price|pricing|material/.test(lower)) return 'price_sheet'
-    return 'pdf'
-  }
-  if (/estimate|xactimate/.test(lower)) return 'estimate'
-  if (/scope/.test(lower)) return 'scope_of_loss'
-  if (/price|pricing|material/.test(lower)) return 'price_sheet'
-  if (/contract|agreement|authorization/.test(lower)) return 'contract'
-  if (/invoice/.test(lower)) return 'invoice'
-  if (/claim|insurance|carrier/.test(lower)) return 'insurance_claim'
-  if (/permit/.test(lower)) return 'permit'
-  return 'other'
+  return classifyUploadForSkills({ filename: name, mimeType }).fileType
 }
 
 function statusFor(fileType: string) {
@@ -49,7 +32,7 @@ function storageKeyPrefix(input: { contractorId: string; documentId: string; pro
 }
 
 function isCompanyLevelUpload(uploadPurpose: string) {
-  return ['company_logo', 'company_pricing', 'company_document', 'company_profile', 'user_avatar'].includes(uploadPurpose)
+  return ['company_logo', 'company_pricing', 'company_document', 'company_profile', 'company_template', 'template_library', 'user_avatar'].includes(uploadPurpose)
 }
 
 function isSimpleProfileAsset(fileType: string) {
@@ -155,6 +138,9 @@ export async function POST(req: NextRequest) {
       avatarUrl?: string | null
       companyLogoUrl?: string | null
       locationResolution?: unknown
+      storageScope?: string
+      skillRoute?: string
+      skillIds?: string[]
     }> = []
 
     for (const file of files) {
@@ -165,6 +151,18 @@ export async function POST(req: NextRequest) {
 
       const mimeType = validation.detectedMime || file.type || 'application/octet-stream'
       const documentId = uuidv4()
+      const classification = classifyUploadForSkills({
+        filename: originalName,
+        mimeType,
+        uploadPurpose,
+        suggestedUploadPurpose,
+        uploadIntentSource,
+        photoSection,
+        photoSectionLabel,
+        hasCustomerContext: Boolean(customerId),
+        hasProjectContext: Boolean(projectId),
+        hasWorkspaceContext: Boolean(workspaceId),
+      })
       const detectedFileType = fileTypeFor(originalName, mimeType)
       const fileType = uploadPurpose === 'company_logo'
         ? 'company_logo'
@@ -172,11 +170,12 @@ export async function POST(req: NextRequest) {
           ? 'user_avatar'
           : uploadPurpose === 'company_pricing'
             ? 'price_sheet'
-            : detectedFileType
-      const shouldStoreAsCompanyPricing = fileType === 'price_sheet'
-      const documentWorkspaceId = shouldStoreAsCompanyPricing ? undefined : workspaceId
-      const documentProjectId = shouldStoreAsCompanyPricing ? undefined : projectId
-      const documentCustomerId = shouldStoreAsCompanyPricing ? undefined : customerId
+            : classification.fileType || detectedFileType
+      const shouldStoreAsCompanyPricing = classification.storageScope === 'company_pricing' || fileType === 'price_sheet'
+      const shouldStoreAsCompanyLevel = classification.companyLevel || shouldStoreAsCompanyPricing || isSimpleProfileAsset(fileType)
+      const documentWorkspaceId = shouldStoreAsCompanyLevel ? undefined : workspaceId
+      const documentProjectId = shouldStoreAsCompanyLevel ? undefined : projectId
+      const documentCustomerId = shouldStoreAsCompanyLevel ? undefined : customerId
       const saved = await saveUpload({
         name: originalName,
         type: mimeType,
@@ -184,7 +183,7 @@ export async function POST(req: NextRequest) {
         data,
         storageKeyPrefix: storageKeyPrefix({ contractorId: ctx.contractorId, documentId, projectId: documentProjectId, customerId: documentCustomerId }),
       })
-      const uploadContext = uploadPurpose || suggestedUploadPurpose || uploadIntentSource || photoSection || photoSectionLabel || shouldStoreAsCompanyPricing
+      const uploadContext = uploadPurpose || suggestedUploadPurpose || uploadIntentSource || photoSection || photoSectionLabel || shouldStoreAsCompanyPricing || classification.companyLevel || classification.needsClarification
         ? {
             uploadContext: {
               uploadPurpose: uploadPurpose || (shouldStoreAsCompanyPricing ? 'company_pricing' : null),
@@ -196,6 +195,12 @@ export async function POST(req: NextRequest) {
               captureLocation,
               capturedFrom: 'chat_input',
               companyPricingDefault: shouldStoreAsCompanyPricing,
+              skillIds: classification.skillIds,
+              skillStorageScope: classification.storageScope,
+              skillRoute: classification.route,
+              skillConfidence: classification.confidence,
+              documentType: classification.documentType,
+              classificationReason: classification.reason,
             },
           }
         : captureLocation
@@ -203,6 +208,12 @@ export async function POST(req: NextRequest) {
               uploadContext: {
                 captureLocation,
                 capturedFrom: 'chat_input',
+                skillIds: classification.skillIds,
+                skillStorageScope: classification.storageScope,
+                skillRoute: classification.route,
+                skillConfidence: classification.confidence,
+                documentType: classification.documentType,
+                classificationReason: classification.reason,
               },
             }
         : null
@@ -233,7 +244,7 @@ export async function POST(req: NextRequest) {
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
 
       let appliedAvatarUrl: string | null = null
-      if (fileType === 'user_avatar') {
+      if (uploadPurpose === 'user_avatar') {
         appliedAvatarUrl = thumbnailUrl(saved) || toFileUrl(document.filePath)
         await db.user.update({
           where: { id: ctx.user.id },
@@ -243,7 +254,7 @@ export async function POST(req: NextRequest) {
       }
 
       let appliedCompanyLogoUrl: string | null = null
-      if (fileType === 'company_logo') {
+      if (uploadPurpose === 'company_logo') {
         appliedCompanyLogoUrl = toFileUrl(document.filePath)
         await db.contractorProfile.upsert({
           where: { contractorId: ctx.contractorId },
@@ -269,7 +280,7 @@ export async function POST(req: NextRequest) {
       }
 
       let locationResolution: unknown = undefined
-      if (!companyLevelUpload && !shouldStoreAsCompanyPricing && captureLocation) {
+      if (!companyLevelUpload && !shouldStoreAsCompanyLevel && captureLocation) {
         try {
           locationResolution = await resolveFieldEntity(ctx, {
             documentId: document.id,
@@ -321,11 +332,16 @@ export async function POST(req: NextRequest) {
         ...(appliedAvatarUrl ? { avatarUrl: appliedAvatarUrl } : {}),
         ...(appliedCompanyLogoUrl ? { companyLogoUrl: appliedCompanyLogoUrl } : {}),
         ...(locationResolution ? { locationResolution } : {}),
+        storageScope: classification.storageScope,
+        skillRoute: classification.route,
+        skillIds: classification.skillIds,
       })
     }
 
     const companyPricingUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => d.fileType === 'price_sheet')
-    const needsLink = !companyLevelUpload && !companyPricingUpload && !customerId && !projectId && !workspaceId
+    const companyTemplateUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => d.storageScope === 'company_template')
+    const companyAssetUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => ['brand_asset', 'user_profile', 'company_profile'].includes(d.storageScope || ''))
+    const needsLink = !companyLevelUpload && !companyPricingUpload && !companyTemplateUpload && !companyAssetUpload && !customerId && !projectId && !workspaceId
     return NextResponse.json({
       documents,
       ...(companyPricingUpload ? {
@@ -339,6 +355,32 @@ export async function POST(req: NextRequest) {
           filenames: documents.map(d => d.originalName),
           fileTypes: documents.map(d => d.fileType),
           uploadPurpose: 'company_pricing',
+        },
+      } : companyTemplateUpload ? {
+        needsLink: false,
+        deferLinkPrompt: true,
+        suggestedPrompt: documents.length === 1
+          ? 'Saved this as a company template candidate. Do you want me to turn it into a reusable Jobrolo template?'
+          : `Saved ${documents.length} company template candidates. Tell me which ones should become reusable Jobrolo templates.`,
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+          uploadPurpose: 'company_template',
+        },
+      } : companyAssetUpload ? {
+        needsLink: false,
+        deferLinkPrompt: true,
+        suggestedPrompt: documents.some(d => d.fileType === 'company_logo')
+          ? 'Saved this as a company logo candidate. Do you want me to update the company profile logo with it?'
+          : documents.some(d => d.fileType === 'user_avatar')
+            ? 'Saved this as a profile photo candidate. Do you want me to update your account avatar with it?'
+            : 'Saved this as a company/profile asset. I’ll keep it out of customer files unless you ask me to attach it.',
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+          uploadPurpose: documents.find(d => d.fileType === 'company_logo') ? 'company_logo_candidate' : 'profile_asset_candidate',
         },
       } : {}),
       ...(companyLevelUpload ? {

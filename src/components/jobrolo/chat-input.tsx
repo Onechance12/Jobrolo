@@ -617,7 +617,7 @@ function uploadPromptGroupsFor(mode: 'command' | 'field', files: File[]): Prompt
   const fileSummary = describePendingUpload(files)
   const hasImage = files.some(file => file.type.startsWith('image/'))
   const hasPdf = files.some(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
-  const maybePriceSheet = files.some(file => /price|material|supply|supplier|abc|qxo|texas direct|price[-_\s]?list/i.test(file.name))
+  const maybePriceSheet = files.some(file => /price|material|supply|supplier|catalog|cost[-_\s]?sheet|price[-_\s]?list/i.test(file.name))
   const maybeScope = files.some(file => /scope|estimate|claim|xact|loss|roof/i.test(file.name)) || hasPdf
 
   const uploadReview: PromptGroup = {
@@ -640,7 +640,7 @@ function uploadPromptGroupsFor(mode: 'command' | 'field', files: File[]): Prompt
     shortcuts: [
       makeCommandShortcut('Attach to current job', `Save this staged upload (${fileSummary}) to the current project/job file. If there is no current project, ask me which customer or job first.`, 'job'),
       makeCommandShortcut('Create job from upload', `Read this staged upload (${fileSummary}), extract customer/property/project details, detect conflicts with saved records, then create or suggest the correct project/job before linking it.`, 'job'),
-      ...(maybeScope ? [makeCommandShortcut('Save scope', `Read this staged scope/estimate upload (${fileSummary}), extract the scope breakdown, deductible, totals, trades, and line items, then save it to the correct customer/project file after resolving any missing project or customer.`, 'roof')] : []),
+      ...(maybeScope ? [makeCommandShortcut('Save scope', `After this staged scope/estimate upload (${fileSummary}) is saved and has a documentId, save it with create_scope_from_document. Do not pass the filename as raw scope text. If analysis is still processing, say the file is saved and extraction is still processing.`, 'roof')] : []),
     ],
   }
 

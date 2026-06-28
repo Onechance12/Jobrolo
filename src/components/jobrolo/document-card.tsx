@@ -139,7 +139,7 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
         <div className="flex flex-wrap gap-1.5 border-t border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/50">
           <ActionChip icon={<Link2 className="h-3.5 w-3.5" />} label="Attach" onClick={() => insertPrompt(`Attach ${attachment.name} (documentId ${attachment.documentId}) to a customer or project. Ask me which one if you need more info.`)} />
           <ActionChip icon={<FolderPlus className="h-3.5 w-3.5" />} label="Create job" onClick={() => insertPrompt(`Create a project/job from ${attachment.name} (documentId ${attachment.documentId}). Check for customer conflicts before linking.`)} />
-          {isScopeLike ? <ActionChip icon={<FileCheck2 className="h-3.5 w-3.5" />} label="Save scope" onClick={() => insertPrompt(`Save ${attachment.name} (documentId ${attachment.documentId}) as a scope/estimate in the correct job file. Ask which project if needed.`)} /> : null}
+          {isScopeLike ? <ActionChip icon={<FileCheck2 className="h-3.5 w-3.5" />} label="Save scope" onClick={() => insertPrompt(`Save the uploaded scope/estimate document ${attachment.name} using documentId ${attachment.documentId}. Use create_scope_from_document; do not use the filename as pasted scope text. If no customer/project is known, ask which job to save it to.`)} /> : null}
           {isPriceSheet ? <ActionChip icon={<Rows3 className="h-3.5 w-3.5" />} label="Review rows" onClick={() => insertPrompt(`Review the first 10 extracted material rows from ${attachment.name} (documentId ${attachment.documentId}) and tell me if they are pending import or already saved.`)} /> : null}
         </div>
       ) : null}

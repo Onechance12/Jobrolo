@@ -966,7 +966,7 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
 }
 
 export function CompanyResearchReviewCard({ data }: { data?: any }) {
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed' | 'hidden'>('idle')
+  const [status, setStatus] = useState<'idle' | 'drafted' | 'hidden'>('idle')
   if (status === 'hidden') return null
 
   const research = data?.research ?? {}
@@ -992,18 +992,20 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
   ].filter(Boolean))
   const changes = companyResearchChanges(existingProfile, { name, phone, email, website, location: textValue(research.location), logoUrl })
 
-  async function save() {
-    setStatus('saving')
-    try {
-      const res = await fetch('/api/contractor/profile', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(suggested),
-      })
-      setStatus(res.ok ? 'saved' : 'failed')
-    } catch {
-      setStatus('failed')
+  function save() {
+    const compact = {
+      companyName: textValue(suggested.companyName) || name,
+      displayName: textValue(suggested.displayName) || name,
+      phone,
+      email,
+      website,
+      location: textValue(research.location),
+      logoUrl,
+      services,
+      serviceAreas,
     }
+    insertJobroloPrompt(`Review and save these company profile updates from the latest research. Show me what will change before saving:\n${JSON.stringify(compact, null, 2)}`)
+    setStatus('drafted')
   }
 
   function editInChat() {
@@ -1066,13 +1068,12 @@ export function CompanyResearchReviewCard({ data }: { data?: any }) {
         <div className="rounded-lg border border-blue-200 bg-background/70 p-2 text-xs text-muted-foreground dark:border-blue-900/60">
           If something is wrong, just tell me in chat — for example: “phone is wrong, use…” or “don’t use that BBB link.” I’ll update the profile from your correction.
         </div>
-        {status === 'saved' ? <p className="text-xs text-blue-700 dark:text-blue-300">Saved to company profile.</p> : null}
-        {status === 'failed' ? <p className="text-xs text-rose-600">Could not save this profile update. Try “save these company updates” in chat.</p> : null}
+        {status === 'drafted' ? <p className="text-xs text-blue-700 dark:text-blue-300">I drafted the save request in chat so you can review it before anything changes.</p> : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" disabled={status === 'saving' || status === 'saved'} onClick={save}>
-          {status === 'saving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-          {status === 'saved' ? 'Saved' : 'Save updates'}
+        <Button size="sm" disabled={status === 'drafted'} onClick={save}>
+          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+          {status === 'drafted' ? 'Drafted' : 'Save updates'}
         </Button>
         <Button size="sm" variant="outline" onClick={editInChat}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit in chat</Button>
         <Button size="sm" variant="ghost" onClick={() => setStatus('hidden')}><XCircle className="mr-1.5 h-3.5 w-3.5" />Remove</Button>
@@ -1383,23 +1384,16 @@ function ProfileRow({ label, value, icon, className }: { label: string; value: s
 }
 
 export function LocationConfirmationCard({ location }: { location?: LocationLike | null }) {
-  const [status, setStatus] = useState<'idle' | 'saving' | 'confirmed' | 'failed'>('idle')
+  const [status, setStatus] = useState<'idle' | 'drafted'>('idle')
   const best = location?.bestMatch ?? location?.candidates?.[0]
   const confidence = location?.confidenceLabel ?? (typeof location?.confidence === 'number' ? `${Math.round(location.confidence)}%` : 'unknown')
 
-  async function confirm() {
+  function confirm() {
     if (!location?.resolutionId || !best?.projectId) return
-    setStatus('saving')
-    try {
-      const res = await fetch('/api/field-copilot/confirm-location', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resolutionId: location.resolutionId, projectId: best.projectId, customerId: best.customerId, documentId: location.documentId, attachDocument: !!location.documentId }),
-      })
-      setStatus(res.ok ? 'confirmed' : 'failed')
-    } catch {
-      setStatus('failed')
-    }
+    insertJobroloPrompt(
+      `Confirm this location match and tell me what will be attached before saving. Resolution ID: ${location.resolutionId}. Project ID: ${best.projectId}. Customer ID: ${best.customerId || 'unknown'}. ${location.documentId ? `Uploaded document/photo ID: ${location.documentId}. Attach it if the match is correct.` : 'No uploaded document is attached to this location check.'}`,
+    )
+    setStatus('drafted')
   }
 
   return (
@@ -1416,9 +1410,9 @@ export function LocationConfirmationCard({ location }: { location?: LocationLike
         {location?.reason || best?.reason ? <p className="text-xs text-muted-foreground">{location?.reason || best?.reason}</p> : null}
       </CardContent>
       <CardFooter className="flex gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" disabled={!location?.resolutionId || !best?.projectId || status === 'saving' || status === 'confirmed'} onClick={confirm}>
-          {status === 'saving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-          {status === 'confirmed' ? 'Attached' : 'Attach'}
+        <Button size="sm" disabled={!location?.resolutionId || !best?.projectId || status === 'drafted'} onClick={confirm}>
+          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+          {status === 'drafted' ? 'Drafted in chat' : 'Attach in chat'}
         </Button>
         <Button size="sm" variant="outline" disabled>Choose different</Button>
       </CardFooter>
@@ -1429,26 +1423,19 @@ export function LocationConfirmationCard({ location }: { location?: LocationLike
 
 
 export function ScheduleEventCard({ data }: { data?: any }) {
-  const [status, setStatus] = useState<'idle' | 'logging' | 'logged' | 'failed'>('idle')
+  const [status, setStatus] = useState<'idle' | 'drafted'>('idle')
   const appointment = data?.appointment ?? data
   const project = data?.project
   const quickActions = Array.isArray(data?.quickActions) ? data.quickActions.slice(0, 4) : []
   const projectId = appointment?.projectId ?? project?.id
   const when = appointment?.startTime ? new Date(appointment.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
 
-  async function runAction(action: { key: string; label: string }) {
+  function runAction(action: { key: string; label: string }) {
     if (!projectId) return
-    setStatus('logging')
-    try {
-      const res = await fetch(`/api/projects/${projectId}/field-copilot/actions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: action.key, mode: appointment?.type || 'field', appointmentId: appointment?.id }),
-      })
-      setStatus(res.ok ? 'logged' : 'failed')
-    } catch {
-      setStatus('failed')
-    }
+    insertJobroloPrompt(
+      `Log "${action.label}" for this scheduled job/appointment in chat. Project ID: ${projectId}. Appointment ID: ${appointment?.id || 'unknown'}. Mode: ${appointment?.type || 'field'}. Ask for anything missing, then tell me what saved.`,
+    )
+    setStatus('drafted')
   }
 
   return (
@@ -1465,11 +1452,10 @@ export function ScheduleEventCard({ data }: { data?: any }) {
         </p>
         {quickActions.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {quickActions.map((a: any) => <Button key={a.key} size="sm" variant="secondary" disabled={status === 'logging'} onClick={() => runAction(a)}>{a.label}</Button>)}
+            {quickActions.map((a: any) => <Button key={a.key} size="sm" variant="secondary" onClick={() => runAction(a)}>{a.label}</Button>)}
           </div>
         ) : null}
-        {status === 'logged' ? <p className="text-xs text-blue-700 dark:text-blue-300">Logged to the job timeline.</p> : null}
-        {status === 'failed' ? <p className="text-xs text-rose-600">Could not log that action.</p> : null}
+        {status === 'drafted' ? <p className="text-xs text-blue-700 dark:text-blue-300">Drafted that job action in chat so you can review and send it.</p> : null}
       </CardContent>
     </Card>
   )
@@ -1792,7 +1778,6 @@ export function ReportPhotoPickerCard({ data }: { data?: ReportPhotoPickerLike |
   const photos = data?.photos || []
   const initialSelected = useMemo(() => new Set(photos.filter(p => p.defaultSelected || (p.alreadyAttached && p.isIncluded !== false)).map(p => String(p.documentId || p.reportPhotoId)).filter(Boolean)), [photos])
   const [selected, setSelected] = useState<Set<string>>(initialSelected)
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const reportId = data?.reportId || null
 
@@ -1811,47 +1796,26 @@ export function ReportPhotoPickerCard({ data }: { data?: ReportPhotoPickerLike |
     })
   }
 
-  async function saveSelection() {
+  function saveSelection() {
     if (!reportId) {
       insertJobroloPrompt('Create or choose a roof report first, then help me add these selected photos to it.')
       return
     }
-    setSaving(true)
-    setMessage(null)
-    try {
-      const toAdd = photos.filter(p => p.documentId && selected.has(keyFor(p)) && !p.reportPhotoId)
-      if (toAdd.length) {
-        const res = await fetch(`/api/roof-reports/${encodeURIComponent(reportId)}/photos/bulk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            photos: toAdd.map((p, i) => ({
-              documentId: p.documentId,
-              category: p.suggestedCategory || 'other',
-              condition: p.suggestedCondition || 'other',
-              severity: p.suggestedSeverity || 'informational',
-              caption: p.caption || p.summary || p.originalName,
-              sortOrder: i,
-            })),
-          }),
-        })
-        if (!res.ok) throw new Error(await res.text())
-      }
-      const toggles = photos.filter(p => p.reportPhotoId && p.documentId && selected.has(keyFor(p)) !== (p.isIncluded !== false))
-      await Promise.all(toggles.map(async p => {
-        const res = await fetch(`/api/roof-reports/${encodeURIComponent(reportId)}/photos/${encodeURIComponent(String(p.reportPhotoId))}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isIncluded: selected.has(keyFor(p)) }),
-        })
-        if (!res.ok) throw new Error(await res.text())
+    const selectedPhotos = photos
+      .filter(p => selected.has(keyFor(p)))
+      .map((p, i) => ({
+        documentId: p.documentId,
+        reportPhotoId: p.reportPhotoId,
+        category: p.suggestedCategory || 'other',
+        condition: p.suggestedCondition || 'other',
+        severity: p.suggestedSeverity || 'informational',
+        caption: p.caption || p.summary || p.originalName,
+        sortOrder: i,
       }))
-      setMessage('Saved this report photo selection. Removed photos stay in the job file; they are just excluded from this report.')
-    } catch (error: any) {
-      setMessage(error?.message ? `Could not save selection: ${String(error.message).slice(0, 180)}` : 'Could not save selection.')
-    } finally {
-      setSaving(false)
-    }
+    insertJobroloPrompt(
+      `Update roof report ${reportId} with this photo selection. Include the selected photos below. Exclude unselected photos from the report only; do not delete them from the job file. Confirm what changed after saving:\n${JSON.stringify(selectedPhotos, null, 2)}`,
+    )
+    setMessage('Drafted the report photo update in chat. Review it, add notes if needed, then send it.')
   }
 
   const selectedCount = photos.filter(p => selected.has(keyFor(p))).length
@@ -1912,7 +1876,7 @@ export function ReportPhotoPickerCard({ data }: { data?: ReportPhotoPickerLike |
         {message ? <div className="rounded-lg border bg-background/80 p-2 text-xs text-muted-foreground">{message}</div> : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" onClick={saveSelection} disabled={saving || !photos.length}>{saving ? 'Saving…' : 'Save selection'}</Button>
+        <Button size="sm" onClick={saveSelection} disabled={!photos.length}>Save selection in chat</Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`${reportId ? `For roof report ${reportId}, ` : ''}help me choose the best report photos. I want roof/gutter/hail/wind markings and only strong customer-facing photos.`)}>Ask Jobrolo</Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`${reportId ? `Share roof report ${reportId}. ` : 'Share this roof report. '}Ask who it should go to: homeowner, crew/subcontractor, referral partner/realtor, insurance agent/adjuster, or internal team.`)}>Route/share</Button>
       </CardFooter>
@@ -2270,25 +2234,18 @@ export function CanvassingGamePlanCard({ data }: { data?: any }) {
 
 
 export function PropertyResearchCard({ data }: { data?: any }) {
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+  const [state, setState] = useState<'idle' | 'drafted'>('idle')
   const best = data?.bestCandidate || data?.candidate || data?.candidates?.[0]
   const candidates = Array.isArray(data?.candidates) ? data.candidates : []
   const providerSources = Array.isArray(data?.providerSources) ? data.providerSources : []
   const providerWarnings = Array.isArray(data?.providerWarnings) ? data.providerWarnings : []
   const unverifiedOnly = Boolean(data?.unverifiedOnly)
-  async function confirm() {
+  function confirm() {
     if (!data?.runId) return
-    setState('saving')
-    try {
-      const res = await fetch(`/api/property-research/${data.runId}/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidateId: best?.id, createMemory: true, notes: data?.summary }),
-      })
-      setState(res.ok ? 'saved' : 'failed')
-    } catch {
-      setState('failed')
-    }
+    insertJobroloPrompt(
+      `Review and confirm property research run ${data.runId}. Candidate ID: ${best?.id || 'unknown'}. Address: ${best?.address || 'unknown'}. Possible owner: ${best?.ownerName || 'unknown'}. If this is the correct property, save it to property memory and tell me what saved. If it is uncertain, ask me before saving.`,
+    )
+    setState('drafted')
   }
   return (
     <Card className="mt-2 w-full overflow-hidden border-cyan-200 bg-cyan-50/50 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20 sm:max-w-xl">
@@ -2343,13 +2300,12 @@ export function PropertyResearchCard({ data }: { data?: any }) {
             {candidates.slice(1, 4).map((c: any, i: number) => <div key={i}>• {c.address || c.id}{typeof c.score === 'number' ? ` · score ${c.score}` : ''}</div>)}
           </div>
         ) : null}
-        {state === 'saved' ? <p className="text-xs text-blue-700 dark:text-blue-300">Saved to property memory.</p> : null}
-        {state === 'failed' ? <p className="text-xs text-rose-600">Could not save this candidate.</p> : null}
+        {state === 'drafted' ? <p className="text-xs text-blue-700 dark:text-blue-300">Drafted the property confirmation in chat so you can review it before saving.</p> : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" disabled={!data?.runId || state === 'saving' || state === 'saved'} onClick={confirm}>
-          {state === 'saving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-          {state === 'saved' ? 'Saved' : 'Confirm & save'}
+        <Button size="sm" disabled={!data?.runId || state === 'drafted'} onClick={confirm}>
+          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+          {state === 'drafted' ? 'Drafted' : 'Confirm in chat'}
         </Button>
         <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt(`Use this property research in the field chat${data?.runId ? ` (research run ID: ${data.runId})` : ''}. Ask me to confirm if this is the correct house before saving or converting.`)}>Use in field chat</Button>
       </CardFooter>
@@ -2448,7 +2404,7 @@ export function ActionCenterCard({ data }: { data?: any }) {
 }
 
 export function InboxActionCard({ item, onChanged, className }: { item?: InboxLike | null; onChanged?: () => void; className?: string }) {
-  const [decisionState, setDecisionState] = useState<'idle' | 'approving' | 'rejecting' | 'done' | 'failed'>('idle')
+  const [decisionState, setDecisionState] = useState<'idle' | 'done'>('idle')
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null)
   const payload = useMemo(() => parsePayload(item), [item])
   if (!item) return null
@@ -2459,37 +2415,16 @@ export function InboxActionCard({ item, onChanged, className }: { item?: InboxLi
   const Icon = isMaterial ? Package : type.includes('location') ? MapPin : type.includes('signature') ? FileText : type.includes('issue') ? AlertTriangle : ClipboardCheck
   const tone = isMaterial ? 'border-orange-200 bg-orange-50/60 dark:border-orange-900/60 dark:bg-orange-950/20' : 'border-blue-200 bg-blue-50/50 dark:border-blue-900/60 dark:bg-blue-950/20'
 
-  async function decide(decision: 'approved' | 'rejected') {
+  function decide(decision: 'approved' | 'rejected') {
     if (!currentItem.actionRequestId) return
-    setDecisionState(decision === 'approved' ? 'approving' : 'rejecting')
-    setDecisionMessage(null)
-    try {
-      const res = await fetch(`/api/action-requests/${currentItem.actionRequestId}/decision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(String(data?.error || 'Decision failed'))
-      const replay = data?.replayResult
-      if (decision === 'rejected') {
-        setDecisionMessage('Rejected. Jobrolo will not run this action.')
-      } else if (replay && typeof replay === 'object') {
-        if (replay.success) {
-          const msg = replayMessage(replay)
-          setDecisionMessage(msg ? `Approved and completed: ${msg}` : 'Approved and completed.')
-        } else {
-          setDecisionMessage(`Approved, but it did not complete: ${String(replay.error || 'the saved action failed to run')}`)
-        }
-      } else {
-        setDecisionMessage('Decision logged. This request is waiting for its routed workflow.')
-      }
-      setDecisionState('done')
-      onChanged?.()
-    } catch (err) {
-      setDecisionMessage(err instanceof Error ? err.message : 'Could not update this request. Try again.')
-      setDecisionState('failed')
-    }
+    const verb = decision === 'approved' ? 'Approve' : 'Reject'
+    const safety = decision === 'approved'
+      ? 'Show me exactly what will happen first, then run it only if it is still pending and safe.'
+      : 'Show me exactly what this request is, then reject it if it is still pending.'
+    insertJobroloPrompt(`${verb} action request ${currentItem.actionRequestId}. ${safety}`)
+    setDecisionMessage(decision === 'approved' ? 'Drafted an approval prompt in chat. Review or send it to continue.' : 'Drafted a rejection prompt in chat. Review or send it to continue.')
+    setDecisionState('done')
+    onChanged?.()
   }
 
   return (
@@ -2508,17 +2443,16 @@ export function InboxActionCard({ item, onChanged, className }: { item?: InboxLi
       <CardContent className="space-y-2 text-sm">
         {currentItem.summary ? <p className="text-foreground/90">{currentItem.summary}</p> : null}
         {payload ? <PayloadSummary payload={payload} /> : null}
-        {decisionState === 'failed' ? <p className="text-xs text-rose-600">{decisionMessage || 'Could not update this request. Try again.'}</p> : null}
         {decisionState === 'done' ? <p className="flex items-center gap-1 text-xs text-blue-700 dark:text-blue-300"><ShieldCheck className="h-3.5 w-3.5" /> {decisionMessage || 'Decision logged.'}</p> : null}
       </CardContent>
       {isApproval ? (
         <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-          <Button size="sm" disabled={decisionState === 'approving' || decisionState === 'rejecting' || decisionState === 'done'} onClick={() => decide('approved')}>
-            {decisionState === 'approving' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+          <Button size="sm" disabled={decisionState === 'done'} onClick={() => decide('approved')}>
+            <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
             Approve
           </Button>
-          <Button size="sm" variant="outline" disabled={decisionState === 'approving' || decisionState === 'rejecting' || decisionState === 'done'} onClick={() => decide('rejected')}>
-            {decisionState === 'rejecting' ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <XCircle className="mr-1.5 h-3.5 w-3.5" />}
+          <Button size="sm" variant="outline" disabled={decisionState === 'done'} onClick={() => decide('rejected')}>
+            <XCircle className="mr-1.5 h-3.5 w-3.5" />
             Reject
           </Button>
         </CardFooter>
@@ -2570,21 +2504,6 @@ function parsePayload(item?: InboxLike | null): Record<string, unknown> | null {
   }
   const direct = item as Record<string, unknown>
   if (direct.approvalDetails || direct.toolName || direct.args || direct.actionRequestId) return direct
-  return null
-}
-
-function replayMessage(replay: any): string | null {
-  const data = replay?.data
-  const nested = data?.replayResult?.data
-  const candidates = [
-    data?.message,
-    nested?.message,
-    data?.replayResult?.message,
-    replay?.message,
-  ]
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
-  }
   return null
 }
 
