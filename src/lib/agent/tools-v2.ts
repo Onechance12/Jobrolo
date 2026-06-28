@@ -2328,8 +2328,8 @@ export const TOOLS: ToolDef[] = [
       debugContext: z.object({
         recentMessages: z.array(z.object({
           role: z.enum(['user', 'assistant']),
-          text: z.string().max(2000),
-        })).max(20).optional(),
+          text: z.string().max(4000),
+        })).max(30).optional(),
         conversationId: z.string().max(200).optional(),
         workspaceId: z.string().max(200).optional(),
         chatId: z.string().max(200).optional(),
@@ -2345,7 +2345,7 @@ export const TOOLS: ToolDef[] = [
       const inferredSeverity = inferCodySeverity(content, args.severity)
       const area = inferCodyArea(content, args.area)
       const title = `${args.source === 'note_to_codex' ? 'Note to Codex' : 'Note to Cody'}: ${area}`
-      const summary = content.length > 280 ? `${content.slice(0, 277)}...` : content
+      const summary = content.length > 700 ? `${content.slice(0, 697)}...` : content
       const debugContext = {
         ...(args.debugContext ?? {}),
         conversationId: args.debugContext?.conversationId ?? ctx.conversationId ?? null,

@@ -81,7 +81,7 @@ async function recentMessagesForNote(item: { contractorId: string; createdAt: Da
     const messages = await db.workspaceMessage.findMany({
       where: { chatId, createdAt: { lte: item.createdAt } },
       orderBy: { createdAt: 'desc' },
-      take: 12,
+      take: 24,
       select: { role: true, content: true, createdAt: true, attachments: true },
     }).catch(() => [])
     if (messages.length) {
@@ -99,7 +99,7 @@ async function recentMessagesForNote(item: { contractorId: string; createdAt: Da
     const messages = await db.message.findMany({
       where: { conversationId, createdAt: { lte: item.createdAt } },
       orderBy: { createdAt: 'desc' },
-      take: 12,
+      take: 24,
       select: { role: true, content: true, createdAt: true, attachments: true },
     }).catch(() => [])
     if (messages.length) {

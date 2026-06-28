@@ -25,14 +25,14 @@ function safeRecentMessages(value: unknown): PublicEntryRecentMessage[] {
       const record = entry as Record<string, unknown>
       const role = record.role === 'assistant' ? 'assistant' : record.role === 'user' ? 'user' : null
       const text = typeof record.text === 'string'
-        ? sanitizeUserInput(record.text).text.trim().slice(0, 700)
+        ? sanitizeUserInput(record.text).text.trim().slice(0, 1200)
         : typeof record.content === 'string'
-          ? sanitizeUserInput(record.content).text.trim().slice(0, 700)
+          ? sanitizeUserInput(record.content).text.trim().slice(0, 1200)
           : ''
       return role && text ? { role, text } : null
     })
     .filter((entry): entry is PublicEntryRecentMessage => Boolean(entry))
-    .slice(-8)
+    .slice(-20)
 }
 
 function safeUrl(value: unknown) {
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
     const requestedMode = body?.mode === 'cody' || isCodyBlockOpenText(rawMessage) || isCodyBlockCloseText(rawMessage) ? 'cody' : 'normal'
     const codyClosing = Boolean(body?.codyClosing) || isCodyBlockCloseText(rawMessage)
     const codySessionContent = typeof body?.codySessionContent === 'string'
-      ? sanitizeUserInput(body.codySessionContent).text.trim().slice(0, 5000)
+      ? sanitizeUserInput(body.codySessionContent).text.trim().slice(0, 10000)
       : ''
 
     if (requestedMode === 'cody') {
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
       if (!message) return NextResponse.json({ error: 'Message is required.' }, { status: 400 })
 
       if (codyClosing) {
-        const content = codySessionContent || recentMessages.map(entry => `${entry.role}: ${entry.text}`).join('\n').slice(0, 8000)
+        const content = codySessionContent || recentMessages.map(entry => `${entry.role}: ${entry.text}`).join('\n').slice(0, 10000)
         const saved = await savePublicCodySession(req, content || 'Cody account-entry review session ended without additional details.', recentMessages, currentUrl)
         if (saved.saved) {
           return NextResponse.json({
@@ -167,7 +167,8 @@ Public account-entry boundaries:
 
 Response style:
 - Be concise and technical, like a QA engineer.
-- Use this format when useful: Cody Review, What I see, Likely issue, Severity, Codex handoff, Safer path.
+- Preserve the user's exact complaint and details. Do not over-compress the issue into a vague summary.
+- Use this format when useful: Cody Review, Raw issue, What I see, Likely issue, Severity, Codex handoff, Safer path.
 - Tell the user they can type "end Cody" when ready to close/package the Cody session.
 - Do not use markdown tables or code blocks.`,
         },

@@ -224,7 +224,7 @@ function priorityFromSeverity(severity: CodySeverity): CodyPacket['priority'] {
 }
 
 function compactSummary(content: string) {
-  return content.replace(/\s+/g, ' ').trim().slice(0, 240)
+  return content.replace(/\s+/g, ' ').trim().slice(0, 600)
 }
 
 function expectedForArea(area: CodyArea) {
@@ -385,7 +385,7 @@ function evidenceFromInput(input: CodyPacketInput) {
 function reproductionStepsFromMessages(messages: CodyPacketInput['recentMessages']) {
   const userMessages = (messages ?? [])
     .filter(message => message?.role === 'user' && message.text)
-    .slice(-4)
+    .slice(-8)
     .map(message => String(message.text).replace(/\s+/g, ' ').trim())
   if (!userMessages.length) {
     return [
@@ -394,7 +394,7 @@ function reproductionStepsFromMessages(messages: CodyPacketInput['recentMessages
       'Compare actual result to expected behavior.',
     ]
   }
-  return userMessages.map((text, index) => `${index + 1}. User said: ${text.slice(0, 220)}`)
+  return userMessages.map((text, index) => `${index + 1}. User said: ${text.slice(0, 420)}`)
 }
 
 export function buildCodyPacket(input: CodyPacketInput): CodyPacket {

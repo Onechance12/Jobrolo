@@ -138,10 +138,11 @@ function printNotes(body) {
     }
     if (Array.isArray(item.recentMessages) && item.recentMessages.length) {
       console.log('  Recent chat:')
-      for (const message of item.recentMessages.slice(-8)) {
+      for (const message of item.recentMessages.slice(-20)) {
         const role = message.role || 'unknown'
-        const text = String(message.text || '').replace(/\s+/g, ' ').slice(0, 500)
-        if (text) console.log(`    ${role}: ${text}`)
+        const source = message.source ? `/${message.source}` : ''
+        const text = String(message.text || '').replace(/\s+/g, ' ').slice(0, 900)
+        if (text) console.log(`    ${role}${source}: ${text}`)
       }
     }
   }

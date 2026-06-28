@@ -255,12 +255,12 @@ function recentPlainMessages(messages: ChatMessage[], limit = 6) {
   return out.join('\n')
 }
 
-function recentVisibleChatTurns(messages: ChatMessage[], limit = 12) {
+function recentVisibleChatTurns(messages: ChatMessage[], limit = 24) {
   const out: Array<{ role: 'user' | 'assistant'; text: string }> = []
   for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
     const message = messages[i]
     if ((message.role !== 'user' && message.role !== 'assistant') || isInternalAgentInstruction(message.content)) continue
-    const text = plainMessageText(message.content).slice(0, 2000)
+    const text = plainMessageText(message.content).slice(0, 4000)
     if (!text) continue
     out.unshift({ role: message.role, text })
   }
@@ -1166,7 +1166,9 @@ Rules:
 - Do not create customers, projects, documents, notifications, or approvals.
 - Do not save this as a normal customer/job note.
 - Help the user discuss, reproduce, and clarify the bug or product issue.
-- If enough evidence is available, produce a compact Cody Review with: What I see, likely issue, severity, likely files, Codex handoff, and safety notes.
+- Preserve the user's exact complaint and details. Do not over-compress the issue into a vague summary.
+- If enough evidence is available, produce a Cody Review with: raw issue, what I see, likely issue, severity, likely files, Codex handoff, and safety notes.
+- If evidence is thin, ask one or two focused questions that would help Codex reproduce the bug.
 - Tell the user they can type "end Cody" when ready to package this Cody session for Codex.
 - Respond as JSON only with final=true and no tool_calls/actions.
 
@@ -1174,7 +1176,7 @@ Latest Cody-mode user message:
 "${(openingContent || userText).slice(0, 800)}"
 
 Recent Cody-mode context:
-${JSON.stringify(codyBlock.turns.slice(-10))}`
+${JSON.stringify(codyBlock.turns.slice(-20))}`
   }
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) {
