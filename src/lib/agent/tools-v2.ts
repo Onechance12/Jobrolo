@@ -38,6 +38,7 @@ import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
 import { createRoleNotification } from '@/lib/notifications'
 
 export interface ToolContext {
+  conversationId?: string
   workspaceId?: string
   chatId?: string
   channelType?: ChannelType
@@ -2308,6 +2309,19 @@ export const TOOLS: ToolDef[] = [
       area: z.string().max(120).optional(),
       severity: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
       currentUrl: z.string().max(1000).optional(),
+      debugContext: z.object({
+        recentMessages: z.array(z.object({
+          role: z.enum(['user', 'assistant']),
+          text: z.string().max(2000),
+        })).max(20).optional(),
+        conversationId: z.string().max(200).optional(),
+        workspaceId: z.string().max(200).optional(),
+        chatId: z.string().max(200).optional(),
+        channelType: z.string().max(80).optional(),
+        documentIds: z.array(z.string().max(200)).max(20).optional(),
+        userId: z.string().max(200).optional(),
+        userRole: z.string().max(80).optional(),
+      }).optional(),
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
@@ -2343,6 +2357,16 @@ export const TOOLS: ToolDef[] = [
           area,
           severity: inferredSeverity,
           currentUrl: args.currentUrl ?? null,
+          debugContext: {
+            ...(args.debugContext ?? {}),
+            conversationId: args.debugContext?.conversationId ?? ctx.conversationId ?? null,
+            workspaceId: args.debugContext?.workspaceId ?? ctx.workspaceId ?? null,
+            chatId: args.debugContext?.chatId ?? ctx.chatId ?? null,
+            channelType: args.debugContext?.channelType ?? ctx.channelType ?? null,
+            documentIds: args.debugContext?.documentIds ?? ctx.documentIds ?? [],
+            userId: args.debugContext?.userId ?? ctx.userId ?? null,
+            userRole: args.debugContext?.userRole ?? ctx.userRole ?? null,
+          },
           capturedByUserId: ctx.userId ?? null,
           capturedByRole: ctx.userRole ?? null,
           capturedAt: new Date().toISOString(),

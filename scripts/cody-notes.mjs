@@ -1,7 +1,34 @@
 #!/usr/bin/env node
 
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 const command = process.argv[2] || 'list'
 const args = process.argv.slice(3)
+
+function loadLocalEnv() {
+  for (const file of ['.env.local', '.env']) {
+    const path = resolve(process.cwd(), file)
+    if (!existsSync(path)) continue
+    const text = readFileSync(path, 'utf8')
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq === -1) continue
+      const key = trimmed.slice(0, eq).trim()
+      if (!key || process.env[key]) continue
+      let value = trimmed.slice(eq + 1).trim()
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1)
+      }
+      process.env[key] = value
+    }
+  }
+}
+
+loadLocalEnv()
+
 const baseUrl = (process.env.JOBROLO_BASE_URL || 'https://jobrolo.onrender.com').replace(/\/$/, '')
 const token = process.env.CODY_BRIDGE_TOKEN
 
@@ -82,7 +109,21 @@ function printNotes(body) {
     console.log(`  Area: ${item.area || 'unknown'} · Severity: ${item.severity || item.priority}`)
     console.log(`  Created: ${item.createdAt}`)
     if (item.currentUrl) console.log(`  URL: ${item.currentUrl}`)
+    if (item.appUrl) console.log(`  App: ${item.appUrl}`)
     console.log(`  Note: ${item.content || item.summary || '(empty)'}`)
+    if (item.debugContext) {
+      const ids = item.debugContext
+      const docIds = Array.isArray(ids.documentIds) && ids.documentIds.length ? ` docs=${ids.documentIds.join(',')}` : ''
+      console.log(`  Context: conversation=${ids.conversationId || '-'} workspace=${ids.workspaceId || '-'} chat=${ids.chatId || '-'} channel=${ids.channelType || '-'}${docIds}`)
+    }
+    if (Array.isArray(item.recentMessages) && item.recentMessages.length) {
+      console.log('  Recent chat:')
+      for (const message of item.recentMessages.slice(-8)) {
+        const role = message.role || 'unknown'
+        const text = String(message.text || '').replace(/\s+/g, ' ').slice(0, 500)
+        if (text) console.log(`    ${role}: ${text}`)
+      }
+    }
   }
 }
 

@@ -471,6 +471,7 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
     const loopResult = await runAgentLoop({
       messages,
       contractorId: contractor.id,
+      conversationId: conversation.id,
       workspaceId: job.workspaceId ?? undefined,
       chatId: job.chatId ?? undefined,
       channelType,

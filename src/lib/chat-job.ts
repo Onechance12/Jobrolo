@@ -150,7 +150,7 @@ export async function processJob(jobId: string, opts: {
     messages.push({ role: 'user', content: message })
 
     job.heartbeat = 'Thinking...'
-    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { const toolNames = iter.toolCalls.map(tc => tc.name); j.thinking.push({ text: safeThinkingText(iter.text, toolNames), toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.success ? 'Done' : 'Needs attention' })) }); j.heartbeat = safeThinkingText(iter.text, toolNames) } } } })
+    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, conversationId: conversation.id, workspaceId, chatId, documentIds, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { const toolNames = iter.toolCalls.map(tc => tc.name); j.thinking.push({ text: safeThinkingText(iter.text, toolNames), toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.success ? 'Done' : 'Needs attention' })) }); j.heartbeat = safeThinkingText(iter.text, toolNames) } } } })
     clearInterval(hb)
 
     const finalText = sanitizeGeneratedStorageUrls(loopResult.final.text || '(no response)')

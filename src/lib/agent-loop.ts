@@ -24,6 +24,7 @@ export interface AgentLoopOptions {
   userId?: string
   userRole?: string
   trustedDirectExecution?: boolean
+  conversationId?: string
   workspaceId?: string
   chatId?: string
   channelType?: ChannelType
@@ -242,6 +243,18 @@ function recentPlainMessages(messages: ChatMessage[], limit = 6) {
     out.unshift(plainMessageText(message.content))
   }
   return out.join('\n')
+}
+
+function recentVisibleChatTurns(messages: ChatMessage[], limit = 12) {
+  const out: Array<{ role: 'user' | 'assistant'; text: string }> = []
+  for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
+    const message = messages[i]
+    if ((message.role !== 'user' && message.role !== 'assistant') || isInternalAgentInstruction(message.content)) continue
+    const text = plainMessageText(message.content).slice(0, 2000)
+    if (!text) continue
+    out.unshift({ role: message.role, text })
+  }
+  return out
 }
 
 function looksLikeApprovalReplayFailure(text: string) {
@@ -580,7 +593,24 @@ function isActionCenterRequest(text: string) {
   )
 }
 
-function testerFeedbackFromText(text: string): { content: string; source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'; area?: string; severity?: 'low' | 'normal' | 'high' | 'urgent' } | null {
+type TesterFeedbackArgs = {
+  content: string
+  source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'
+  area?: string
+  severity?: 'low' | 'normal' | 'high' | 'urgent'
+  debugContext?: {
+    recentMessages?: Array<{ role: 'user' | 'assistant'; text: string }>
+    conversationId?: string
+    workspaceId?: string
+    chatId?: string
+    channelType?: string
+    documentIds?: string[]
+    userId?: string
+    userRole?: string
+  }
+}
+
+function testerFeedbackFromText(text: string): TesterFeedbackArgs | null {
   const clean = plainMessageText(text)
   if (!clean) return null
   const marker = clean.match(/^\s*\(?\s*note\s+to\s+(cody|codex)\s*\)?\s*[:\-–—]?\s*/i)
@@ -608,6 +638,22 @@ function testerFeedbackFromText(text: string): { content: string; source: 'note_
     source: audience === 'codex' ? 'note_to_codex' : 'note_to_cody',
     ...(area ? { area } : {}),
     severity,
+  }
+}
+
+function withTesterFeedbackDebugContext(feedback: TesterFeedbackArgs, messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'conversationId' | 'workspaceId' | 'chatId' | 'channelType' | 'documentIds' | 'userId' | 'userRole'>): TesterFeedbackArgs {
+  return {
+    ...feedback,
+    debugContext: {
+      recentMessages: recentVisibleChatTurns(messages),
+      ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
+      ...(opts?.workspaceId ? { workspaceId: opts.workspaceId } : {}),
+      ...(opts?.chatId ? { chatId: opts.chatId } : {}),
+      ...(opts?.channelType ? { channelType: opts.channelType } : {}),
+      ...(opts?.documentIds?.length ? { documentIds: opts.documentIds.slice(0, 20) } : {}),
+      ...(opts?.userId ? { userId: opts.userId } : {}),
+      ...(opts?.userRole ? { userRole: opts.userRole } : {}),
+    },
   }
 }
 
@@ -959,7 +1005,7 @@ function buildFieldObservationToolCall(userText: string): ToolCall {
   }
 }
 
-function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'documentIds'>): ToolCall | null {
+function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'conversationId' | 'workspaceId' | 'chatId' | 'channelType' | 'documentIds' | 'userId' | 'userRole'>): ToolCall | null {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
@@ -967,7 +1013,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
     return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
   }
   const testerFeedback = testerFeedbackFromText(userText)
-  if (testerFeedback) return { name: 'record_tester_feedback', args: testerFeedback }
+  if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
@@ -991,17 +1037,18 @@ function documentHintFromPriceSheetText(text: string) {
   return ''
 }
 
-function buildDeterministicIntentInstruction(messages: ChatMessage[]) {
+function buildDeterministicIntentInstruction(messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'conversationId' | 'workspaceId' | 'chatId' | 'channelType' | 'documentIds' | 'userId' | 'userRole'>) {
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) {
+    const feedbackWithContext = withTesterFeedbackDebugContext(testerFeedback, messages, opts)
     return `The latest user message is tester/product feedback intended for ${testerFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}:
 "${testerFeedback.content.slice(0, 500)}"
 
 Call record_tester_feedback now with:
-${JSON.stringify(testerFeedback)}
+${JSON.stringify(feedbackWithContext)}
 
 Do not save it as a normal customer/job note. Do not narrate that you will save it. Only say it was captured after the tool succeeds. Respond as JSON only.`
   }
@@ -1124,7 +1171,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     console.log(`[agent-loop] affirmative continuation detected contractorId=${opts.contractorId}`)
     messages.splice(insertAt, 0, { role: 'system', content: continuationInstruction })
   }
-  const deterministicIntentInstruction = buildDeterministicIntentInstruction(messages)
+  const deterministicIntentInstruction = buildDeterministicIntentInstruction(messages, {
+    conversationId: opts.conversationId,
+    workspaceId: opts.workspaceId,
+    chatId: opts.chatId,
+    channelType: opts.channelType,
+    documentIds: opts.documentIds,
+    userId: opts.userId,
+    userRole: opts.userRole,
+  })
   if (deterministicIntentInstruction) {
     const insertAt = Math.max(0, messages.length - 1)
     console.log(`[agent-loop] deterministic intent instruction inserted contractorId=${opts.contractorId}`)
@@ -1317,6 +1372,7 @@ Respond as JSON only.`,
           userId: opts.userId,
           userRole: opts.userRole,
           trustedDirectExecution: opts.trustedDirectExecution,
+          conversationId: opts.conversationId,
           workspaceId: opts.workspaceId,
           chatId: opts.chatId,
           channelType: opts.channelType,
