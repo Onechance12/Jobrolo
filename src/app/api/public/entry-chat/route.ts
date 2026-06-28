@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { chatComplete, type ChatMessage } from '@/lib/ai'
+import { buildCodyPacket, codyBlockOpeningContent, inferCodyArea, inferCodySeverity, isCodyBlockCloseText, isCodyBlockOpenText } from '@/lib/cody/packet'
+import { createRoleNotification } from '@/lib/notifications'
 import { rateLimitByIp } from '@/lib/security/rate-limit'
+import { requireContext } from '@/lib/security/context'
 import { sanitizeAIOutput, sanitizeUserInput } from '@/lib/security/prompt-defense'
 
 export const runtime = 'nodejs'
@@ -9,8 +12,92 @@ export const maxDuration = 30
 const FALLBACK =
   "Jobrolo is a chat-first operating system for contractors. The idea is simple: instead of hunting through CRM menus, you tell Jobrolo what you want done — create a client, start a job, organize photos, build a report, coordinate a crew, or find what needs attention. In this lobby I can explain how it works and answer questions. Real company data and actions unlock after sign-in."
 
-const PUBLIC_ENTRY_MAX_BODY_BYTES = 8 * 1024
+const PUBLIC_ENTRY_MAX_BODY_BYTES = 16 * 1024
 const PUBLIC_ENTRY_MAX_MESSAGE_CHARS = 2000
+
+type PublicEntryRecentMessage = { role: 'user' | 'assistant'; text: string }
+
+function safeRecentMessages(value: unknown): PublicEntryRecentMessage[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+      const record = entry as Record<string, unknown>
+      const role = record.role === 'assistant' ? 'assistant' : record.role === 'user' ? 'user' : null
+      const text = typeof record.text === 'string'
+        ? sanitizeUserInput(record.text).text.trim().slice(0, 700)
+        : typeof record.content === 'string'
+          ? sanitizeUserInput(record.content).text.trim().slice(0, 700)
+          : ''
+      return role && text ? { role, text } : null
+    })
+    .filter((entry): entry is PublicEntryRecentMessage => Boolean(entry))
+    .slice(-8)
+}
+
+function safeUrl(value: unknown) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim().slice(0, 1000)
+  if (!/^https?:\/\//i.test(trimmed)) return null
+  return trimmed
+}
+
+async function savePublicCodySession(req: NextRequest, content: string, recentMessages: PublicEntryRecentMessage[], currentUrl: string | null) {
+  const ctx = await requireContext(req).catch(() => null)
+  if (!ctx || !ctx.user) return { saved: false as const, reason: 'not_authenticated' as const }
+
+  const area = inferCodyArea(content, 'onboarding/auth')
+  const severity = inferCodySeverity(content)
+  const summary = content.length > 280 ? `${content.slice(0, 277)}...` : content
+  const debugContext = {
+    source: 'public_entry_chat',
+    route: '/signup',
+    currentUrl,
+    recentMessages,
+    userId: ctx.user.id,
+    userRole: ctx.user.role,
+  }
+  const codyPacket = buildCodyPacket({
+    content,
+    area,
+    severity,
+    title: `Note to Cody: ${area}`,
+    company: ctx.contractor.company || ctx.contractor.name || null,
+    currentUrl,
+    debugContext,
+    recentMessages,
+    relevantIds: {
+      contractorId: ctx.contractorId,
+      userId: ctx.user.id,
+      source: 'public_entry_chat',
+    },
+  })
+
+  const item = await createRoleNotification({
+    contractorId: ctx.contractorId,
+    role: 'owner',
+    userId: null,
+    type: 'tester_feedback',
+    title: `Note to Cody: ${area}`,
+    summary,
+    priority: severity,
+    relatedType: 'tester_feedback',
+    payload: {
+      cardType: 'tester_feedback',
+      content,
+      source: 'note_to_cody',
+      area,
+      severity,
+      currentUrl,
+      debugContext,
+      codyPacket,
+      capturedByUserId: ctx.user.id,
+      capturedByRole: ctx.user.role,
+      capturedAt: new Date().toISOString(),
+    },
+  })
+  return { saved: true as const, itemId: item.id, area, severity }
+}
 
 export async function POST(req: NextRequest) {
   if (process.env.NODE_ENV === 'production' && process.env.RATE_LIMIT_ENABLED === 'false') {
@@ -30,6 +117,68 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     rawMessage = String(body?.message ?? '')
+    const recentMessages = safeRecentMessages(body?.recentMessages)
+    const currentUrl = safeUrl(body?.currentUrl)
+    const requestedMode = body?.mode === 'cody' || isCodyBlockOpenText(rawMessage) || isCodyBlockCloseText(rawMessage) ? 'cody' : 'normal'
+    const codyClosing = Boolean(body?.codyClosing) || isCodyBlockCloseText(rawMessage)
+    const codySessionContent = typeof body?.codySessionContent === 'string'
+      ? sanitizeUserInput(body.codySessionContent).text.trim().slice(0, 5000)
+      : ''
+
+    if (requestedMode === 'cody') {
+      const sanitized = sanitizeUserInput(rawMessage)
+      const message = sanitized.text.trim()
+      if (!message) return NextResponse.json({ error: 'Message is required.' }, { status: 400 })
+
+      if (codyClosing) {
+        const content = codySessionContent || recentMessages.map(entry => `${entry.role}: ${entry.text}`).join('\n').slice(0, 8000)
+        const saved = await savePublicCodySession(req, content || 'Cody account-entry review session ended without additional details.', recentMessages, currentUrl)
+        if (saved.saved) {
+          return NextResponse.json({
+            message: `Cody session ended and saved to the Cody queue.\n\nArea: ${saved.area}\nSeverity: ${saved.severity}\n\nI captured the account-entry/onboarding context so Codex can review it.`,
+            codySaved: true,
+          })
+        }
+        return NextResponse.json({
+          message: 'Cody session ended. I can help diagnose this account-entry screen here, but I could not save it to the private Cody queue because you are not signed in yet.\n\nBest workaround: sign in or create the workspace, then open Cody again in the main Jobrolo chat with “Cody Cody Cody” and close with “end Cody” so it saves with company/chat context.',
+          codySaved: false,
+          codySaveReason: saved.reason,
+        })
+      }
+
+      const latest = isCodyBlockOpenText(message) ? codyBlockOpeningContent(message) || message : message
+      const codyMessages: ChatMessage[] = [
+        {
+          role: 'system',
+          content: `You are Cody inside Jobrolo's public account-entry/sign-in chat.
+
+Cody identity:
+- Cody is Jobrolo's hidden read-only developer analyst.
+- Cody helps diagnose bugs, UX issues, confusing onboarding/sign-in behavior, screenshots, logs, and product feedback.
+- Cody does not perform real Jobrolo operations.
+
+Public account-entry boundaries:
+- The visitor may not be signed in. Do not claim access to private company, customer, project, document, or database records.
+- You can analyze only the visible account-entry/signup/lobby behavior and the user's supplied description.
+- Do not ask for passwords, secrets, tokens, or private customer data.
+- Do not claim the note is saved unless the user says "end Cody" and the server reports it saved.
+
+Response style:
+- Be concise and technical, like a QA engineer.
+- Use this format when useful: Cody Review, What I see, Likely issue, Severity, Codex handoff, Safer path.
+- Tell the user they can type "end Cody" when ready to close/package the Cody session.
+- Do not use markdown tables or code blocks.`,
+        },
+        ...recentMessages.map(entry => ({ role: entry.role, content: entry.text }) as ChatMessage),
+        { role: 'user', content: latest },
+      ]
+      const answer = await chatComplete(codyMessages, {
+        purpose: 'chat',
+        maxTokens: 650,
+        temperature: 0.25,
+      })
+      return NextResponse.json({ message: sanitizeAIOutput(answer || 'Cody mode is open. Tell me what broke, what you expected, and what happened. Type “end Cody” when you want to package it.') })
+    }
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
   }

@@ -152,6 +152,21 @@ function mentionsInviteJoin(value: string) {
   return /\b(join|joining|invite|invited|one[-\s]?time|code|token)\b/i.test(value)
 }
 
+function isLobbyCodyOpen(value: string) {
+  return /^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\b/i.test(value.trim())
+}
+
+function isLobbyCodyClose(value: string) {
+  return /^\s*end\s+cody\b/i.test(value.trim())
+}
+
+function lobbyMessagesForApi(messages: LobbyMessage[]) {
+  return messages.slice(-8).map(message => ({
+    role: message.role,
+    text: message.content.slice(0, 700),
+  }))
+}
+
 function parseLobbyAnswer(content: string) {
   const lines = content.split(/\r?\n/).map(line => cleanLobbyText(line)).filter(Boolean)
   const intro: string[] = []
@@ -269,6 +284,8 @@ export default function SignupPage() {
   const [lobbyInput, setLobbyInput] = useState('')
   const [lobbySending, setLobbySending] = useState(false)
   const [lobbyMessages, setLobbyMessages] = useState<LobbyMessage[]>([])
+  const [codyMode, setCodyMode] = useState(false)
+  const [codyTranscript, setCodyTranscript] = useState<LobbyMessage[]>([])
   const [inviteCode, setInviteCode] = useState('')
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', companyName: '', website: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
@@ -382,10 +399,25 @@ export default function SignupPage() {
 
     if (!overrideText) setLobbyInput('')
     setLockedNotice(null)
-    setLobbyMessages(prev => [...prev, { role: 'user', content: text }])
+    const userMessage: LobbyMessage = { role: 'user', content: text }
+    const codyOpening = isLobbyCodyOpen(text)
+    const codyClosing = isLobbyCodyClose(text)
+    const isCodyTurn = codyMode || codyOpening || codyClosing
+    const visibleMessages = [...lobbyMessages, userMessage]
+    const codySessionMessages = codyOpening
+      ? [userMessage]
+      : [...codyTranscript, userMessage]
+    setLobbyMessages(visibleMessages)
+
+    if (codyOpening) {
+      setCodyMode(true)
+      setCodyTranscript([userMessage])
+    } else if (codyMode && !codyClosing) {
+      setCodyTranscript(prev => [...prev, userMessage])
+    }
 
     const inviteFromText = extractInviteCode(text)
-    if (inviteFromText || mentionsInviteJoin(text)) {
+    if (!isCodyTurn && (inviteFromText || mentionsInviteJoin(text))) {
       setInviteCode(inviteFromText)
       setMode('join')
       setLobbyMessages(prev => [
@@ -405,7 +437,16 @@ export default function SignupPage() {
       const res = await fetch('/api/public/entry-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          mode: isCodyTurn ? 'cody' : 'normal',
+          codyClosing,
+          codySessionContent: codyClosing
+            ? codySessionMessages.map(message => `${message.role}: ${message.content}`).join('\n').slice(0, 5000)
+            : undefined,
+          currentUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+          recentMessages: lobbyMessagesForApi(visibleMessages),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       setLobbyMessages(prev => [
@@ -417,6 +458,10 @@ export default function SignupPage() {
             : data.error || 'I can answer Jobrolo questions here. Try again in a moment.',
         },
       ])
+      if (codyClosing) {
+        setCodyMode(false)
+        setCodyTranscript([])
+      }
     } catch {
       setLobbyMessages(prev => [
         ...prev,
@@ -425,6 +470,10 @@ export default function SignupPage() {
           content: 'I had trouble answering from the lobby chat. You can still sign in or create a workspace, and I’ll continue setup there.',
         },
       ])
+      if (codyClosing) {
+        setCodyMode(false)
+        setCodyTranscript([])
+      }
     } finally {
       setLobbySending(false)
     }
@@ -483,6 +532,13 @@ export default function SignupPage() {
           {lockedNotice ? (
             <div className="ml-auto max-w-[88%] rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
               {lockedNotice}
+            </div>
+          ) : null}
+
+          {codyMode ? (
+            <div className="ml-0 flex items-center gap-2 rounded-2xl border border-violet-300/25 bg-violet-500/10 px-4 py-3 text-sm text-violet-100 sm:ml-14">
+              <span className="h-2 w-2 rounded-full bg-violet-300 shadow-[0_0_14px_rgba(196,181,253,0.9)]" />
+              Cody review mode is open. Talk through the sign-in/onboarding issue, then type “end Cody” when ready to package it.
             </div>
           ) : null}
 
