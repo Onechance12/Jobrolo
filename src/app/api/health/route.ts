@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getDeployInfo } from '@/lib/deploy-info'
 import { requireContext } from '@/lib/security/context'
 export const runtime = 'nodejs'
 
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
+      deploy: getDeployInfo(),
     })
   }
 
@@ -47,6 +49,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     status: allOk ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
+    deploy: getDeployInfo(),
     checks,
   }, { status: allOk ? 200 : 503 })
 }
