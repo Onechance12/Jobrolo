@@ -947,15 +947,30 @@ export const TOOLS: ToolDef[] = [
       const profile = await getOrCreateContractorProfile(contractorId)
       const publicProfile = publicContractorProfile(profile)
       const mergeContext = await buildProjectMergeData({ contractorId })
+      const profileForSetup = (publicProfile ?? {}) as Record<string, any>
+      const setupPrompts = [
+        !profileForSetup.website ? { label: 'Research missing public info', prompt: 'Research my company online and suggest missing company profile updates. Show what is new before saving.' } : null,
+        !profileForSetup.address ? { label: 'Add business address', prompt: 'Update my company profile address to ' } : null,
+        !profileForSetup.logoUrl && !profileForSetup.logoDocumentId ? { label: 'Add company logo', prompt: 'I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.' } : null,
+        !profileForSetup.licenseNumber ? { label: 'Add license number', prompt: 'Update my company profile license number to ' } : null,
+        !profileForSetup.paymentInstructions ? { label: 'Draft payment instructions', prompt: 'Draft payment instructions for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+        !profileForSetup.warrantyText ? { label: 'Draft warranty text', prompt: 'Draft warranty text for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+        !profileForSetup.defaultTerms ? { label: 'Draft default terms', prompt: 'Draft default terms for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+        !profileForSetup.estimateDisclaimer ? { label: 'Draft estimate disclaimer', prompt: 'Draft an estimate disclaimer for my company profile. Show me the draft and ask before saving.' } : null,
+        { label: 'Upload material price list', prompt: 'I want to upload a material price list for company pricing. Keep it company-level, review extracted rows, and ask before importing.' },
+        { label: 'Upload agreement/template', prompt: 'I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.' },
+      ].filter(Boolean)
       return {
         success: true,
         data: {
           profile: publicProfile,
+          setupPrompts,
           availableMergeFields: Object.keys(mergeContext.data).sort(),
           mergePreview: mergeContext.data,
           card: {
             cardType: 'company_profile',
             profile: publicProfile,
+            setupPrompts,
             status: 'saved',
           },
         },

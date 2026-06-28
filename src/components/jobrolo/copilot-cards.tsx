@@ -870,6 +870,12 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
   const hasLogo = Boolean(logoUrl || logoDocumentId)
   const licenseNumber = textValue(profile.licenseNumber)
   const ownerName = textValue(profile.ownerName)
+  const defaultTerms = textValue(profile.defaultTerms)
+  const paymentInstructions = textValue(profile.paymentInstructions)
+  const warrantyText = textValue(profile.warrantyText)
+  const estimateDisclaimer = textValue(profile.estimateDisclaimer)
+  const contractDisclaimer = textValue(profile.contractDisclaimer)
+  const insuranceText = textValue(profile.insuranceText)
   const contact = [textValue(profile.publicContactName), textValue(profile.publicContactTitle)].filter(Boolean).join(' · ')
   const missing = [
     !website ? 'website' : null,
@@ -877,6 +883,11 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     !email ? 'email' : null,
     !address ? 'address' : null,
     !hasLogo ? 'logo' : null,
+    !licenseNumber ? 'license' : null,
+    !paymentInstructions ? 'payment instructions' : null,
+    !warrantyText ? 'warranty text' : null,
+    !defaultTerms ? 'default terms' : null,
+    !estimateDisclaimer ? 'estimate disclaimer' : null,
   ].filter(Boolean)
   const setupActions = [
     !phone ? { label: 'Add phone', prompt: 'Update my company profile phone number to ' } : null,
@@ -885,6 +896,12 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     !address ? { label: 'Add address', prompt: 'Update my company profile address to ' } : null,
     !hasLogo ? { label: 'Add logo', prompt: 'I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.' } : null,
     !licenseNumber ? { label: 'Add license', prompt: 'Update my company profile license number to ' } : null,
+    !defaultTerms ? { label: 'Draft terms', prompt: 'Draft default terms for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+    !paymentInstructions ? { label: 'Draft payment instructions', prompt: 'Draft payment instructions for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+    !warrantyText ? { label: 'Draft warranty', prompt: 'Draft warranty text for my company profile based on my trade and saved company info. Show me the draft and ask before saving.' } : null,
+    !estimateDisclaimer ? { label: 'Draft estimate disclaimer', prompt: 'Draft an estimate disclaimer for my company profile. Show me the draft and ask before saving.' } : null,
+    !contractDisclaimer ? { label: 'Draft contract disclaimer', prompt: 'Draft a contract disclaimer for my company profile. Show me the draft and ask before saving.' } : null,
+    !insuranceText ? { label: 'Add insurance note', prompt: 'Help me add insurance/licensing text to my company profile. Ask what you need or suggest safe wording for review.' } : null,
     { label: 'Upload price list', prompt: 'I want to upload a material price list for company pricing. Keep it company-level, review extracted rows, and ask before importing.' },
     { label: 'Upload agreement', prompt: 'I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.' },
   ].filter(Boolean) as Array<{ label: string; prompt: string }>
@@ -931,10 +948,10 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
         {missing.length ? (
           <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
             <div>
-              Missing document profile items: {missing.join(', ')}. These help estimates, invoices, reports, contracts, and signatures look complete.
+              Setup gaps: {missing.slice(0, 8).join(', ')}{missing.length > 8 ? ` + ${missing.length - 8} more` : ''}. These help estimates, invoices, reports, contracts, and signatures look complete.
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {setupActions.slice(0, 8).map(action => (
+              {setupActions.slice(0, 12).map(action => (
                 <button
                   key={action.label}
                   type="button"

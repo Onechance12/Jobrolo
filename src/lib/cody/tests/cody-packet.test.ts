@@ -17,6 +17,7 @@ export function assertCodyPacketContracts() {
   assert(inferCodyArea('Cody Cody Cody the onboarding screen locks me in setup mode') === 'onboarding/auth', 'onboarding notes should classify as onboarding/auth')
   assert(inferCodyArea('Cody Cody Cody approval button does nothing in Action Needed') === 'notifications', 'approval/notification notes should classify as notifications')
   assert(inferCodyArea('company card setup gaps should prompt me to upload agreements and research BBB') === 'company profile', 'company setup/research notes should classify as company profile')
+  assert(inferCodyArea('uploaded a photo after company research and the company card BBB Google reviews are wrong', 'uploads/files') === 'company profile', 'strong company/research notes should override a weak upload fallback')
   assert(inferCodySeverity('critical private customer file leaked') === 'urgent', 'security/private-data language should be urgent')
   assert(inferCodySeverity('upload failed and got stuck') === 'high', 'failed/stuck language should be high severity')
 

@@ -71,6 +71,12 @@ const AREA_PATTERNS: Array<[CodyArea, RegExp]> = [
   ['database', /\b(database|postgres|prisma|migration|schema|record|db)\b/i],
 ]
 
+const STRONG_AREA_PATTERNS: Array<[CodyArea, RegExp]> = [
+  ['company profile', /\b(company card|company profile|setup gaps?|research(?:ed|ing)? (?:my |the |our )?company|bbb|better business bureau|google reviews?|default terms|payment instructions|warranty text|estimate disclaimer|company logo|brand assets?)\b/i],
+  ['onboarding/auth', /\b(setup mode|stuck in onboarding|create workspace|join workspace|invite code|account entry)\b/i],
+  ['agent/tools', /\b(narrated operational work|without a valid executable tool call|tool call|tool_call|wrong workflow|misfire)\b/i],
+]
+
 const AREA_FILES: Record<CodyArea, string[]> = {
   'uploads/files': [
     'src/app/api/upload/route.ts',
@@ -163,6 +169,9 @@ const AREA_FILES: Record<CodyArea, string[]> = {
 export function inferCodyArea(content: string, fallback?: string | null): CodyArea {
   const normalizedFallback = (fallback ?? '').trim().toLowerCase()
   const known = Object.keys(AREA_FILES).find(area => area === normalizedFallback) as CodyArea | undefined
+  for (const [area, pattern] of STRONG_AREA_PATTERNS) {
+    if (pattern.test(content)) return area
+  }
   if (known) return known
   for (const [area, pattern] of AREA_PATTERNS) {
     if (pattern.test(content)) return area

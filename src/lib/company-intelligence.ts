@@ -273,10 +273,15 @@ function buildRecommendations(input: {
     })
   }
   if (input.kpis.leads.thisPeriod === 0) {
+    const pipelineAdds = (input.kpis.customers.addedThisPeriod ?? 0) + (input.kpis.projects.addedThisPeriod ?? 0)
     out.push({
-      title: 'Create lead flow this week',
-      detail: 'No new leads are saved for this period yet. Use field mode, referrals, website follow-up, or past-customer outreach.',
-      prompt: 'Help me create a lead generation plan for this week using my current company profile and saved Jobrolo data.',
+      title: pipelineAdds > 0 ? 'Tighten lead tracking' : 'Create lead flow this week',
+      detail: pipelineAdds > 0
+        ? `No new field leads are saved for this period, but ${pipelineAdds} customer/project record(s) were added. Jobrolo should separate prospects, leads, customers, and jobs clearly.`
+        : 'No new field leads are saved for this period yet. Use field mode, referrals, website follow-up, or past-customer outreach.',
+      prompt: pipelineAdds > 0
+        ? 'Show my pipeline counts by prospects, leads, customers, active jobs, completed jobs, and files. Only use saved Jobrolo database records.'
+        : 'Help me create a lead generation plan for this week using my current company profile and saved Jobrolo data.',
       priority: 'normal',
     })
   }

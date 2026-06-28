@@ -591,7 +591,12 @@ function mostRecentBrowserLocation(messages: ChatMessage[]) {
 function isCompanyLogoUploadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!/\blogo\b/.test(lower)) return false
-  return /\b(company|profile|estimate|estimates|invoice|invoices|report|reports|contract|contracts|signature|signatures|branding|brand)\b/.test(lower)
+  if (!/\b(company|profile|estimate|estimates|invoice|invoices|report|reports|contract|contracts|signature|signatures|branding|brand)\b/.test(lower)) return false
+  // Only deterministic-save when the user explicitly tells Jobrolo to apply the
+  // current upload as the company logo. Questions like "show my logo" or "I
+  // need a logo" should route through normal confirmation instead of mutating.
+  return /\b(set|use|apply|save|make|add|update|replace)\b[\s\S]{0,80}\blogo\b/.test(lower)
+    || /\blogo\b[\s\S]{0,80}\b(set|use|apply|save|make|add|update|replace)\b/.test(lower)
 }
 
 function isActionCenterRequest(text: string) {
@@ -1239,7 +1244,7 @@ Common recovery examples:
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
 - To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
-- If the user uploaded a logo and asked to add it to the company profile, call update_contractor_profile with logoDocumentId from the current uploaded document. Do not wait for logo/image analysis.
+- If the user explicitly says to use/apply/save the current uploaded image as the company logo, call update_contractor_profile with logoDocumentId from the current uploaded document. If they only asked about logos, uploaded an image after discussing logos, or the image merely looks logo-like, ask for confirmation first.
 - To create a named/address potential lead before an inspection is set, call create_canvassing_lead_at_location with homeownerName/address/phone/status="new".
 - To start or log an inspection/field visit from chat, call log_field_action when a projectId is known, or start_field_inspection_lead when this is clearly an inspection/appointment at a new property with browser GPS.
 - To save live field observations like "missing shingles from ground", "dents to soft metals", "no soliciting sign", "renters", or "window screen damage" with browser GPS, call record_field_observation_at_location. Do not create a customer/project unless the user explicitly asks to convert it.
