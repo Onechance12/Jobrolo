@@ -37,6 +37,27 @@ import { normalizeRole } from '@/lib/security/permissions'
 import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
 import { createRoleNotification } from '@/lib/notifications'
 import { buildCodyPacket, inferCodyArea, inferCodySeverity } from '@/lib/cody/packet'
+import { getAllIntegrationReadiness, getIntegrationReadiness, getIntegrationsByCapability } from '@/lib/integrations/registry'
+
+const INTEGRATION_CAPABILITIES = [
+  'chat_reasoning',
+  'web_search',
+  'document_vision',
+  'price_catalog',
+  'account_pricing',
+  'quote_request',
+  'material_order',
+  'order_status',
+  'delivery_tracking',
+  'invoice_lookup',
+  'receipt_lookup',
+  'store_availability',
+  'property_lookup',
+  'reviews_lookup',
+  'social_research',
+  'notification_send',
+  'calendar_sync',
+] as const
 
 export interface ToolContext {
   conversationId?: string
@@ -1072,6 +1093,56 @@ export const TOOLS: ToolDef[] = [
             guidance: 'Review these suggested company profile updates. If anything is wrong, tell Jobrolo in chat and it will update the profile from your correction.',
           },
           message: 'Website research completed. If the user wants this saved, call update_contractor_profile with suggestedProfileUpdate fields.',
+        },
+      }
+    },
+  },
+  {
+    name: 'get_integration_readiness',
+    description: 'Read-only integration readiness check for outside connections such as OpenAI/ChatGPT, public web search, ABC Supply, SRS, QXO, Southern Shingle, Builders FirstSource, Home Depot, Lowe’s, property data, marketing, communications, calendar, and supplier APIs. Use when the user asks what is connected, what API connections exist, whether a supplier/OpenAI/web-search connection is ready, or what still needs to be configured. Never expose secret values; only report missing variable names and safe fallback workflows.',
+    schema: z.object({
+      providerId: z.string().min(1).max(80).optional(),
+      capability: z.enum(INTEGRATION_CAPABILITIES).optional(),
+    }),
+    allowedChannels: ['main', 'management', 'supplier', 'finance', 'production'],
+    execute: async (args) => {
+      if (args.providerId) {
+        const readiness = getIntegrationReadiness(args.providerId)
+        if (!readiness) {
+          return {
+            success: false,
+            data: { providerId: args.providerId },
+            error: `Unknown integration provider "${args.providerId}".`,
+          }
+        }
+        return {
+          success: true,
+          data: {
+            readiness,
+            message: readiness.configured
+              ? `${readiness.label} is configured for ${readiness.capabilities.join(', ')}.`
+              : `${readiness.label} is ${readiness.status}. Current fallback: ${readiness.currentFallback}`,
+          },
+        }
+      }
+
+      if (args.capability) {
+        const readiness = getIntegrationsByCapability(args.capability).map(provider => getIntegrationReadiness(provider.id)).filter(Boolean)
+        return {
+          success: true,
+          data: {
+            capability: args.capability,
+            integrations: readiness,
+            message: `Loaded integration readiness for ${args.capability}.`,
+          },
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          integrations: getAllIntegrationReadiness(),
+          message: 'Loaded all Jobrolo integration readiness records.',
         },
       }
     },

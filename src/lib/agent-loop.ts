@@ -385,6 +385,48 @@ function websiteHintFromText(text: string) {
   return bare.replace(/[),.]+$/g, '')
 }
 
+function integrationProviderHintFromText(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (/\b(openai|chatgpt|gpt|ai provider|web search)\b/.test(lower)) return lower.includes('web search') ? 'public_web_search' : 'openai'
+  if (/\babc(?:\s+supply)?\b/.test(lower)) return 'abc_supply'
+  if (/\bsrs(?:\s+distribution)?\b/.test(lower)) return 'srs_distribution'
+  if (/\bqxo\b|\bbeacon\b/.test(lower)) return 'qxo'
+  if (/\bsouthern\s+shingle\b/.test(lower)) return 'southern_shingle'
+  if (/\bbuilders?\s+first\s*source\b|\bbfs\b/.test(lower)) return 'builders_firstsource'
+  if (/\bhome\s+depot\b/.test(lower)) return 'home_depot'
+  if (/\blowe'?s\b/.test(lower)) return 'lowes'
+  return null
+}
+
+function integrationCapabilityHintFromText(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (/\b(web search|search online|online research|public search|google|duckduckgo|reviews?|social)\b/.test(lower)) return 'web_search'
+  if (/\b(price list|price sheet|price catalog|material price|account pricing|supplier pricing)\b/.test(lower)) return 'price_catalog'
+  if (/\b(order|material order|place order|order status)\b/.test(lower)) return lower.includes('status') ? 'order_status' : 'material_order'
+  if (/\b(delivery|delivery ticket|drop)\b/.test(lower)) return 'delivery_tracking'
+  if (/\b(invoice|bill|supplier invoice)\b/.test(lower)) return 'invoice_lookup'
+  if (/\b(receipt|store purchase)\b/.test(lower)) return 'receipt_lookup'
+  if (/\b(homeowner|property owner|property data|county|cad|parcel)\b/.test(lower)) return 'property_lookup'
+  if (/\b(document vision|ocr|photo analysis|image analysis)\b/.test(lower)) return 'document_vision'
+  return null
+}
+
+function isIntegrationReadinessRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  const integrationTerm = /\b(api|apis|integration|integrations|connected|connection|connect|configured|supplier|vendor|openai|chatgpt|web search|abc|srs|qxo|beacon|southern shingle|builders firstsource|home depot|lowe'?s)\b/.test(lower)
+  const readinessTerm = /\b(what|which|show|list|status|ready|available|connected|configured|setup|set up|can we|can jobrolo|do we have|need to connect|how do we connect)\b/.test(lower)
+  return integrationTerm && readinessTerm
+}
+
+function buildIntegrationReadinessToolCall(text: string): ToolCall {
+  const providerId = integrationProviderHintFromText(text)
+  if (providerId) return { name: 'get_integration_readiness', args: { providerId } }
+  const capability = integrationCapabilityHintFromText(text)
+  if (capability) return { name: 'get_integration_readiness', args: { capability } }
+  return { name: 'get_integration_readiness', args: {} }
+}
+
 function needsCompanyProfileToolRetry(parsed: ParsedAIResponse, messages: ChatMessage[], toolCallCount: number, executableActionCount: number) {
   if (toolCallCount > 0 || executableActionCount > 0) return false
   const userText = latestUserText(messages)
@@ -1203,6 +1245,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
+  if (isIntegrationReadinessRequest(userText)) return buildIntegrationReadinessToolCall(userText)
   if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
   if (isCompanyProfileResearchRequest(userText)) {
     const website = websiteHintFromText(userText)

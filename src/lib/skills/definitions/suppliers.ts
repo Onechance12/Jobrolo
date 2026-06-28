@@ -19,6 +19,7 @@ export const supplierSkills: JobroloSkill[] = [
       'Price lists are company-level by default, not customer/project files.',
       'Review rows before importing; never clear/replace prices from an ambiguous prompt.',
       'Use review_price_sheet_items for first rows, units, prices, and pending/imported status.',
+      'If a live supplier API is not configured, use uploaded price sheets and clearly say the supplier connection is not live yet.',
     ],
     failureHandling: ['If row data is missing, say the price sheet was detected but rows are not reviewable yet.'],
     tests: ['show price list selects review_price_sheet_items', 'price sheet upload does not need customer/project link'],
@@ -31,11 +32,13 @@ export const supplierSkills: JobroloSkill[] = [
     risk: 'medium',
     priority: 58,
     purpose: 'Represent supplier-specific workflows for ABC, SRS, QXO, and local distributors without adding APIs yet.',
-    whenToUse: ['Supplier branch questions', 'Supplier quotes', 'Manual supplier fallback'],
+    whenToUse: ['Supplier branch questions', 'Supplier quotes', 'Manual supplier fallback', 'ABC Supply', 'SRS', 'QXO', 'Home Depot', "Lowe's"],
     allowedRoles: ['owner', 'admin', 'production', 'office', 'system'],
     decisionRules: [
       'Do not claim live supplier API access unless configured.',
       'Use manual fallback drafts when supplier integrations are unavailable.',
+      'Supplier connections should be implemented through the integration registry/provider layer, not one-off tool calls.',
+      'Before placing orders, sending quote requests, or checking account pricing, verify integration readiness and require approval for external actions.',
     ],
   },
   {
