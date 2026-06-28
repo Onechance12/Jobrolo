@@ -91,6 +91,11 @@ const PROJECT_CHAT_TYPE_SCHEMA = z.enum(PROJECT_CHAT_TYPES)
 type ProjectChatType = (typeof PROJECT_CHAT_TYPES)[number]
 const CREW_LIKE_CHAT_TYPES = new Set<ProjectChatType>(['crew', 'roofing_crew', 'gutter_crew', 'window_crew', 'siding_crew', 'field_crew', 'subcontractor'])
 
+function compactTesterFeedbackSummary(content: string) {
+  const compact = content.replace(/\s+/g, ' ').trim()
+  return compact.length > 360 ? `${compact.slice(0, 357)}...` : compact
+}
+
 function canRunDirectWithoutApproval(name: string, ctx: ToolContext, args?: Record<string, unknown>) {
   if (!ctx.trustedDirectExecution) return false
   if (!TRUSTED_DIRECT_TOOLS.has(name)) return false
@@ -119,6 +124,23 @@ function normalizeDocumentLinkRole(role: string) {
     return 'inspection_photo'
   }
   return normalized || 'attachment'
+}
+
+async function markDocumentLinkReviewsActioned(contractorId: string, documentId: string) {
+  if (!documentId) return
+  await db.inboxItem.updateMany({
+    where: {
+      contractorId,
+      type: 'document_link_review',
+      relatedType: 'document',
+      relatedId: documentId,
+      status: { in: ['unread', 'read'] },
+    },
+    data: {
+      status: 'actioned',
+      actionedAt: new Date(),
+    },
+  }).catch(err => console.warn(`[tools-v2] document_link_review cleanup failed for ${documentId}:`, err))
 }
 
 function canManageCompanyProfile(ctx: ToolContext) {
@@ -984,7 +1006,7 @@ export const TOOLS: ToolDef[] = [
       website: z.string().max(500).optional(),
       companyName: z.string().max(200).optional(),
       searchMode: z.enum(['cheap', 'normal', 'deep']).optional(),
-    }).refine(v => Boolean(v.website?.trim() || v.companyName?.trim()), 'website or companyName is required'),
+    }),
     allowedChannels: ['main', 'management'],
     execute: async (args, contractorId, ctx) => {
       if (!canManageCompanyProfile(ctx)) {
@@ -1945,6 +1967,7 @@ export const TOOLS: ToolDef[] = [
         source: 'ai',
       })
       if (!link) return { success: false, data: null, error: 'Document not found or does not belong to this contractor' }
+      await markDocumentLinkReviewsActioned(contractorId, args.documentId)
       return { success: true, data: { link, role: normalizedRole, label: args.label ?? null } }
     },
   },
@@ -2345,7 +2368,7 @@ export const TOOLS: ToolDef[] = [
       const inferredSeverity = inferCodySeverity(content, args.severity)
       const area = inferCodyArea(content, args.area)
       const title = `${args.source === 'note_to_codex' ? 'Note to Codex' : 'Note to Cody'}: ${area}`
-      const summary = content.length > 700 ? `${content.slice(0, 697)}...` : content
+      const summary = compactTesterFeedbackSummary(content)
       const debugContext = {
         ...(args.debugContext ?? {}),
         conversationId: args.debugContext?.conversationId ?? ctx.conversationId ?? null,
@@ -2425,7 +2448,7 @@ export const TOOLS: ToolDef[] = [
             priority: item.priority,
             area,
           },
-          message: 'Saved this as tester feedback for Cody/Codex in Action Needed.',
+          message: 'Cody captured this. I saved a compact Codex packet with the recent chat context.',
         },
       }
     },
@@ -3847,6 +3870,7 @@ export const TOOLS: ToolDef[] = [
         source: 'ai',
         metadata: { linkedVia: 'link_document_to_customer', customerOnly: !project?.id },
       }).catch(err => console.warn(`[tools-v2] link_document_to_customer: document link record failed for ${doc?.id}:`, err))
+      await markDocumentLinkReviewsActioned(contractorId, doc.id)
       console.log(`[tools-v2] link_document_to_customer: linked ${doc.originalName} to ${customer.name}`)
       return {
         success: true,

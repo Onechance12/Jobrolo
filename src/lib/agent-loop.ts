@@ -206,6 +206,50 @@ function sanitizeToolArgs(value: unknown, path = 'args'): { value: unknown; remo
   return { value, removed: [] }
 }
 
+function normalizeDecisionValue(value: unknown): 'approved' | 'rejected' | undefined {
+  if (Array.isArray(value)) return normalizeDecisionValue(value[0])
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, '')
+
+  if (['approved', 'approve', 'yes', 'y', 'accepted', 'accept'].includes(normalized)) return 'approved'
+  if (['rejected', 'reject', 'no', 'n', 'denied', 'deny', 'declined', 'decline'].includes(normalized)) return 'rejected'
+  return undefined
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const ids = value.map(item => String(item ?? '').trim()).filter(Boolean)
+    return ids.length ? ids : undefined
+  }
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return undefined
+}
+
+function normalizeApprovalToolArgs(call: ToolCall): ToolCall {
+  if (call.name !== 'decide_action_request' && call.name !== 'decide_pending_action_requests') return call
+
+  const args = { ...(call.args ?? {}) } as Record<string, unknown>
+  const decision = normalizeDecisionValue(args.decision)
+  if (decision) args.decision = decision
+
+  if (call.name === 'decide_pending_action_requests') {
+    const ids = normalizeStringArray(args.actionRequestIds)
+    if (ids) args.actionRequestIds = ids
+  }
+
+  if (call.name === 'decide_action_request') {
+    const idCandidate = args.actionRequestId ?? args.id ?? args.actionRequestIds
+    const ids = normalizeStringArray(idCandidate)
+    if (ids?.[0]) args.actionRequestId = ids[0]
+    delete args.id
+    delete args.actionRequestIds
+  }
+
+  return { ...call, args }
+}
+
 function actionToToolCall(action: { type: string; [k: string]: unknown }): ToolCall | null {
   if (!TOOL_NAMES.has(action.type)) return null
   const { type, ...args } = action
@@ -322,10 +366,29 @@ function isCompanyProfileReadRequest(text: string) {
   )
 }
 
+function isCompanyProfileResearchRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  return (
+    /\b(research|search|look up|check|scan|find)\b[\s\S]{0,120}\b(my|our|the)?\s*(company|business|website|online presence|web presence)\b/.test(lower) ||
+    /\b(company|business)\b[\s\S]{0,80}\b(research|online presence|web presence)\b/.test(lower)
+  )
+}
+
+function websiteHintFromText(text: string) {
+  const clean = plainMessageText(text)
+  const explicit = clean.match(/\bhttps?:\/\/[^\s<>)"']+/i)?.[0]
+  if (explicit) return explicit.replace(/[),.]+$/g, '')
+  const bare = clean.match(/\b(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+\b/i)?.[0]
+  if (!bare) return null
+  if (/\.(?:jpg|jpeg|png|gif|webp|pdf|docx?|xlsx?|csv|txt)$/i.test(bare)) return null
+  return bare.replace(/[),.]+$/g, '')
+}
+
 function needsCompanyProfileToolRetry(parsed: ParsedAIResponse, messages: ChatMessage[], toolCallCount: number, executableActionCount: number) {
   if (toolCallCount > 0 || executableActionCount > 0) return false
   const userText = latestUserText(messages)
-  if (!isCompanyProfileReadRequest(userText)) return false
+  if (!isCompanyProfileReadRequest(userText) && !isCompanyProfileResearchRequest(userText)) return false
   const answer = parsed.text.toLowerCase()
   return (
     answer.includes('fetching') ||
@@ -333,7 +396,19 @@ function needsCompanyProfileToolRetry(parsed: ParsedAIResponse, messages: ChatMe
     answer.includes('pulling up') ||
     answer.includes('getting') ||
     answer.includes('checking') ||
+    answer.includes('research') ||
+    answer.includes('search') ||
     answer.length < 160
+  )
+}
+
+function looksLikeCodyInventedRuntimeAccess(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  return (
+    /\b(successfully retrieved|retrieved the customer file|found the customer file|looked up the customer|fetched the record|pulled the record)\b/.test(lower) ||
+    /\bhere are the details\b[\s\S]{0,120}\b(customer information|project information|document information)\b/.test(lower) ||
+    /\bi (successfully )?(created|updated|saved|deleted|linked|attached|approved|rejected)\b/.test(lower)
   )
 }
 
@@ -497,7 +572,7 @@ function buildAffirmativeContinuationInstruction(messages: ChatMessage[]) {
 
 Do not create a new approval request. Do not narrate.
 
-Call decide_pending_action_requests with decision "approved"${toolName ? ` and toolName "${toolName}"` : ''}.
+Call decide_pending_action_requests with exact JSON args: {"decision":"approved"${toolName ? `,"toolName":"${toolName}"` : ''},"approveRecent":true}.
 
 Only say the action completed after the approval replay tool result confirms success. If multiple approvals match, ask which exact approval to run. Respond as JSON only.`
   }
@@ -1128,6 +1203,11 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
+  if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
+  if (isCompanyProfileResearchRequest(userText)) {
+    const website = websiteHintFromText(userText)
+    return { name: 'research_contractor_website', args: website ? { website } : {} }
+  }
   const convertFieldLeadToolCall = buildConvertFieldLeadToolCall(userText)
   if (convertFieldLeadToolCall) return convertFieldLeadToolCall
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
@@ -1163,6 +1243,10 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[], opts?: Pic
 
 Rules:
 - Do not call mutation tools.
+- Do not claim you retrieved, fetched, looked up, created, saved, linked, updated, approved, rejected, or deleted anything.
+- Cody mode only sees this chat context and any explicitly attached screenshots/files; it does not have live database/tool access inside the response.
+- If the user asks Cody to look up live customer/project/document data, explain that Cody can review visible evidence here, and the user should ask normal Jobrolo outside Cody mode for live records.
+- Do not invent customer names, addresses, project details, document lists, or database records that are not in the visible Cody context.
 - Do not create customers, projects, documents, notifications, or approvals.
 - Do not save this as a normal customer/job note.
 - Help the user discuss, reproduce, and clarify the bug or product issue.
@@ -1242,7 +1326,7 @@ Common recovery examples:
 - To remove a file from a customer/project but keep it saved, call detach_document_from_customer. Do not delete unless the user explicitly asked to permanently delete the file.
 - To move a supplier price sheet out of a customer file and into company pricing, call detach_document_from_customer, then review_price_sheet_items; ask for confirmation before import_price_sheet_items.
 - To delete a customer/client, call delete_customer, not delete_documents_by_name.
-- To approve pending requests after the user says "yes approved", "yes delete", "yes", or "approved", call decide_pending_action_requests or decide_action_request. If the pending request is delete_customer, pass toolName="delete_customer" and do NOT create a new delete_customer approval.
+- To approve pending requests after the user says "yes approved", "yes delete", "yes", or "approved", call decide_pending_action_requests or decide_action_request. Use exact decision values "approved" or "rejected". For decide_pending_action_requests, actionRequestIds must be an array of strings, never a single string. If the pending request is delete_customer, pass toolName="delete_customer" and do NOT create a new delete_customer approval.
 - To create a crew/customer/project chat, call create_project_chat.
 - To invite/add/share a chat with an employee, crew member, subcontractor, customer, homeowner, or sales rep, call invite_user_to_chat. If email is missing, ask for it. Default to returning a copyable secure invite link; only set sendEmail/sendSms when the user explicitly wants automatic delivery.
 - To show/update company info, call get_contractor_profile or update_contractor_profile. To research a company website, call research_contractor_website first; if the user asked to save the findings, follow up with update_contractor_profile after the research result.
@@ -1261,6 +1345,17 @@ Respond as JSON only.`
 }
 
 function buildCompanyProfileToolInstruction(userText: string) {
+  if (isCompanyProfileResearchRequest(userText)) {
+    const website = websiteHintFromText(userText)
+    return `The user asked: "${userText.slice(0, 220)}"
+
+This is a company/business public research request. Do not answer "I'll research" or "checking" as a final response.
+
+Call research_contractor_website now${website ? ` with website "${website}"` : ' using the saved company profile as fallback context'}, final=false. After the tool result returns, summarize public evidence and suggested updates without claiming anything was saved.
+
+Respond as JSON only.`
+  }
+
   return `The user asked: "${userText.slice(0, 180)}"
 
 This is a saved company/business profile lookup. Do not answer "fetching" or "checking" as a final response.
@@ -1357,6 +1452,25 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
     const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
     const parsed = parseAIResponse(raw)
+    if (codyBlockAtStart.active && !codyBlockAtStart.closing && looksLikeCodyInventedRuntimeAccess(parsed.text)) {
+      lastBlockedReason = 'Cody mode response claimed live data/tool access.'
+      console.warn(`[agent-loop] forced Cody mode retry after invented runtime access iteration=${i} contractorId=${opts.contractorId}`)
+      messages.push({ role: 'assistant', content: raw })
+      messages.push({
+        role: 'user',
+        content: `Cody mode must be read-only and evidence-based.
+
+You claimed live database/tool access or completed work. That is not allowed in Cody mode.
+
+Correct your answer:
+- Say what you can infer only from the visible Cody chat/screenshot/context.
+- If live records are needed, tell the user to ask normal Jobrolo outside Cody mode.
+- Do not invent customer/project/document details.
+- Do not claim anything was saved, retrieved, linked, approved, rejected, or updated.
+- Respond as JSON only with final=true and no tool_calls/actions.`,
+      })
+      continue
+    }
     if (activeTesterFeedback && testerFeedbackSaved) {
       const capturedText = testerFeedbackFollowUpText(activeTesterFeedback)
       const finalParsed: ParsedAIResponse = {
@@ -1440,6 +1554,7 @@ Respond as JSON only.`,
     }
 
     let toolCalls = [...(parsed.tool_calls ?? []), ...normalizedWork.convertedToolCalls, ...(deterministicToolCall ? [deterministicToolCall] : [])]
+      .map(normalizeApprovalToolArgs)
     const blockedToolResults: NonNullable<AgentIteration['toolResults']> = [...normalizedWork.blockedResults]
     if (normalizedWork.blockedResults.length > 0) {
       lastBlockedReason = normalizedWork.blockedResults.map(r => r.error).filter(Boolean).join('; ')

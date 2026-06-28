@@ -183,6 +183,14 @@ export function extractCodyFeedbackActivation(text: string): CodyActivation | nu
   const clean = text.trim()
   if (!clean) return null
 
+  const codyMarker = clean.match(/^\s*\(?\s*note\s+to\s+(cody)\s*\)?\s*[:\-–—]?\s*/i)
+    ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(cody)\s*[:\-–—]?\s*/i)
+    ?? clean.match(/^\s*(?:tell|send|save)\s+(cody)\s+(?:this\s+)?[:\-–—]?\s*/i)
+  if (codyMarker) {
+    const content = clean.slice(codyMarker[0].length).trim()
+    return content ? { audience: 'cody', content } : null
+  }
+
   const codexMarker = clean.match(/^\s*\(?\s*note\s+to\s+(codex)\s*\)?\s*[:\-–—]?\s*/i)
     ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(codex)\s*[:\-–—]?\s*/i)
     ?? clean.match(/^\s*(?:tell|send|save)\s+(codex)\s+(?:this\s+)?[:\-–—]?\s*/i)
@@ -224,7 +232,34 @@ function priorityFromSeverity(severity: CodySeverity): CodyPacket['priority'] {
 }
 
 function compactSummary(content: string) {
-  return content.replace(/\s+/g, ' ').trim().slice(0, 600)
+  const compact = content.replace(/\s+/g, ' ').trim()
+  return compact.length > 420 ? `${compact.slice(0, 417)}...` : compact
+}
+
+function likelyIssueFromContent(area: CodyArea, content: string) {
+  if (/\bwithout a valid executable tool call|narrated operational work|did not include any tool_calls|no executable\b/i.test(content)) {
+    return 'Agent promised operational work without an executable tool call. Tighten deterministic intent routing and tool-call recovery for this workflow.'
+  }
+  if (/\bInvalid (?:tool )?args|expected array|expected.*approved|expected.*rejected|decide_(?:pending_)?action_request/i.test(content)) {
+    return 'Approval replay emitted malformed tool arguments before the stored action could run. Normalize approval decisions and actionRequestIds before schema validation.'
+  }
+  if (/\b(review docs?|needs review|still.*review|approved.*still|link(?:ed|ing).*still)\b/i.test(content)) {
+    return 'A review/inbox item appears to stay open after the underlying document action completed. Check the InboxItem lifecycle and mark document-review items actioned when a link/save succeeds.'
+  }
+  if (area === 'company profile' && /\b(fetching|research|profile|company)\b/i.test(content) && /\bwithout a valid executable tool call|did not include any tool_calls|narrated/i.test(content)) {
+    return 'Company profile/research intent was answered from narration instead of the company-profile or research tool path.'
+  }
+  if (area === 'uploads/files' && /\bwrong customer|attached to|price sheet|logo|profile photo|timothy|customer file\b/i.test(content)) {
+    return 'Upload routing likely used stale active context instead of user intent, extracted content, and document classification boundaries.'
+  }
+  if (area === 'onboarding/auth' && /\bstuck|locked|cannot navigate|setup mode|sign in chat|account entry\b/i.test(content)) {
+    return 'Onboarding/account-entry state is bleeding into normal navigation or failing to route Cody/sign-in/setup actions through the expected chat-first path.'
+  }
+  return `Likely ${area} workflow issue based on tester feedback. Confirm with captured chat/log evidence before patching.`
+}
+
+function codexTaskForArea(area: CodyArea, likelyFiles: string[], likelyIssue: string) {
+  return `Investigate and fix: ${likelyIssue} Start with ${likelyFiles.slice(0, 3).join(', ')}. Preserve approvals, tenant isolation, and chat-first behavior.`
 }
 
 function expectedForArea(area: CodyArea) {
@@ -407,6 +442,7 @@ export function buildCodyPacket(input: CodyPacketInput): CodyPacket {
   const expectedBehavior = expectedForArea(area)
   const actualBehavior = summary || 'Tester reported a problem but did not provide details.'
   const likelyFiles = AREA_FILES[area] ?? AREA_FILES.general
+  const likelyIssue = likelyIssueFromContent(area, content)
   const suggestedFixDirection = fixDirectionForArea(area)
   const safetyNotes = safetyNotesForArea(area)
   const testChecklist = testChecklistForArea(area)
@@ -419,7 +455,7 @@ export function buildCodyPacket(input: CodyPacketInput): CodyPacket {
     role: 'read_only_developer_analyst',
     oneSentenceSummary: summary,
     whatICanSee: evidence.length ? evidence : ['Only the tester note is available. Ask for screenshot/chat/log context if needed.'],
-    likelyIssue: `Likely ${area} workflow issue based on tester feedback. Confirm with captured chat/log evidence before patching.`,
+    likelyIssue,
     expectedBehavior,
     actualBehavior,
     evidence,
@@ -434,7 +470,7 @@ export function buildCodyPacket(input: CodyPacketInput): CodyPacket {
       'Do not turn tester notes into customer/job notes.',
     ],
     testChecklist,
-    codexTask: `Investigate and fix the ${area} issue described by the tester. Start with ${likelyFiles.slice(0, 3).join(', ')}. Preserve approvals, tenant isolation, and chat-first behavior.`,
+    codexTask: codexTaskForArea(area, likelyFiles, likelyIssue),
   }
 }
 
@@ -442,5 +478,5 @@ export function buildCodyCaptureMessage(input: Pick<CodyPacketInput, 'content' |
   const area = inferCodyArea(input.content, input.area)
   const severity = inferCodySeverity(input.content, input.severity)
   const priority = priorityFromSeverity(severity)
-  return `Captured for Cody as ${priority} ${area}. Cody will review it as read-only developer feedback and package the context for Codex.`
+  return `Cody captured this as ${priority} ${area}. I saved the note plus recent chat context for Codex.`
 }

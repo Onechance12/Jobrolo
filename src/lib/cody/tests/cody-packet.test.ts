@@ -26,6 +26,8 @@ export function assertCodyPacketContracts() {
 
   const codexActivation = extractCodyFeedbackActivation('note to Codex: review this patch')
   assert(codexActivation?.audience === 'codex', 'note to Codex should still activate direct Codex feedback')
+  const codyActivation = extractCodyFeedbackActivation('note to Cody: upload approval does nothing')
+  assert(codyActivation?.audience === 'cody', 'note to Cody should activate direct Cody feedback')
 
   assert(isCodyBlockOpenText('Cody Cody Cody upload approval does nothing') === true, 'triple Cody should open Cody review mode')
   assert(isCodyBlockOpenText('Cody help me debug uploads') === false, 'single Cody should not open Cody review mode')
