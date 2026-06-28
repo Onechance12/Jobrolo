@@ -595,6 +595,38 @@ function testerFeedbackFromText(text: string): { content: string; source: 'note_
   }
 }
 
+function testerFeedbackFollowUpText(feedback: { content: string; source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'; area?: string }) {
+  const audience = feedback.source === 'note_to_codex' ? 'Codex' : 'Cody'
+  const lower = feedback.content.toLowerCase()
+  let workaround = 'If you still need to keep working, tell Jobrolo the immediate goal in plain language and use the closest working card/tool path. This note is saved for review with the logs.'
+
+  if (/\b(upload|file|photo|image|jpeg|jpg|png|pdf|document|scope)\b/.test(lower)) {
+    workaround = 'For now, use the upload path that matches the file: roof/site photos through photo or inspection-photo upload, PDFs/scopes/estimates through document upload, and company logos through Add logo. If the picker rejects it or Jobrolo guesses wrong, paste the scope text into chat or say “this upload is a photo/document/logo for…” so the workflow stays moving while Cody reviews the bug.'
+  }
+
+  if (/\b(misclass|wrong.*type|claim number|policy number|insurance field|treated.*document|roof photo|simple photo)\b/.test(lower)) {
+    workaround = 'For now, treat normal roof photos as inspection/evidence photos and manually tag the section if needed, like “roof overview,” “front elevation,” or “hail/wind damage.” A plain roof photo should not ask for claim number, policy number, carrier, deductible, RCV, or ACV.'
+  }
+
+  if (/\b(company|profile|logo|avatar|picture|brand)\b/.test(lower)) {
+    workaround = 'For now, upload the image, then say “use the last upload as my company logo” or “use the last upload as my profile photo.” Jobrolo should ask before saving it to the profile instead of attaching it to a customer/job.'
+  }
+
+  if (/\b(onboard|signup|sign in|login|workspace|invite|locked|stuck)\b/.test(lower)) {
+    workaround = 'For now, use Sign in, Create workspace, or the invite link/code path. If setup locks you in, refresh and open Command Center after the company setup finishes; Cody will review the onboarding lock/route.'
+  }
+
+  if (/\b(shortcut|prompt|pill|button)\b/.test(lower)) {
+    workaround = 'For now, use the shortcut pill as a prompt starter, edit the text before sending, and tell Jobrolo exactly which shortcut title/prompt to add, edit, or delete.'
+  }
+
+  if (/\b(field|gps|map|inspection|canvass|location)\b/.test(lower)) {
+    workaround = 'For now, use Open map to confirm the location, then say “start an inspection here” or “save this as a field lead.” If the browser location is wrong or missing, include the address or nearest landmark.'
+  }
+
+  return `Captured that note for ${audience}. ${workaround}`
+}
+
 function isFieldInspectionLeadRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
@@ -885,6 +917,10 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   return null
 }
 
+function stableToolCallSignature(toolCall: ToolCall) {
+  return `${toolCall.name}:${JSON.stringify(toolCall.args ?? {})}`
+}
+
 function documentHintFromPriceSheetText(text: string) {
   const clean = plainMessageText(text)
   const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
@@ -1006,6 +1042,8 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxIterations = opts.maxIterations ?? 4
   const messages = [...opts.messages]
+  const latestUserAtStart = lastExternalUserMessage(messages)
+  const activeTesterFeedback = latestUserAtStart ? testerFeedbackFromText(plainMessageText(latestUserAtStart.message.content)) : null
   const continuationInstruction = buildAffirmativeContinuationInstruction(messages) ?? buildUploadLinkContinuationInstruction(messages)
   if (continuationInstruction) {
     const insertAt = Math.max(0, messages.length - 1)
@@ -1021,6 +1059,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const iterations: AgentIteration[] = []
   let totalToolCalls = 0
   let lastBlockedReason: string | null = null
+  let testerFeedbackSaved = false
+  const injectedDeterministicToolCalls = new Set<string>()
 
   for (let i = 0; i < maxIterations; i++) {
     if (await opts.isCancelled?.()) {
@@ -1032,13 +1072,35 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
     const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
     const parsed = parseAIResponse(raw)
+    if (activeTesterFeedback && testerFeedbackSaved) {
+      const capturedText = testerFeedbackFollowUpText(activeTesterFeedback)
+      const finalParsed: ParsedAIResponse = {
+        ...parsed,
+        text: capturedText,
+        actions: [],
+        tool_calls: [],
+        final: true,
+      }
+      const finalIteration: AgentIteration = { iteration: i, text: finalParsed.text, toolCalls: [], final: true }
+      opts.onIteration?.(finalIteration)
+      iterations.push(finalIteration)
+      console.log(`[agent-loop] tester feedback final answer sanitized after saved result contractorId=${opts.contractorId}`)
+      return { final: finalParsed, iterations, totalToolCalls }
+    }
     const normalizedWork = normalizeParsedWork(parsed)
     const parsedToolCallCount = (parsed.tool_calls?.length ?? 0) + normalizedWork.convertedToolCalls.length
     const parsedActionCount = normalizedWork.executableActions.length
-    const deterministicToolCall = parsedToolCallCount === 0 && parsedActionCount === 0
+    const candidateDeterministicToolCall = parsedToolCallCount === 0 && parsedActionCount === 0
       ? buildDeterministicToolCall(messages, opts)
       : null
+    const deterministicToolCall = candidateDeterministicToolCall && !injectedDeterministicToolCalls.has(stableToolCallSignature(candidateDeterministicToolCall))
+      ? candidateDeterministicToolCall
+      : null
+    if (candidateDeterministicToolCall && !deterministicToolCall) {
+      console.warn(`[agent-loop] skipped repeated deterministic tool call '${candidateDeterministicToolCall.name}' iteration=${i} contractorId=${opts.contractorId}`)
+    }
     if (deterministicToolCall) {
+      injectedDeterministicToolCalls.add(stableToolCallSignature(deterministicToolCall))
       console.warn(`[agent-loop] injected deterministic tool call '${deterministicToolCall.name}' iteration=${i} contractorId=${opts.contractorId}`)
     }
 
@@ -1082,6 +1144,14 @@ Respond as JSON only.`,
     const blockedToolResults: NonNullable<AgentIteration['toolResults']> = [...normalizedWork.blockedResults]
     if (normalizedWork.blockedResults.length > 0) {
       lastBlockedReason = normalizedWork.blockedResults.map(r => r.error).filter(Boolean).join('; ')
+    }
+
+    if (activeTesterFeedback && toolCalls.some(tc => tc.name === 'record_tester_feedback')) {
+      const before = toolCalls.length
+      toolCalls = toolCalls.filter(tc => tc.name === 'record_tester_feedback')
+      if (before !== toolCalls.length) {
+        console.warn(`[agent-loop] isolated tester feedback; dropped non-feedback tool calls contractorId=${opts.contractorId} dropped=${before - toolCalls.length}`)
+      }
     }
 
     // Filter out tools not allowed in this channel (security: per-channel permissioning)
@@ -1142,6 +1212,9 @@ Respond as JSON only.`,
           data: result.data,
           error: result.error,
         })
+        if (tc.name === 'record_tester_feedback' && result.success) {
+          testerFeedbackSaved = true
+        }
         totalToolCalls++
       }
       iteration.toolResults = results

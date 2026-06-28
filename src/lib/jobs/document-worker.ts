@@ -222,6 +222,36 @@ function buildDocumentReviewProfile(input: {
   }
 }
 
+function profileSpecificReviewNotes(profile: ReturnType<typeof buildDocumentReviewProfile>) {
+  if (!profile.missingFields.length) return []
+  if (profile.documentType === 'photo') {
+    const notes: string[] = []
+    if (profile.missingDataFlags.photoType) notes.push('Photo section/type was not confidently identified — ask the user to tag it as roof overview, elevation, hail/wind damage, interior, attic, documents, or other.')
+    if (profile.missingDataFlags.damageObserved) notes.push('Visible damage/condition was not confidently identified — ask for a short note if the photo is meant to document damage.')
+    if (profile.missingDataFlags.materialsVisible) notes.push('Visible materials were not confidently identified — ask for context if this matters for the job file or report.')
+    return notes
+  }
+  if (profile.documentType === 'price_sheet') {
+    const notes: string[] = []
+    if (profile.missingDataFlags.supplierName) notes.push('Supplier name was not confidently extracted — ask the user to confirm distributor/supplier before import.')
+    if (profile.missingDataFlags.effectiveDate) notes.push('Effective date was not confidently extracted — ask the user to confirm before importing prices.')
+    if (profile.missingDataFlags.unit || profile.missingDataFlags.unitPrice || profile.missingDataFlags.itemName) notes.push('Some material row fields need review before importing into company pricing.')
+    return notes
+  }
+  if (profile.documentType === 'scope_of_loss') {
+    const notes: string[] = []
+    if (profile.missingDataFlags.scopeSummary) notes.push('Scope summary was not confidently extracted — ask the user for context or paste the scope text.')
+    if (profile.missingDataFlags.lineItems) notes.push('No line items were confidently extracted — ask for the full scope/estimate text or a clearer file.')
+    if (profile.missingDataFlags.totals) notes.push('Totals were not confidently extracted — ask the user to confirm RCV/total if needed.')
+    return notes
+  }
+  return []
+}
+
+function shouldUseReviewProfileInsteadOfGenericClaimNotes(profile: ReturnType<typeof buildDocumentReviewProfile>) {
+  return ['photo', 'price_sheet', 'scope_of_loss', 'contract', 'invoice'].includes(profile.documentType)
+}
+
 export async function processDocumentJob(job: AgentJobRow) {
   await resolveJobExecutionContext(job)
   const input = JSON.parse(job.inputJson) as DocAnalysisInput
@@ -429,6 +459,13 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     comparisonMissingData: comparisonResult.missingData as Record<string, unknown>,
   })
   fullData.documentReview = imageReview
+  if (shouldUseReviewProfileInsteadOfGenericClaimNotes(imageReview)) {
+    fullData.missingData = imageReview.missingDataFlags
+    fullData.missingFields = imageReview.missingFields
+    fullData.reviewNotes = profileSpecificReviewNotes(imageReview)
+    fullData.warnings = imageReview.warnings
+    console.log(`[document-review] generic claim-field review suppressed documentId=${documentId} type=${imageReview.documentType}`)
+  }
 
   // PASS 6: Additive scope intelligence with real document + contractor IDs.
   // For images, the merged OCR/vision text is `visionText`. Failure is
@@ -446,6 +483,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     }
   }
 
+  const imageMissingCount = imageReview.missingFields.length
   const imageStatus = comparisonResult.confidence < 50 ? 'needs_review' : 'reviewed'
   if (imageStatus === 'needs_review') console.log(`[doc-worker] doc=${documentId} | low confidence — flagged for review`)
 
@@ -477,7 +515,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     status: imageStatus === 'needs_review' ? 'reviewed' : imageStatus,
     confidence: comparisonResult.confidence,
     conflictCount: Object.values(comparisonResult.conflicts).filter(Boolean).length,
-    missingCount: Object.values(comparisonResult.missingData).filter(Boolean).length,
+    missingCount: imageMissingCount,
     extractionMethod: 'image_vision',
     source: 'system',
   })
@@ -500,7 +538,7 @@ async function processImageDocument(job: AgentJobRow, current: any) {
     extractionMethod: 'image_vision',
     confidence: comparisonResult.confidence,
     conflicts: Object.values(comparisonResult.conflicts).filter(Boolean).length,
-    missingFields: Object.values(comparisonResult.missingData).filter(Boolean).length,
+    missingFields: imageMissingCount,
   })
 }
 
@@ -789,6 +827,13 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     comparisonMissingData: comparisonResult.missingData as Record<string, unknown>,
   })
   finalData.documentReview = documentReview
+  if (shouldUseReviewProfileInsteadOfGenericClaimNotes(documentReview)) {
+    finalData.missingData = documentReview.missingDataFlags
+    finalData.missingFields = documentReview.missingFields
+    finalData.reviewNotes = profileSpecificReviewNotes(documentReview)
+    finalData.warnings = documentReview.warnings
+    console.log(`[document-review] generic claim-field review suppressed documentId=${documentId} type=${documentReview.documentType}`)
+  }
 
   // PASS 6: Additive scope intelligence with real document + contractor IDs.
   // Failure is non-blocking; base parsing/processing remains intact.
@@ -804,6 +849,10 @@ async function processTextDocument(job: AgentJobRow, current: any) {
       console.log(`[doc-worker] doc=${documentId} | scope intelligence ✓ (${enriched.scopeIntelligence.supplementReview.opportunities.length} supplement opportunities)`)
     }
   }
+
+  const documentMissingCount = shouldUseReviewProfileInsteadOfGenericClaimNotes(documentReview)
+    ? documentReview.missingFields.length
+    : missingCount
 
   await db.document.update({
     where: { id: documentId },
@@ -835,7 +884,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     status: 'reviewed',
     confidence: comparisonResult.confidence,
     conflictCount,
-    missingCount,
+    missingCount: documentMissingCount,
     extractionMethod: finalExtractionMethod,
     source: 'system',
   })
@@ -868,7 +917,7 @@ async function processTextDocument(job: AgentJobRow, current: any) {
     extractionMethod: finalExtractionMethod,
     confidence: comparisonResult.confidence,
     conflicts: conflictCount,
-    missingFields: missingCount,
+    missingFields: documentMissingCount,
     reviewNotes: comparisonResult.reviewNotes.length,
   })
 }
