@@ -137,12 +137,14 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({
             message: `Cody session ended and saved to the Cody queue.\n\nArea: ${saved.area}\nSeverity: ${saved.severity}\n\nI captured the account-entry/onboarding context so Codex can review it.`,
             codySaved: true,
+            codyMode: false,
           })
         }
         return NextResponse.json({
           message: 'Cody session ended. I can help diagnose this account-entry screen here, but I could not save it to the private Cody queue because you are not signed in yet.\n\nBest workaround: sign in or create the workspace, then open Cody again in the main Jobrolo chat with “Cody Cody Cody” and close with “end Cody” so it saves with company/chat context.',
           codySaved: false,
           codySaveReason: saved.reason,
+          codyMode: false,
         })
       }
 
@@ -177,7 +179,10 @@ Response style:
         maxTokens: 650,
         temperature: 0.25,
       })
-      return NextResponse.json({ message: sanitizeAIOutput(answer || 'Cody mode is open. Tell me what broke, what you expected, and what happened. Type “end Cody” when you want to package it.') })
+      return NextResponse.json({
+        message: sanitizeAIOutput(answer || 'Cody mode is open. Tell me what broke, what you expected, and what happened. Type “end Cody” when you want to package it.'),
+        codyMode: true,
+      })
     }
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })

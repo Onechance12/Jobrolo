@@ -195,7 +195,8 @@ export function extractCodyFeedbackActivation(text: string): CodyActivation | nu
 export function isCodyBlockOpenText(text: string) {
   const clean = text.trim()
   if (!clean) return false
-  return /^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\b/i.test(clean)
+  const leadingWords = clean.toLowerCase().match(/[a-z]+/g) ?? []
+  return leadingWords[0] === 'cody' && leadingWords[1] === 'cody' && leadingWords[2] === 'cody'
 }
 
 export function isCodyBlockCloseText(text: string) {
@@ -203,7 +204,7 @@ export function isCodyBlockCloseText(text: string) {
 }
 
 export function codyBlockOpeningContent(text: string) {
-  return text.trim().replace(/^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\s*\)?\s*[:,\-–—]?\s*/i, '').trim()
+  return text.trim().replace(/^\s*\(?\s*cody\b[\s,.\-–—:;!]*cody\b[\s,.\-–—:;!]*cody\b\s*\)?\s*[:,\-–—]?\s*/i, '').trim()
 }
 
 export function inferCodySeverity(content: string, fallback?: string | null): CodySeverity {

@@ -153,7 +153,8 @@ function mentionsInviteJoin(value: string) {
 }
 
 function isLobbyCodyOpen(value: string) {
-  return /^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\b/i.test(value.trim())
+  const leadingWords = value.trim().toLowerCase().match(/[a-z]+/g) ?? []
+  return leadingWords[0] === 'cody' && leadingWords[1] === 'cody' && leadingWords[2] === 'cody'
 }
 
 function isLobbyCodyClose(value: string) {
@@ -449,6 +450,11 @@ export default function SignupPage() {
         }),
       })
       const data = await res.json().catch(() => ({}))
+      if (data.codyMode === true) {
+        setCodyMode(true)
+      } else if (data.codyMode === false) {
+        setCodyMode(false)
+      }
       setLobbyMessages(prev => [
         ...prev,
         {
