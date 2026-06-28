@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const command = process.argv[2] || 'help'
+const args = process.argv.slice(3)
+
+function loadLocalEnv() {
+  for (const file of ['.env.local', '.env']) {
+    const path = resolve(process.cwd(), file)
+    if (!existsSync(path)) continue
+    const text = readFileSync(path, 'utf8')
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq === -1) continue
+      const key = trimmed.slice(0, eq).trim()
+      if (!key || process.env[key]) continue
+      let value = trimmed.slice(eq + 1).trim()
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1)
+      process.env[key] = value
+    }
+  }
+}
+
+loadLocalEnv()
+
+const baseUrl = (process.env.JOBROLO_BASE_URL || 'https://jobrolo.onrender.com').replace(/\/$/, '')
+const token = process.env.CODY_BRIDGE_TOKEN
+
+function usage() {
+  console.log(`Usage:
+  npm run live:version
+  npm run debug:actions -- --limit 25
+  npm run debug:runtime -- --minutes 120
+  npm run debug:upload -- <documentId>
+  npm run debug:trace -- --chatId <chatId>
+  npm run debug:trace -- --conversationId <conversationId>
+
+Environment:
+  JOBROLO_BASE_URL defaults to https://jobrolo.onrender.com
+  CODY_BRIDGE_TOKEN is required for /api/dev/* endpoints
+`)
+}
+
+function valueAfter(flag, fallback = undefined) {
+  const index = args.indexOf(flag)
+  if (index === -1 || index + 1 >= args.length) return fallback
+  return args[index + 1]
+}
+
+function query(params) {
+  const sp = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') sp.set(key, String(value))
+  }
+  const text = sp.toString()
+  return text ? `?${text}` : ''
+}
+
+async function request(path, { dev = true } = {}) {
+  if (dev && !token) {
+    console.error('Missing CODY_BRIDGE_TOKEN. Add it to .env.local or export it in your shell.')
+    process.exit(2)
+  }
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: {
+      ...(dev ? { authorization: `Bearer ${token}` } : {}),
+      accept: 'application/json',
+    },
+  })
+  const text = await res.text()
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    body = { raw: text }
+  }
+  if (!res.ok) {
+    console.error(`Request failed: ${res.status}`)
+    console.error(JSON.stringify(body, null, 2))
+    process.exit(1)
+  }
+  return body
+}
+
+function printJson(body) {
+  console.log(JSON.stringify(body, null, 2))
+}
+
+async function version() {
+  printJson(await request('/api/version', { dev: false }))
+}
+
+async function actions() {
+  printJson(await request(`/api/dev/action-queue${query({
+    limit: valueAfter('--limit', '50'),
+    actionStatus: valueAfter('--action-status'),
+    inboxStatus: valueAfter('--inbox-status'),
+  })}`))
+}
+
+async function runtime() {
+  printJson(await request(`/api/dev/runtime-logs${query({
+    limit: valueAfter('--limit', '50'),
+    minutes: valueAfter('--minutes', '60'),
+  })}`))
+}
+
+async function upload() {
+  const id = args.find(arg => !arg.startsWith('--'))
+  if (!id) {
+    console.error('Missing documentId.')
+    usage()
+    process.exit(2)
+  }
+  printJson(await request(`/api/dev/uploads/${encodeURIComponent(id)}/debug`))
+}
+
+async function trace() {
+  printJson(await request(`/api/dev/agent-traces${query({
+    limit: valueAfter('--limit', '25'),
+    chatId: valueAfter('--chatId'),
+    conversationId: valueAfter('--conversationId'),
+    messageId: valueAfter('--messageId'),
+  })}`))
+}
+
+if (command === 'version') await version()
+else if (command === 'actions') await actions()
+else if (command === 'runtime') await runtime()
+else if (command === 'upload') await upload()
+else if (command === 'trace') await trace()
+else usage()

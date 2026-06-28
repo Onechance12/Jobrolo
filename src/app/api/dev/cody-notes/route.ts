@@ -1,9 +1,9 @@
-import { timingSafeEqual } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { checkBodySize } from '@/lib/security/body-size'
 import { buildCodyPacket } from '@/lib/cody/packet'
+import { requireDevBridge, safeJson, safeText } from '@/lib/dev-bridge'
 
 export const runtime = 'nodejs'
 
@@ -20,37 +20,12 @@ const PatchSchema = z.object({
 
 const CODY_NOTE_TYPES = ['tester_feedback', 'cody_observation']
 
-function tokenFromRequest(req: NextRequest) {
-  const auth = req.headers.get('authorization') ?? ''
-  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim()
-  return req.headers.get('x-cody-bridge-token')?.trim() ?? ''
-}
-
-function authorized(req: NextRequest) {
-  const configured = process.env.CODY_BRIDGE_TOKEN?.trim()
-  const supplied = tokenFromRequest(req)
-  if (!configured || !supplied) return false
-  const configuredBuffer = Buffer.from(configured)
-  const suppliedBuffer = Buffer.from(supplied)
-  if (configuredBuffer.length !== suppliedBuffer.length) return false
-  return timingSafeEqual(configuredBuffer, suppliedBuffer)
-}
-
 function safePayload(payloadJson: string | null) {
-  if (!payloadJson) return null
-  try {
-    return JSON.parse(payloadJson) as Record<string, unknown>
-  } catch {
-    return null
-  }
+  return safeJson<Record<string, unknown> | null>(payloadJson, null)
 }
 
 function appBaseUrl(req: NextRequest) {
   return (process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin).replace(/\/$/, '')
-}
-
-function safeText(value: unknown, max = 2000) {
-  return typeof value === 'string' ? value.slice(0, max) : ''
 }
 
 function debugContextFromPayload(payload: Record<string, unknown> | null) {
@@ -125,15 +100,9 @@ function codyAppLink(baseUrl: string, debugContext: Record<string, unknown>) {
   return baseUrl
 }
 
-function responseUnauthorized() {
-  const message = process.env.CODY_BRIDGE_TOKEN
-    ? 'Unauthorized'
-    : 'Cody bridge is not configured. Set CODY_BRIDGE_TOKEN in the environment.'
-  return NextResponse.json({ error: message }, { status: process.env.CODY_BRIDGE_TOKEN ? 401 : 503 })
-}
-
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) return responseUnauthorized()
+  const unauthorized = requireDevBridge(req)
+  if (unauthorized) return unauthorized
 
   const sp = Object.fromEntries(new URL(req.url).searchParams.entries())
   const parsed = QuerySchema.safeParse(sp)
@@ -238,7 +207,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!authorized(req)) return responseUnauthorized()
+  const unauthorized = requireDevBridge(req)
+  if (unauthorized) return unauthorized
 
   const sizeErr = checkBodySize(req)
   if (sizeErr) return sizeErr
