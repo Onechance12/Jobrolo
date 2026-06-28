@@ -58,7 +58,9 @@ export function RoofReportBuilder({ reportId }: { reportId: string }) {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [reportId])
+  useEffect(() => {
+    queueMicrotask(() => { void load() })
+  }, [reportId])
 
   const report = workspace?.report
   const readyScore = workspace?.readyScore ?? 0

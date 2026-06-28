@@ -194,7 +194,9 @@ export function TemplateReviewWorkspace({ templateId }: { templateId?: string })
     setWarnings(parseJsonArray<string>(t.parseWarningsJson))
   }
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [templateId])
+  useEffect(() => {
+    queueMicrotask(() => { void load() })
+  }, [templateId])
 
   async function createUpload() {
     if (!newDocumentId.trim()) return

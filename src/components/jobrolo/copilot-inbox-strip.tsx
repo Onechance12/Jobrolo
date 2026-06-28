@@ -39,7 +39,9 @@ export function CopilotInboxStrip({ projectId, limit = 5 }: { projectId?: string
     }
   }
 
-  useEffect(() => { load() }, [projectId, limit])
+  useEffect(() => {
+    queueMicrotask(() => { void load() })
+  }, [projectId, limit])
 
   if (!items.length && !loading) return null
 

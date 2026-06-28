@@ -26,7 +26,6 @@ export default function NotificationSettingsPage() {
         setStatus('')
       })
       .catch(err => setStatus(err.message))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function save(e: FormEvent<HTMLFormElement>) {

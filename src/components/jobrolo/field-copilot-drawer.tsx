@@ -29,12 +29,15 @@ export function FieldCopilotDrawer({ open, onOpenChange, projectId, appointmentI
   useEffect(() => {
     if (!open || !projectId) return
     let cancelled = false
-    setLoading(true)
-    const query = appointmentId ? `?appointmentId=${encodeURIComponent(appointmentId)}` : ''
-    fetch(`/api/projects/${projectId}/field-copilot${query}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (!cancelled) setBriefing(data?.briefing ?? null) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+    queueMicrotask(() => {
+      if (cancelled) return
+      setLoading(true)
+      const query = appointmentId ? `?appointmentId=${encodeURIComponent(appointmentId)}` : ''
+      fetch(`/api/projects/${projectId}/field-copilot${query}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (!cancelled) setBriefing(data?.briefing ?? null) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    })
     return () => { cancelled = true }
   }, [open, projectId, appointmentId])
 

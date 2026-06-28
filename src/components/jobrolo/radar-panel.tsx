@@ -46,7 +46,9 @@ export function RadarPanel({ onClose }: { onClose?: () => void }) {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadInsights() }, [loadInsights])
+  useEffect(() => {
+    queueMicrotask(() => { void loadInsights() })
+  }, [loadInsights])
 
   const handleScan = async () => {
     setScanning(true)

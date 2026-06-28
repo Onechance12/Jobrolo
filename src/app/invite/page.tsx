@@ -15,25 +15,19 @@ type InvitePreview = {
 
 export default function InvitePage() {
   const router = useRouter()
-  const [token, setToken] = useState('')
+  const [token] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('token') ?? '')
   const [invite, setInvite] = useState<InvitePreview | null>(null)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => Boolean(token))
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(() => token ? null : 'Invite token is missing.')
 
   useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get('token') ?? ''
-    setToken(t)
-    if (!t) {
-      setError('Invite token is missing.')
-      setLoading(false)
-      return
-    }
+    if (!token) return
     ;(async () => {
       try {
-        const res = await fetch(`/api/auth/invite/accept?token=${encodeURIComponent(t)}`)
+        const res = await fetch(`/api/auth/invite/accept?token=${encodeURIComponent(token)}`)
         const data = await res.json().catch(() => ({}))
         if (!res.ok) {
           setError(data.error || 'This invite is invalid or expired.')
@@ -47,7 +41,7 @@ export default function InvitePage() {
         setLoading(false)
       }
     })()
-  }, [])
+  }, [token])
 
   const roleCopy = useMemo(() => {
     const role = String(invite?.user?.role ?? '').toLowerCase()

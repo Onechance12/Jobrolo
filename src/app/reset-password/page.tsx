@@ -8,23 +8,13 @@ import { Loader2, CheckCircle2 } from 'lucide-react'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
-  const [stage, setStage] = useState<'request' | 'confirm' | 'done'>('request')
+  const initialToken = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('token') ?? ''
+  const [stage, setStage] = useState<'request' | 'confirm' | 'done'>(() => initialToken ? 'confirm' : 'request')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
-  const [token, setToken] = useState('')
+  const [token, setToken] = useState(initialToken)
   const [newPassword, setNewPassword] = useState('')
-
-  // If URL has ?token=XXX, jump straight to confirm stage
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    const t = params.get('token')
-    if (t) {
-      setToken(t)
-      setStage('confirm')
-    }
-  }, [])
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault()

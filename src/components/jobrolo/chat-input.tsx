@@ -103,7 +103,7 @@ function shouldCaptureLocationForUpload(input: {
 
 export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mode = 'command' }: Props) {
   const [text, setText] = useState(''); const [pendingFiles, setPendingFiles] = useState<File[]>([]); const [showAttachMenu, setShowAttachMenu] = useState(false); const [listening, setListening] = useState(false)
-  const [speechSupported, setSpeechSupported] = useState(false)
+  const [speechSupported] = useState(() => typeof window !== 'undefined' && (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition))
   const [localError, setLocalError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [shortcuts, setShortcuts] = useState<CommandShortcut[]>(DEFAULT_COMMAND_SHORTCUTS)
@@ -113,11 +113,6 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
   const textRef = useRef(text); useEffect(() => { textRef.current = text }, [text])
   const selectedInspectionSection = inspectionSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === inspectionSectionId) ?? null : null
-
-  // Check speech support on client only — prevents hydration mismatch
-  useEffect(() => {
-    setSpeechSupported(!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition)
-  }, [])
 
   useEffect(() => {
     const load = () => {
@@ -192,11 +187,13 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
 
   useEffect(() => {
     if (mode === 'field') return
-    setInspectionPickerOpen(false)
-    setInspectionSectionId(null)
-    if (!pendingFiles.length && isGeneratedInspectionPrompt(textRef.current)) {
-      setText('')
-    }
+    queueMicrotask(() => {
+      setInspectionPickerOpen(false)
+      setInspectionSectionId(null)
+      if (!pendingFiles.length && isGeneratedInspectionPrompt(textRef.current)) {
+        setText('')
+      }
+    })
   }, [mode, pendingFiles.length])
 
   const handleSend = useCallback(async () => {
@@ -343,7 +340,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const activeShortcutGroup = shortcutSheetGroupId ? shortcutRailGroups.find(group => group.id === shortcutSheetGroupId) ?? null : null
 
   useEffect(() => {
-    if (text.trim()) setShortcutSheetGroupId(null)
+    if (!text.trim()) return
+    queueMicrotask(() => setShortcutSheetGroupId(null))
   }, [text])
 
   return (

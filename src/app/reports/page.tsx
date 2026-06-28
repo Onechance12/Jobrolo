@@ -26,7 +26,9 @@ export default function ReportsPage() {
     if (workspacesRes.ok) setWorkspaces(workspaceData.workspaces || [])
     setLoading(false)
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    queueMicrotask(() => { void load() })
+  }, [])
 
   async function create() {
     if (!projectId) return alert('Choose a job/project first.')

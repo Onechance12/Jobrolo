@@ -222,12 +222,11 @@ export default function Page() {
       }
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (initialLoading) return
-    void loadActionItems()
+    queueMicrotask(() => { void loadActionItems() })
     const timer = window.setInterval(() => { void loadActionItems() }, 60_000)
     return () => window.clearInterval(timer)
   }, [initialLoading, loadActionItems])
@@ -345,10 +344,11 @@ export default function Page() {
       return { ok: true }
     }
     return isInWorkspace ? sendWorkspaceMessage(args) : sendMessage(args)
-  }, [addGlobalMessage, addWorkspaceMessage, currentWorkspace?.projectId, isInWorkspace, openFieldMap, sendWorkspaceMessage, sendMessage])
+  }, [addGlobalMessage, addWorkspaceMessage, currentWorkspace, isInWorkspace, openFieldMap, sendWorkspaceMessage, sendMessage])
 
   const handleStop = useCallback(() => {
-    isInWorkspace ? stopWorkspaceMessage() : stopMessage()
+    if (isInWorkspace) stopWorkspaceMessage()
+    else stopMessage()
   }, [isInWorkspace, stopMessage, stopWorkspaceMessage])
 
   const insertPrompt = useCallback((text: string) => {
@@ -407,7 +407,7 @@ export default function Page() {
     } catch (e) {
       console.warn('[page] proactive operator:', e)
     }
-  }, [isInWorkspace, currentWorkspaceId, currentChatId, currentWorkspace?.projectId, conversationId, setConversationId, appendProactiveMessages])
+  }, [isInWorkspace, currentWorkspaceId, currentChatId, currentWorkspace, conversationId, setConversationId, appendProactiveMessages])
 
   useEffect(() => {
     if (initialLoading) return
@@ -991,17 +991,17 @@ function ActionNeededMenu({
   onClose: () => void
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
-  const [message, setMessage] = useState<string | null>(null)
-  const hiddenStatuses = new Set(['actioned', 'archived', 'completed', 'rejected', 'cancelled'])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
     try {
       const raw = window.localStorage.getItem('jobrolo.actionCenter.dismissed.v1')
-      if (raw) setDismissedIds(new Set(JSON.parse(raw)))
-    } catch {}
-  }, [])
+      return raw ? new Set(JSON.parse(raw)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+  const [message, setMessage] = useState<string | null>(null)
+  const hiddenStatuses = new Set(['actioned', 'archived', 'completed', 'rejected', 'cancelled'])
 
   function saveDismissed(next: Set<string>) {
     setDismissedIds(next)
@@ -1302,7 +1302,7 @@ function InvitePeopleModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
-  const [chatLink, setChatLink] = useState('')
+  const chatLink = `${typeof window === 'undefined' ? '' : window.location.origin}/?workspaceId=${encodeURIComponent(workspace.id)}${chat?.id ? `&chatId=${encodeURIComponent(chat.id)}` : ''}`
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -1311,10 +1311,6 @@ function InvitePeopleModal({
     sendEmail: false,
     sendSms: false,
   })
-
-  useEffect(() => {
-    setChatLink(`${window.location.origin}/?workspaceId=${encodeURIComponent(workspace.id)}${chat?.id ? `&chatId=${encodeURIComponent(chat.id)}` : ''}`)
-  }, [workspace.id, chat?.id])
 
   useEffect(() => {
     let cancelled = false

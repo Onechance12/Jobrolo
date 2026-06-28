@@ -79,7 +79,7 @@ export function CanvassingMapMode() {
   }
 
   useEffect(() => {
-    void locateMe()
+    queueMicrotask(() => { void locateMe() })
   }, [])
 
   const mapUrl = useMemo(() => isValidLocation(location) ? `${openStreetMapEmbedUrl(location)}&refresh=${mapRefreshKey}` : null, [location, mapRefreshKey])
