@@ -725,6 +725,32 @@ function isActionCenterRequest(text: string) {
   )
 }
 
+function isCompanyIntelligenceRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  return (
+    /\b(company health|company intelligence|business health|setup gaps?|profile readiness|how are our leads|how are my leads|lead kpis?|saved kpis?|jobrolo kpis?)\b/.test(lower) ||
+    /\b(what should i|what should we|how can i|how can we)\b[\s\S]{0,80}\b(grow|improve|increase revenue|get more leads|convert leads|follow up)\b/.test(lower) ||
+    /\b(growth|grow|revenue|marketing)\b[\s\S]{0,100}\b(kpi|kpis|leads?|projects?|setup gaps?|company research|public research)\b/.test(lower)
+  )
+}
+
+function buildCompanyIntelligenceToolCall(text: string): ToolCall {
+  const lower = plainMessageText(text).toLowerCase()
+  const includePublicResearch = /\b(fresh|research online|search online|public company research|public research|online presence|web presence|social|reviews?)\b/.test(lower)
+  const periodDays = /\b(30 days|month|monthly)\b/.test(lower)
+    ? 30
+    : /\b(90 days|quarter|quarterly)\b/.test(lower)
+      ? 90
+      : /\b(today|24 hours)\b/.test(lower)
+        ? 1
+        : 7
+  return {
+    name: 'get_company_intelligence',
+    args: { includePublicResearch, periodDays },
+  }
+}
+
 type TesterFeedbackArgs = {
   content: string
   source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'
@@ -1246,6 +1272,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isIntegrationReadinessRequest(userText)) return buildIntegrationReadinessToolCall(userText)
+  if (isCompanyIntelligenceRequest(userText)) return buildCompanyIntelligenceToolCall(userText)
   if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
   if (isCompanyProfileResearchRequest(userText)) {
     const website = websiteHintFromText(userText)
@@ -1294,9 +1321,10 @@ Rules:
 - Do not save this as a normal customer/job note.
 - Help the user discuss, reproduce, and clarify the bug or product issue.
 - Preserve the user's exact complaint and details. Do not over-compress the issue into a vague summary.
-- If enough evidence is available, produce a Cody Review with: raw issue, what I see, likely issue, severity, likely files, Codex handoff, and safety notes.
+- Keep the visible Cody reply short. Use at most 6 concise bullets unless the user asks for detail.
+- If enough evidence is available, produce a Cody Review with: issue, evidence, likely cause, severity, Codex handoff, and one next question if needed.
 - If evidence is thin, ask one or two focused questions that would help Codex reproduce the bug.
-- Tell the user they can type "end Cody" when ready to package this Cody session for Codex.
+- Tell the user they can type "End Cody" when ready to package this Cody session for Codex.
 - Respond as JSON only with final=true and no tool_calls/actions.
 
 Latest Cody-mode user message:
@@ -1436,8 +1464,52 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const maxIterations = opts.maxIterations ?? 4
   const messages = [...opts.messages]
   const latestUserAtStart = lastExternalUserMessage(messages)
+  const latestUserTextAtStart = latestUserAtStart ? plainMessageText(latestUserAtStart.message.content) : ''
   const activeTesterFeedback = latestUserAtStart ? testerFeedbackFromText(plainMessageText(latestUserAtStart.message.content)) : null
   const codyBlockAtStart = codyBlockState(messages)
+  if (latestUserAtStart && isCodyBlockCloseText(latestUserTextAtStart)) {
+    if (!codyBlockAtStart.closing) {
+      const finalText = 'Cody is not open right now. Start a Cody review with “Cody Cody Cody”, describe the issue, then say “End Cody” when you want me to package it for Codex.'
+      return {
+        final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+        iterations: [{ iteration: 0, text: finalText, toolCalls: [], final: true }],
+        totalToolCalls: 0,
+      }
+    }
+
+    const content = codyBlockAtStart.content || 'Cody review session closed without additional details.'
+    const feedbackArgs = withTesterFeedbackDebugContext({
+      content,
+      source: 'note_to_cody',
+      area: inferCodyArea(content),
+      severity: inferCodySeverity(content),
+    }, messages, opts)
+    const result = await executeTool('record_tester_feedback', feedbackArgs as Record<string, unknown>, opts.contractorId, {
+      conversationId: opts.conversationId,
+      workspaceId: opts.workspaceId,
+      chatId: opts.chatId,
+      channelType: opts.channelType,
+      userId: opts.userId,
+      userRole: opts.userRole,
+      documentIds: opts.documentIds,
+    })
+    const finalText = result.success
+      ? 'Cody session captured. I packaged that review thread for the Cody/Codex queue with the recent chat context. Thanks — you can keep using Jobrolo normally now.'
+      : `I tried to capture that Cody session, but it did not save. ${result.error ? `Error: ${result.error}` : 'Please try again with “Cody Cody Cody”, describe the issue, then “End Cody”.'}`
+    const iteration: AgentIteration = {
+      iteration: 0,
+      text: finalText,
+      toolCalls: [{ name: 'record_tester_feedback', args: feedbackArgs }],
+      toolResults: [{ name: 'record_tester_feedback', success: result.success, data: result.data, error: result.error }],
+      final: true,
+    }
+    opts.onIteration?.(iteration)
+    return {
+      final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+      iterations: [iteration],
+      totalToolCalls: 1,
+    }
+  }
   const closingCodyFeedback = codyBlockAtStart.closing
     ? {
         content: codyBlockAtStart.content || 'Cody review session closed without additional details.',
