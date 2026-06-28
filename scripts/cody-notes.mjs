@@ -105,6 +105,7 @@ function printNotes(body) {
     console.log('')
     console.log(`- ${item.id}`)
     console.log(`  ${item.title} [${item.priority}/${item.status}]`)
+    if (item.type) console.log(`  Type: ${item.type}`)
     console.log(`  Company: ${item.company || item.contractorId}`)
     console.log(`  Area: ${item.area || 'unknown'} · Severity: ${item.severity || item.priority}`)
     console.log(`  Created: ${item.createdAt}`)

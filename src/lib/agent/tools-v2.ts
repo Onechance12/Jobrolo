@@ -2303,7 +2303,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_tester_feedback',
-    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "Cody Cody Cody" followed by feedback about bugs, confusing UX, broken workflows, screenshots, logs to review, or desired fixes. Also use for direct "(note to Codex)" / "hey Codex" development handoff notes. This is for product/dev feedback, not normal customer/job notes.',
+    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when a Cody review session that started with "Cody Cody Cody" is closed with "end Cody", and for direct "(note to Codex)" / "hey Codex" development handoff notes. This is for product/dev feedback, not normal customer/job notes.',
     schema: z.object({
       content: z.string().min(1).max(8000),
       source: z.enum(['note_to_cody', 'note_to_codex', 'tester_feedback']).optional(),

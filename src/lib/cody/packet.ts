@@ -174,12 +174,6 @@ export function extractCodyFeedbackActivation(text: string): CodyActivation | nu
   const clean = text.trim()
   if (!clean) return null
 
-  const codyMarker = clean.match(/^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\s*\)?\s*[:,\-–—]?\s*/i)
-  if (codyMarker) {
-    const content = clean.slice(codyMarker[0].length).trim()
-    return content ? { audience: 'cody', content } : null
-  }
-
   const codexMarker = clean.match(/^\s*\(?\s*note\s+to\s+(codex)\s*\)?\s*[:\-–—]?\s*/i)
     ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(codex)\s*[:\-–—]?\s*/i)
     ?? clean.match(/^\s*(?:tell|send|save)\s+(codex)\s+(?:this\s+)?[:\-–—]?\s*/i)
@@ -187,6 +181,20 @@ export function extractCodyFeedbackActivation(text: string): CodyActivation | nu
   if (!codexMarker) return null
   const content = clean.slice(codexMarker[0].length).trim()
   return content ? { audience: 'codex', content } : null
+}
+
+export function isCodyBlockOpenText(text: string) {
+  const clean = text.trim()
+  if (!clean) return false
+  return /^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\b/i.test(clean)
+}
+
+export function isCodyBlockCloseText(text: string) {
+  return /^\s*end\s+cody\b/i.test(text.trim())
+}
+
+export function codyBlockOpeningContent(text: string) {
+  return text.trim().replace(/^\s*\(?\s*cody[\s,.\-–—:;!]+cody[\s,.\-–—:;!]+cody\s*\)?\s*[:,\-–—]?\s*/i, '').trim()
 }
 
 export function inferCodySeverity(content: string, fallback?: string | null): CodySeverity {

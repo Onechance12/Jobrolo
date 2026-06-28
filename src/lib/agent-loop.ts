@@ -8,7 +8,16 @@ import { parseAIResponse, type ParsedAIResponse, type ToolCall } from '@/lib/pro
 import { buildSkillRoutingContext } from '@/lib/skills/context'
 import { selectSkills } from '@/lib/skills/select-skill'
 import { renderSkillInstructions } from '@/lib/skills/render-skill-instructions'
-import { buildCodyCaptureMessage, extractCodyFeedbackActivation, inferCodyArea, inferCodySeverity } from '@/lib/cody/packet'
+import {
+  buildCodyCaptureMessage,
+  codyBlockOpeningContent,
+  extractCodyFeedbackActivation,
+  inferCodyArea,
+  inferCodySeverity,
+  isCodyBlockCloseText,
+  isCodyBlockOpenText,
+} from '@/lib/cody/packet'
+import { recordCodyObservation } from '@/lib/cody/observations'
 import type { ChannelType } from '@/lib/types'
 
 export interface AgentIteration {
@@ -643,6 +652,81 @@ function withTesterFeedbackDebugContext(feedback: TesterFeedbackArgs, messages: 
   }
 }
 
+function codyBlockState(messages: ChatMessage[]) {
+  let lastOpenIndex = -1
+  let lastCloseIndex = -1
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i]
+    if (message.role !== 'user' || isInternalAgentInstruction(message.content)) continue
+    const text = plainMessageText(message.content)
+    if (isCodyBlockOpenText(text)) lastOpenIndex = i
+    if (isCodyBlockCloseText(text)) lastCloseIndex = i
+  }
+
+  if (lastOpenIndex === -1 || lastCloseIndex > lastOpenIndex) return { active: false, closing: false, content: '', turns: [] as Array<{ role: 'user' | 'assistant'; text: string }> }
+
+  const latestUser = lastExternalUserMessage(messages)
+  const latestText = latestUser ? plainMessageText(latestUser.message.content) : ''
+  const closing = Boolean(latestUser && latestUser.index > lastOpenIndex && isCodyBlockCloseText(latestText))
+  const turns: Array<{ role: 'user' | 'assistant'; text: string }> = []
+  for (let i = lastOpenIndex; i < messages.length; i += 1) {
+    const message = messages[i]
+    if ((message.role !== 'user' && message.role !== 'assistant') || isInternalAgentInstruction(message.content)) continue
+    const text = plainMessageText(message.content)
+    if (!text) continue
+    if (message.role === 'user' && isCodyBlockCloseText(text)) continue
+    turns.push({ role: message.role, text })
+  }
+
+  const opening = plainMessageText(messages[lastOpenIndex]?.content ?? '')
+  const openingContent = codyBlockOpeningContent(opening)
+  const content = [
+    openingContent ? `Opening: ${openingContent}` : 'Opening: Cody review session started.',
+    ...turns
+      .filter(turn => !isCodyBlockOpenText(turn.text))
+      .map(turn => `${turn.role}: ${turn.text}`),
+  ].join('\n').trim()
+
+  return { active: true, closing, content, turns }
+}
+
+async function captureCodyObservation(
+  opts: AgentLoopOptions,
+  messages: ChatMessage[],
+  input: {
+    trigger: string
+    content: string
+    source?: 'agent_loop' | 'tool_result' | 'document_worker' | 'api'
+    severity?: 'low' | 'normal' | 'high' | 'urgent'
+    area?: string
+    relatedType?: string | null
+    relatedId?: string | null
+    debugContext?: Record<string, unknown>
+  },
+) {
+  await recordCodyObservation({
+    contractorId: opts.contractorId,
+    trigger: input.trigger,
+    content: input.content,
+    source: input.source ?? 'agent_loop',
+    severity: input.severity,
+    area: input.area,
+    relatedType: input.relatedType,
+    relatedId: input.relatedId,
+    recentMessages: recentVisibleChatTurns(messages),
+    debugContext: {
+      conversationId: opts.conversationId ?? null,
+      workspaceId: opts.workspaceId ?? null,
+      chatId: opts.chatId ?? null,
+      channelType: opts.channelType ?? null,
+      documentIds: opts.documentIds ?? [],
+      userId: opts.userId ?? null,
+      userRole: opts.userRole ?? null,
+      ...(input.debugContext ?? {}),
+    },
+  }).catch(err => console.warn('[cody-observation] failed to record observation', err))
+}
+
 function testerFeedbackFollowUpText(feedback: { content: string; source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'; area?: string }) {
   const lower = feedback.content.toLowerCase()
   let workaround = 'If you still need to keep working, tell Jobrolo the immediate goal in plain language and use the closest working card/tool path. This note is saved for review with the logs.'
@@ -1020,6 +1104,19 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
+  const codyBlock = codyBlockState(messages)
+  if (codyBlock.closing) {
+    const content = codyBlock.content || 'Cody review session closed without additional details.'
+    return {
+      name: 'record_tester_feedback',
+      args: withTesterFeedbackDebugContext({
+        content,
+        source: 'note_to_cody',
+        area: inferCodyArea(content),
+        severity: inferCodySeverity(content),
+      }, messages, opts),
+    }
+  }
   if (opts?.documentIds?.length && isCompanyLogoUploadRequest(userText)) {
     return { name: 'update_contractor_profile', args: { logoDocumentId: opts.documentIds[0] } }
   }
@@ -1054,6 +1151,26 @@ function buildDeterministicIntentInstruction(messages: ChatMessage[], opts?: Pic
   const latestUser = lastExternalUserMessage(messages)
   if (!latestUser) return null
   const userText = plainMessageText(latestUser.message.content)
+  const codyBlock = codyBlockState(messages)
+  if (codyBlock.active && !codyBlock.closing) {
+    const openingContent = codyBlockOpeningContent(userText)
+    return `The user is in Cody review mode. Cody is Jobrolo's hidden read-only developer analyst.
+
+Rules:
+- Do not call mutation tools.
+- Do not create customers, projects, documents, notifications, or approvals.
+- Do not save this as a normal customer/job note.
+- Help the user discuss, reproduce, and clarify the bug or product issue.
+- If enough evidence is available, produce a compact Cody Review with: What I see, likely issue, severity, likely files, Codex handoff, and safety notes.
+- Tell the user they can type "end Cody" when ready to package this Cody session for Codex.
+- Respond as JSON only with final=true and no tool_calls/actions.
+
+Latest Cody-mode user message:
+"${(openingContent || userText).slice(0, 800)}"
+
+Recent Cody-mode context:
+${JSON.stringify(codyBlock.turns.slice(-10))}`
+  }
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) {
     const feedbackWithContext = withTesterFeedbackDebugContext(testerFeedback, messages, opts)
@@ -1175,6 +1292,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const messages = [...opts.messages]
   const latestUserAtStart = lastExternalUserMessage(messages)
   const activeTesterFeedback = latestUserAtStart ? testerFeedbackFromText(plainMessageText(latestUserAtStart.message.content)) : null
+  const codyBlockAtStart = codyBlockState(messages)
+  const closingCodyFeedback = codyBlockAtStart.closing
+    ? {
+        content: codyBlockAtStart.content || 'Cody review session closed without additional details.',
+        source: 'note_to_cody' as const,
+        area: inferCodyArea(codyBlockAtStart.content || 'Cody review session'),
+      }
+    : null
   if (latestUserAtStart) {
     const skillContext = buildSkillRoutingContext({
       latestText: plainMessageText(latestUserAtStart.message.content),
@@ -1276,18 +1401,32 @@ Respond as JSON only.`,
 
     // Detect when the AI narrates operational work without actually calling a tool/action.
     // This is the trust boundary between "chat demo" and "operating system".
-    if (needsCompanyProfileToolRetry(parsed, messages, parsedToolCallCount, parsedActionCount)) {
+    if (!codyBlockAtStart.active && needsCompanyProfileToolRetry(parsed, messages, parsedToolCallCount, parsedActionCount)) {
       lastBlockedReason = 'The assistant tried to fetch company profile data without calling get_contractor_profile.'
       console.warn(`[agent-loop] forced company profile tool retry iteration=${i} contractorId=${opts.contractorId}`)
+      await captureCodyObservation(opts, messages, {
+        trigger: 'company_profile_tool_missing',
+        content: `Assistant tried to fetch company profile data without calling get_contractor_profile. Assistant text: ${parsed.text.slice(0, 1000)}`,
+        area: 'company profile',
+        severity: 'normal',
+        debugContext: { iteration: i, parsedToolCallCount, parsedActionCount },
+      })
       messages.push({ role: 'assistant', content: raw })
       messages.push({ role: 'user', content: buildCompanyProfileToolInstruction(latestUserText(messages)) })
       continue
     }
 
-    if (!deterministicToolCall && shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
+    if (!codyBlockAtStart.active && !deterministicToolCall && shouldForceToolRetry(parsed, parsedToolCallCount, parsedActionCount)) {
       lastBlockedReason = 'The assistant narrated operational work without a valid executable tool call.'
       console.warn(`[agent-loop] blocked narrated action without tool iteration=${i} contractorId=${opts.contractorId}`)
       console.warn(`[agent-loop] forced retry for missing tool call iteration=${i} contractorId=${opts.contractorId}`)
+      await captureCodyObservation(opts, messages, {
+        trigger: 'narrated_action_without_tool',
+        content: `Assistant narrated operational work without a valid executable tool call. Assistant text: ${parsed.text.slice(0, 1200)}`,
+        area: 'agent/tools',
+        severity: 'high',
+        debugContext: { iteration: i, parsedToolCallCount, parsedActionCount },
+      })
       messages.push({ role: 'assistant', content: raw })
       messages.push({ role: 'user', content: buildMissingToolInstruction(parsed.text) })
       continue
@@ -1297,6 +1436,13 @@ Respond as JSON only.`,
     const blockedToolResults: NonNullable<AgentIteration['toolResults']> = [...normalizedWork.blockedResults]
     if (normalizedWork.blockedResults.length > 0) {
       lastBlockedReason = normalizedWork.blockedResults.map(r => r.error).filter(Boolean).join('; ')
+      await captureCodyObservation(opts, messages, {
+        trigger: 'blocked_action_or_tool_like_action',
+        content: `Agent produced blocked action/tool-like work: ${lastBlockedReason}`,
+        area: 'agent/tools',
+        severity: 'normal',
+        debugContext: { blockedResults: normalizedWork.blockedResults.slice(0, 5) },
+      })
     }
 
     if (activeTesterFeedback && toolCalls.some(tc => tc.name === 'record_tester_feedback')) {
@@ -1304,6 +1450,16 @@ Respond as JSON only.`,
       toolCalls = toolCalls.filter(tc => tc.name === 'record_tester_feedback')
       if (before !== toolCalls.length) {
         console.warn(`[agent-loop] isolated tester feedback; dropped non-feedback tool calls contractorId=${opts.contractorId} dropped=${before - toolCalls.length}`)
+      }
+    }
+
+    if (codyBlockAtStart.active) {
+      const before = toolCalls.length
+      toolCalls = codyBlockAtStart.closing
+        ? toolCalls.filter(tc => tc.name === 'record_tester_feedback')
+        : []
+      if (before !== toolCalls.length) {
+        console.warn(`[agent-loop] isolated Cody review mode; dropped operational tool calls contractorId=${opts.contractorId} dropped=${before - toolCalls.length}`)
       }
     }
 
@@ -1410,6 +1566,18 @@ Respond as JSON only.`,
         if (tc.name === 'record_tester_feedback' && result.success) {
           testerFeedbackSaved = true
         }
+        if (!result.success && tc.name !== 'record_tester_feedback' && !/approval/i.test(result.error ?? '')) {
+          await captureCodyObservation(opts, messages, {
+            trigger: 'tool_execution_failed',
+            source: 'tool_result',
+            content: `Tool "${tc.name}" failed. Error: ${result.error ?? 'unknown error'}`,
+            area: inferCodyArea(`${tc.name} ${result.error ?? ''}`),
+            severity: 'high',
+            relatedType: 'tool_failure',
+            relatedId: `${tc.name}:${result.error ?? 'unknown'}`.slice(0, 180),
+            debugContext: { toolName: tc.name, toolArgs: tc.args, toolError: result.error },
+          })
+        }
         if (result.success) {
           const card = toolResultCardPayload(result.data)
           if (card) lastToolCard = card
@@ -1418,13 +1586,16 @@ Respond as JSON only.`,
       }
       iteration.toolResults = results
       opts.onIteration?.(iteration)
-      if (activeTesterFeedback && toolCalls.some(tc => tc.name === 'record_tester_feedback')) {
+      if ((activeTesterFeedback || closingCodyFeedback) && toolCalls.some(tc => tc.name === 'record_tester_feedback')) {
         const feedbackResult = results.find(r => r.name === 'record_tester_feedback')
+        const feedback = activeTesterFeedback ?? closingCodyFeedback
         const finalText = feedbackResult?.success
-          ? testerFeedbackFollowUpText(activeTesterFeedback)
-          : `I tried to capture that note for ${activeTesterFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}, but it did not save. ${feedbackResult?.error ? `Error: ${feedbackResult.error}` : 'Please try again with “Cody Cody Cody:” and the bug details.'}`
+          ? closingCodyFeedback
+            ? 'Cody session captured. I packaged that review thread for the Cody/Codex queue with the recent chat context.'
+            : testerFeedbackFollowUpText(activeTesterFeedback!)
+          : `I tried to capture that note for ${feedback?.source === 'note_to_codex' ? 'Codex' : 'Cody'}, but it did not save. ${feedbackResult?.error ? `Error: ${feedbackResult.error}` : 'Please try again with “Cody Cody Cody” and then “end Cody” after the bug details.'}`
         iterations.push(iteration)
-        console.log(`[agent-loop] tester feedback turn ended after feedback tool contractorId=${opts.contractorId} success=${Boolean(feedbackResult?.success)}`)
+        console.log(`[agent-loop] Cody/tester feedback turn ended after feedback tool contractorId=${opts.contractorId} success=${Boolean(feedbackResult?.success)}`)
         return {
           final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
           iterations,

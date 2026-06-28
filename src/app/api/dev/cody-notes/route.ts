@@ -18,6 +18,8 @@ const PatchSchema = z.object({
   resolution: z.string().max(2000).optional(),
 })
 
+const CODY_NOTE_TYPES = ['tester_feedback', 'cody_observation']
+
 function tokenFromRequest(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
   if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim()
@@ -144,7 +146,7 @@ export async function GET(req: NextRequest) {
 
   const items = await db.inboxItem.findMany({
     where: {
-      type: 'tester_feedback',
+      type: { in: CODY_NOTE_TYPES },
       ...(statuses.length ? { status: { in: statuses } } : {}),
     },
     orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
@@ -201,6 +203,7 @@ export async function GET(req: NextRequest) {
       company: contractor?.company ?? contractor?.name ?? null,
       contractorEmail: contractor?.email ?? null,
       capturedBy: user ? { id: user.id, name: user.name, email: user.email, role: user.role } : null,
+      type: item.type,
       title: item.title,
       summary: item.summary,
       content,
@@ -245,7 +248,7 @@ export async function PATCH(req: NextRequest) {
 
   const now = new Date()
   const existing = await db.inboxItem.findMany({
-    where: { id: { in: parsed.data.ids }, type: 'tester_feedback' },
+    where: { id: { in: parsed.data.ids }, type: { in: CODY_NOTE_TYPES } },
     select: { id: true, payloadJson: true },
   })
 
