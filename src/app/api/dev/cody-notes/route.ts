@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { checkBodySize } from '@/lib/security/body-size'
+import { buildCodyPacket } from '@/lib/cody/packet'
 
 export const runtime = 'nodejs'
 
@@ -173,6 +174,27 @@ export async function GET(req: NextRequest) {
     const user = item.userId ? userById.get(item.userId) : null
     const recentMessages = await recentMessagesForNote(item, debugContext)
     const documentIds = stringArray(debugContext.documentIds)
+    const content = typeof payload?.content === 'string' ? payload.content : item.summary
+    const codyPacket = payload?.codyPacket && typeof payload.codyPacket === 'object' && !Array.isArray(payload.codyPacket)
+      ? payload.codyPacket
+      : buildCodyPacket({
+          content: content ?? '',
+          title: item.title,
+          area: typeof payload?.area === 'string' ? payload.area : null,
+          severity: typeof payload?.severity === 'string' ? payload.severity : item.priority,
+          company: contractor?.company ?? contractor?.name ?? null,
+          appUrl: codyAppLink(baseUrl, debugContext),
+          currentUrl: typeof payload?.currentUrl === 'string' ? payload.currentUrl : null,
+          debugContext,
+          recentMessages,
+          relevantIds: {
+            contractorId: item.contractorId,
+            conversationId: debugContext.conversationId ?? null,
+            workspaceId: debugContext.workspaceId ?? null,
+            chatId: debugContext.chatId ?? null,
+            documentIds,
+          },
+        })
     return {
       id: item.id,
       contractorId: item.contractorId,
@@ -181,7 +203,7 @@ export async function GET(req: NextRequest) {
       capturedBy: user ? { id: user.id, name: user.name, email: user.email, role: user.role } : null,
       title: item.title,
       summary: item.summary,
-      content: typeof payload?.content === 'string' ? payload.content : item.summary,
+      content,
       area: typeof payload?.area === 'string' ? payload.area : null,
       severity: typeof payload?.severity === 'string' ? payload.severity : item.priority,
       currentUrl: typeof payload?.currentUrl === 'string' ? payload.currentUrl : null,
@@ -201,23 +223,7 @@ export async function GET(req: NextRequest) {
         userRole: debugContext.userRole ?? null,
       },
       recentMessages,
-      codyPacket: {
-        problem: typeof payload?.content === 'string' ? payload.content : item.summary,
-        where: {
-          appUrl: codyAppLink(baseUrl, debugContext),
-          company: contractor?.company ?? contractor?.name ?? null,
-          area: typeof payload?.area === 'string' ? payload.area : null,
-          channelType: debugContext.channelType ?? null,
-        },
-        relevantIds: {
-          contractorId: item.contractorId,
-          conversationId: debugContext.conversationId ?? null,
-          workspaceId: debugContext.workspaceId ?? null,
-          chatId: debugContext.chatId ?? null,
-          documentIds,
-        },
-        recentMessages,
-      },
+      codyPacket,
       payload,
     }
   }))

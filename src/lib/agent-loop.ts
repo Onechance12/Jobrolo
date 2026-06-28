@@ -8,6 +8,7 @@ import { parseAIResponse, type ParsedAIResponse, type ToolCall } from '@/lib/pro
 import { buildSkillRoutingContext } from '@/lib/skills/context'
 import { selectSkills } from '@/lib/skills/select-skill'
 import { renderSkillInstructions } from '@/lib/skills/render-skill-instructions'
+import { buildCodyCaptureMessage, extractCodyFeedbackActivation, inferCodyArea, inferCodySeverity } from '@/lib/cody/packet'
 import type { ChannelType } from '@/lib/types'
 
 export interface AgentIteration {
@@ -613,30 +614,15 @@ type TesterFeedbackArgs = {
 function testerFeedbackFromText(text: string): TesterFeedbackArgs | null {
   const clean = plainMessageText(text)
   if (!clean) return null
-  const marker = clean.match(/^\s*\(?\s*note\s+to\s+(cody|codex)\s*\)?\s*[:\-–—]?\s*/i)
-    ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(cody|codex)\s*[:\-–—]?\s*/i)
-    ?? clean.match(/^\s*(?:tell|send|save)\s+(cody|codex)\s+(?:this\s+)?[:\-–—]?\s*/i)
-    ?? clean.match(/^\s*\(?\s*hey\s+(cody|codex)\s*\)?\s*[:,\-–—]?\s*/i)
-  if (!marker) return null
-  const audience = String(marker[1] || '').toLowerCase()
-  const content = clean.slice(marker[0].length).trim()
-  if (!content) return null
-  const lower = content.toLowerCase()
-  const area = /\bupload|file|photo|document\b/.test(lower) ? 'uploads/files'
-    : /\bonboard|signup|sign in|login|workspace|invite\b/.test(lower) ? 'onboarding/auth'
-      : /\bshortcut|prompt|pill\b/.test(lower) ? 'shortcuts'
-        : /\bfield|gps|map|inspection|canvass\b/.test(lower) ? 'field'
-          : /\bcompany|profile|logo|research\b/.test(lower) ? 'company profile'
-            : undefined
-  const severity: 'low' | 'normal' | 'high' | 'urgent' = /\burgent|critical|p0|emergency\b/.test(lower)
-    ? 'urgent'
-    : /\b(broken|bug|failed|failure|stuck|crash|crashed|error|cannot|can't|wont|won't|loop|frozen|froze)\b/.test(lower)
-      ? 'high'
-      : 'normal'
+  const activation = extractCodyFeedbackActivation(clean)
+  if (!activation) return null
+  const { audience, content } = activation
+  const area = inferCodyArea(content)
+  const severity = inferCodySeverity(content)
   return {
     content,
     source: audience === 'codex' ? 'note_to_codex' : 'note_to_cody',
-    ...(area ? { area } : {}),
+    area,
     severity,
   }
 }
@@ -658,7 +644,6 @@ function withTesterFeedbackDebugContext(feedback: TesterFeedbackArgs, messages: 
 }
 
 function testerFeedbackFollowUpText(feedback: { content: string; source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'; area?: string }) {
-  const audience = feedback.source === 'note_to_codex' ? 'Codex' : 'Cody'
   const lower = feedback.content.toLowerCase()
   let workaround = 'If you still need to keep working, tell Jobrolo the immediate goal in plain language and use the closest working card/tool path. This note is saved for review with the logs.'
 
@@ -686,7 +671,7 @@ function testerFeedbackFollowUpText(feedback: { content: string; source: 'note_t
     workaround = 'For now, use Open map to confirm the location, then say “start an inspection here” or “save this as a field lead.” If the browser location is wrong or missing, include the address or nearest landmark.'
   }
 
-  return `Captured that note for ${audience}. ${workaround}`
+  return `${buildCodyCaptureMessage(feedback)} ${workaround}`
 }
 
 function toolResultCardPayload(data: unknown): { contextType: string; contextData: Record<string, unknown> } | null {
@@ -1437,7 +1422,7 @@ Respond as JSON only.`,
         const feedbackResult = results.find(r => r.name === 'record_tester_feedback')
         const finalText = feedbackResult?.success
           ? testerFeedbackFollowUpText(activeTesterFeedback)
-          : `I tried to capture that note for ${activeTesterFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}, but it did not save. ${feedbackResult?.error ? `Error: ${feedbackResult.error}` : 'Please try again with “hey Cody:” and the bug details.'}`
+          : `I tried to capture that note for ${activeTesterFeedback.source === 'note_to_codex' ? 'Codex' : 'Cody'}, but it did not save. ${feedbackResult?.error ? `Error: ${feedbackResult.error}` : 'Please try again with “Cody Cody Cody:” and the bug details.'}`
         iterations.push(iteration)
         console.log(`[agent-loop] tester feedback turn ended after feedback tool contractorId=${opts.contractorId} success=${Boolean(feedbackResult?.success)}`)
         return {

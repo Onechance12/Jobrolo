@@ -111,6 +111,25 @@ function printNotes(body) {
     if (item.currentUrl) console.log(`  URL: ${item.currentUrl}`)
     if (item.appUrl) console.log(`  App: ${item.appUrl}`)
     console.log(`  Note: ${item.content || item.summary || '(empty)'}`)
+    const packet = item.codyPacket && typeof item.codyPacket === 'object' ? item.codyPacket : null
+    if (packet) {
+      console.log(`  Cody packet: ${packet.priority || item.priority} · ${packet.area || item.area || 'unknown'}`)
+      if (packet.oneSentenceSummary) console.log(`    Summary: ${packet.oneSentenceSummary}`)
+      if (packet.likelyIssue) console.log(`    Likely issue: ${packet.likelyIssue}`)
+      if (Array.isArray(packet.likelyFiles) && packet.likelyFiles.length) {
+        console.log(`    Likely files: ${packet.likelyFiles.slice(0, 5).join(', ')}`)
+      }
+      if (packet.suggestedFixDirection) console.log(`    Fix direction: ${packet.suggestedFixDirection}`)
+      if (packet.codexTask) console.log(`    Codex task: ${packet.codexTask}`)
+      if (Array.isArray(packet.safetyNotes) && packet.safetyNotes.length) {
+        console.log('    Safety:')
+        for (const note of packet.safetyNotes.slice(0, 4)) console.log(`      - ${note}`)
+      }
+      if (Array.isArray(packet.testChecklist) && packet.testChecklist.length) {
+        console.log('    Tests:')
+        for (const test of packet.testChecklist.slice(0, 5)) console.log(`      - ${test}`)
+      }
+    }
     if (item.debugContext) {
       const ids = item.debugContext
       const docIds = Array.isArray(ids.documentIds) && ids.documentIds.length ? ` docs=${ids.documentIds.join(',')}` : ''

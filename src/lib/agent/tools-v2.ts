@@ -36,6 +36,7 @@ import type { TenantContext } from '@/lib/security/context'
 import { normalizeRole } from '@/lib/security/permissions'
 import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
 import { createRoleNotification } from '@/lib/notifications'
+import { buildCodyPacket, inferCodyArea, inferCodySeverity } from '@/lib/cody/packet'
 
 export interface ToolContext {
   conversationId?: string
@@ -1250,7 +1251,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_agent_lesson',
-    description: 'Save a durable Jobrolo agent lesson from a bug, tester note, owner correction, repeated workflow problem, or “note to Cody/Codex”. Use this when feedback should change how Jobrolo behaves next time. This is separate from normal job/customer notes.',
+    description: 'Save a durable Jobrolo agent lesson from a bug, tester note, owner correction, repeated workflow problem, “Cody Cody Cody” feedback, or Codex handoff note. Use this when feedback should change how Jobrolo behaves next time. This is separate from normal job/customer notes.',
     schema: z.object({
       agentName: z.string().max(80).optional(),
       lessonType: z.enum(['success', 'failure', 'pattern', 'preference', 'correction']).optional(),
@@ -2302,7 +2303,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'record_tester_feedback',
-    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "(note to Cody)", "(note to Codex)", "hey Cody", "hey Codex", "note for Cody", "tell Cody", or similar feedback about bugs, confusing UX, broken workflows, logs to review, or desired fixes. This is for product/dev feedback, not normal customer/job notes.',
+    description: 'Save tester/user feedback intended for Cody/Codex as a durable owner-routed Action Needed item. Use when the user writes "Cody Cody Cody" followed by feedback about bugs, confusing UX, broken workflows, screenshots, logs to review, or desired fixes. Also use for direct "(note to Codex)" / "hey Codex" development handoff notes. This is for product/dev feedback, not normal customer/job notes.',
     schema: z.object({
       content: z.string().min(1).max(8000),
       source: z.enum(['note_to_cody', 'note_to_codex', 'tester_feedback']).optional(),
@@ -2326,21 +2327,29 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
       const content = args.content.trim()
-      const inferredSeverity = args.severity ?? (
-        /\b(broken|bug|failed|failure|stuck|crash|crashed|error|urgent|cannot|can't|wont|won't|loop|frozen|froze)\b/i.test(content)
-          ? 'high'
-          : 'normal'
-      )
-      const area = args.area?.trim() || (
-        /\bupload|file|photo|document\b/i.test(content) ? 'uploads/files'
-          : /\bonboard|signup|sign in|login|workspace\b/i.test(content) ? 'onboarding/auth'
-            : /\bshortcut|prompt|pill\b/i.test(content) ? 'shortcuts'
-              : /\bfield|gps|map|inspection|canvass\b/i.test(content) ? 'field'
-                : /\bcompany|profile|logo|research\b/i.test(content) ? 'company profile'
-                  : 'general'
-      )
+      const inferredSeverity = inferCodySeverity(content, args.severity)
+      const area = inferCodyArea(content, args.area)
       const title = `${args.source === 'note_to_codex' ? 'Note to Codex' : 'Note to Cody'}: ${area}`
       const summary = content.length > 280 ? `${content.slice(0, 277)}...` : content
+      const debugContext = {
+        ...(args.debugContext ?? {}),
+        conversationId: args.debugContext?.conversationId ?? ctx.conversationId ?? null,
+        workspaceId: args.debugContext?.workspaceId ?? ctx.workspaceId ?? null,
+        chatId: args.debugContext?.chatId ?? ctx.chatId ?? null,
+        channelType: args.debugContext?.channelType ?? ctx.channelType ?? null,
+        documentIds: args.debugContext?.documentIds ?? ctx.documentIds ?? [],
+        userId: args.debugContext?.userId ?? ctx.userId ?? null,
+        userRole: args.debugContext?.userRole ?? ctx.userRole ?? null,
+      }
+      const codyPacket = buildCodyPacket({
+        content,
+        area,
+        severity: inferredSeverity,
+        title,
+        currentUrl: args.currentUrl ?? null,
+        debugContext,
+        recentMessages: args.debugContext?.recentMessages ?? [],
+      })
       const item = await createRoleNotification({
         contractorId,
         role: 'owner',
@@ -2357,16 +2366,8 @@ export const TOOLS: ToolDef[] = [
           area,
           severity: inferredSeverity,
           currentUrl: args.currentUrl ?? null,
-          debugContext: {
-            ...(args.debugContext ?? {}),
-            conversationId: args.debugContext?.conversationId ?? ctx.conversationId ?? null,
-            workspaceId: args.debugContext?.workspaceId ?? ctx.workspaceId ?? null,
-            chatId: args.debugContext?.chatId ?? ctx.chatId ?? null,
-            channelType: args.debugContext?.channelType ?? ctx.channelType ?? null,
-            documentIds: args.debugContext?.documentIds ?? ctx.documentIds ?? [],
-            userId: args.debugContext?.userId ?? ctx.userId ?? null,
-            userRole: args.debugContext?.userRole ?? ctx.userRole ?? null,
-          },
+          debugContext,
+          codyPacket,
           capturedByUserId: ctx.userId ?? null,
           capturedByRole: ctx.userRole ?? null,
           capturedAt: new Date().toISOString(),
