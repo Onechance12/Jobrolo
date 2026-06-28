@@ -95,6 +95,62 @@ function hasValue(value: unknown) {
   return value !== null && value !== undefined && String(value).trim().length > 0
 }
 
+function uploadContextFromData(data: Record<string, any>) {
+  const uploadContext = data.uploadContext
+  return uploadContext && typeof uploadContext === 'object' && !Array.isArray(uploadContext)
+    ? uploadContext as Record<string, any>
+    : {}
+}
+
+function isPhotoUploadFileType(fileType?: string | null) {
+  const normalized = String(fileType || '').toLowerCase()
+  return normalized === 'photo' || normalized === 'image'
+}
+
+function hasExplicitPricingContext(data: Record<string, any>) {
+  const uploadContext = uploadContextFromData(data)
+  return uploadContext.uploadPurpose === 'company_pricing'
+    || uploadContext.suggestedUploadPurpose === 'company_pricing'
+    || uploadContext.skillStorageScope === 'company_pricing'
+    || uploadContext.skillRoute === 'company_pricing'
+}
+
+function shouldTreatAsPriceSheet(input: {
+  fileType?: string | null
+  category?: string | null
+  data: Record<string, any>
+  materialItemCount?: number
+}) {
+  const category = String(input.category || '').toLowerCase()
+  const rows = Array.isArray(input.data.materialItems) ? input.data.materialItems.length : 0
+  const materialItemCount = input.materialItemCount ?? rows
+  if (materialItemCount > 0) return true
+  if (hasExplicitPricingContext(input.data)) return true
+  if (isPhotoUploadFileType(input.fileType)) return false
+  return category.includes('price')
+}
+
+function finalDocumentFileType(input: {
+  currentFileType?: string | null
+  analysisCategory?: string | null
+  data: Record<string, any>
+  materialItemCount?: number
+}) {
+  const currentFileType = String(input.currentFileType || '').toLowerCase()
+  const category = String(input.analysisCategory || '').toLowerCase()
+  if (!category || category === 'document_analysis' || category === 'unknown' || category === 'scanned_pdf') return currentFileType || undefined
+  if (isPhotoUploadFileType(currentFileType)) {
+    if (shouldTreatAsPriceSheet({
+      fileType: currentFileType,
+      category,
+      data: input.data,
+      materialItemCount: input.materialItemCount,
+    })) return 'price_sheet'
+    return 'photo'
+  }
+  return category
+}
+
 function buildDocumentReviewProfile(input: {
   documentId: string
   category?: string | null
@@ -108,7 +164,13 @@ function buildDocumentReviewProfile(input: {
   const fileType = String(input.fileType || '').toLowerCase()
   const lower = `${fileType} ${category}`.trim() || 'unknown'
   const documentType =
-    lower.includes('price') ? 'price_sheet' :
+    shouldTreatAsPriceSheet({
+      fileType,
+      category,
+      data: input.extractedData,
+      materialItemCount: input.materialItemCount,
+    }) ? 'price_sheet' :
+    isPhotoUploadFileType(fileType) ? 'photo' :
     lower.includes('scope') ? 'scope_of_loss' :
     lower.includes('carrier_letter') || lower.includes('carrier letter') || lower.includes('settlement') ? 'carrier_letter' :
     lower.includes('estimate') ? 'carrier_estimate' :
@@ -502,7 +564,12 @@ async function processImageDocument(job: AgentJobRow, current: any) {
       extractionConfidence: comparisonResult.confidence,
       missingDataFlags: JSON.stringify(imageReview.missingDataFlags),
       conflictFlags: JSON.stringify(comparisonResult.conflicts),
-      fileType: analysis.category !== 'document_analysis' && analysis.category !== 'unknown' ? analysis.category : current.fileType,
+      fileType: finalDocumentFileType({
+        currentFileType: current.fileType,
+        analysisCategory: analysis.category,
+        data: fullData as Record<string, any>,
+        materialItemCount: analysis.materialItems?.length ?? 0,
+      }) ?? current.fileType,
     },
   })
 
@@ -869,9 +936,12 @@ async function processTextDocument(job: AgentJobRow, current: any) {
       extractionConfidence: comparisonResult.confidence,
       missingDataFlags: JSON.stringify(documentReview.missingDataFlags),
       conflictFlags: JSON.stringify(comparisonResult.conflicts),
-      fileType: analysis?.category && analysis.category !== 'document_analysis' && analysis.category !== 'unknown' && analysis.category !== 'scanned_pdf'
-        ? analysis.category
-        : current.fileType,
+      fileType: finalDocumentFileType({
+        currentFileType: current.fileType,
+        analysisCategory: analysis?.category,
+        data: finalData as Record<string, any>,
+        materialItemCount: analysis?.materialItems?.length ?? 0,
+      }) ?? current.fileType,
     },
   })
 

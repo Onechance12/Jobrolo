@@ -47,7 +47,8 @@ export function DocumentCard({ attachment }: { attachment: MessageAttachment }) 
   const warnings = (extracted?.warnings as string[] | undefined) ?? []
   const extractionCoverage = (extracted?.extractionCoverage as Record<string, unknown> | undefined) ?? {}
   const hasReviewNotes = reviewNotes.length > 0 || warnings.length > 0
-  const isPriceSheet = attachment.documentType === 'price_sheet' || String(attachment.documentCategory ?? '').includes('price')
+  const reviewDocumentType = typeof documentReview?.documentType === 'string' ? documentReview.documentType : ''
+  const isPriceSheet = attachment.documentType === 'price_sheet' || reviewDocumentType === 'price_sheet' || materialItems.length > 0
   const isScopeLike = ['scope_of_loss', 'estimate', 'insurance_claim'].includes(attachment.documentType ?? '')
 
   function insertPrompt(text: string) {

@@ -25,6 +25,8 @@ export const skillRoutingTestCases = [
   'profile photo/avatar routes to user profile behavior',
   'ambiguous documents ask one clarification',
   'filename-only price list hints do not auto-route',
+  'generic image uploads route as photos, not price sheets',
+  'image filename price-list hint does not override image/photo evidence',
   'show price list selects price-list behavior',
 ]
 
@@ -114,6 +116,23 @@ export function assertSkillRoutingContracts() {
   assert(filenameOnly.route === 'unassigned_review', 'Filename-only price list hint should not auto-route')
   assert(filenameOnly.evidence === 'filename_fallback', 'Filename-only classification must be marked weak')
   assert(filenameOnly.needsClarification, 'Filename-only classification should ask or wait for extraction')
+
+  const roofPhoto = classifyUploadForSkills({
+    filename: 'roof-photo.png',
+    mimeType: 'image/png',
+    recentUserText: 'Upload this roof photo.',
+  })
+  assert(roofPhoto.fileType === 'photo', 'Generic roof image upload should stay a photo')
+  assert(roofPhoto.route === 'unassigned_review', 'Untyped roof photo should wait for customer/project/section confirmation')
+  assert(!roofPhoto.skillIds.includes('price-list'), 'Generic roof photo should not select price-list skill')
+
+  const misleadingImageName = classifyUploadForSkills({
+    filename: 'abc-price-list.png',
+    mimeType: 'image/png',
+  })
+  assert(misleadingImageName.fileType === 'photo', 'Image MIME type should beat misleading price-list filename')
+  assert(misleadingImageName.documentType === 'photo', 'Image with price-list filename should not become a price sheet without content or user intent')
+  assert(misleadingImageName.route === 'unassigned_review', 'Misleading image filename should stay in review/confirmation path')
 
   assertSkillSelected('Show my material price list and first 10 rows', 'price-list', 'Show price list should select price-list behavior')
   const showPriceListSkills = skillIdsFor('Show my material price list and first 10 rows')

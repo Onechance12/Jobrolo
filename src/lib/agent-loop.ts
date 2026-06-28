@@ -816,6 +816,23 @@ function isCreatePotentialLeadRequest(text: string) {
   return !/\b(inspection|inspect|appointment|project|job|customer file)\b/.test(lower)
 }
 
+function convertFieldLeadRequest(text: string) {
+  const clean = plainMessageText(text).replace(/\[BROWSER_LOCATION\][\s\S]*$/i, '').trim()
+  const lower = clean.toLowerCase()
+  if (!/\b(convert|create)\b[\s\S]{0,120}\b(field\s+)?(inspection\s+)?lead\b[\s\S]{0,160}\b(customer|project|job)\b/.test(lower)) return null
+  const leadId = clean.match(/\blead\s*id\s*:?\s*([a-z0-9_-]{8,})\b/i)?.[1]
+    ?? clean.match(/\((?:field\s+)?lead\s*id\s*:?\s*([a-z0-9_-]{8,})\)/i)?.[1]
+  if (!leadId) return null
+  const projectTitle = clean.match(/\bproject\s*(?:title|name)\s*:?\s*([^.\n]+)/i)?.[1]?.trim()
+  const customerName = clean.match(/\b(?:customer|homeowner|owner)\s*(?:name)?\s*:?\s*([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3})\b/)?.[1]?.trim()
+  return {
+    leadId,
+    ...(customerName ? { customerName } : {}),
+    ...(projectTitle ? { projectTitle } : {}),
+    notes: clean.slice(0, 800),
+  }
+}
+
 function extractPotentialLeadArgs(text: string) {
   const clean = plainMessageText(text)
     .replace(/\[BROWSER_LOCATION\][\s\S]*$/i, '')
@@ -965,6 +982,15 @@ function buildPotentialLeadToolCall(userText: string): ToolCall {
   }
 }
 
+function buildConvertFieldLeadToolCall(userText: string): ToolCall | null {
+  const args = convertFieldLeadRequest(userText)
+  if (!args) return null
+  return {
+    name: 'convert_canvassing_lead_to_project',
+    args,
+  }
+}
+
 function buildFieldResearchContinuationToolCall(messages: ChatMessage[]): ToolCall {
   const latestUser = lastExternalUserMessage(messages)
   const userText = latestUser ? plainMessageText(latestUser.message.content) : ''
@@ -1015,6 +1041,8 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
+  const convertFieldLeadToolCall = buildConvertFieldLeadToolCall(userText)
+  if (convertFieldLeadToolCall) return convertFieldLeadToolCall
   if (isCreatePotentialLeadRequest(userText)) return buildPotentialLeadToolCall(userText)
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadToolCall(userText)
   if (isLiveFieldObservationRequest(userText)) return buildFieldObservationToolCall(userText)
@@ -1054,6 +1082,16 @@ Do not save it as a normal customer/job note. Do not narrate that you will save 
   }
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
   if (isLiveFieldObservationRequest(userText)) return buildFieldObservationInstruction(userText)
+  const convertFieldLeadArgs = convertFieldLeadRequest(userText)
+  if (convertFieldLeadArgs) {
+    return `The latest user request is converting a saved field/inspection lead into a real customer/project:
+"${userText.slice(0, 500)}"
+
+Call convert_canvassing_lead_to_project now with:
+${JSON.stringify(convertFieldLeadArgs)}
+
+This mutation requires approval. Do not say converted unless the tool result confirms success. If approval is required, clearly show that approval is needed. Respond as JSON only.`
+  }
   if (isAffirmativeFieldInspectionContinuation(messages)) return buildFieldInspectionLeadInstruction(userText, mostRecentBrowserLocation(messages))
   if (isFieldResearchContinuationRequest(messages)) return buildFieldResearchContinuationInstruction(messages)
   if (isFieldLocationResolveRequest(messages)) return buildFieldLocationResolveInstruction(userText)

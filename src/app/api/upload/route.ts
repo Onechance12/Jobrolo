@@ -243,8 +243,10 @@ export async function POST(req: NextRequest) {
       })
       console.log(`[upload] saved document requestId=${requestId} id=${document.id} file=${originalName} size=${document.size} type=${document.fileType}`)
 
+      const shouldApplyProfileAssetNow = !requireUploadConfirmation
+
       let appliedAvatarUrl: string | null = null
-      if (uploadPurpose === 'user_avatar') {
+      if (uploadPurpose === 'user_avatar' && shouldApplyProfileAssetNow) {
         appliedAvatarUrl = thumbnailUrl(saved) || toFileUrl(document.filePath)
         await db.user.update({
           where: { id: ctx.user.id },
@@ -254,7 +256,7 @@ export async function POST(req: NextRequest) {
       }
 
       let appliedCompanyLogoUrl: string | null = null
-      if (uploadPurpose === 'company_logo') {
+      if (uploadPurpose === 'company_logo' && shouldApplyProfileAssetNow) {
         appliedCompanyLogoUrl = toFileUrl(document.filePath)
         await db.contractorProfile.upsert({
           where: { contractorId: ctx.contractorId },
