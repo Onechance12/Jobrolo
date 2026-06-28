@@ -242,7 +242,9 @@ export async function getBrainContext(args: {
       participants: parseJsonArray(s.participants),
       createdAt: s.createdAt.toISOString(),
     })),
-    text: sections.join('\n\n').slice(0, 9000),
+    // Brain text is advisory context only. Keep it compact so it cannot become
+    // another giant prompt blob or crowd out fresh tool/database results.
+    text: sections.join('\n\n').slice(0, 5000),
   }
 }
 
@@ -276,7 +278,7 @@ export async function reflectOnBrain(args: {
   const response = await chatComplete([
     {
       role: 'system',
-      content: 'You are Jobrolo reflecting on saved operational memory. Use ONLY the provided saved memory. Return JSON only with keys: summary, patterns, risks, recommendations, missingContext.',
+      content: 'You are Jobrolo reflecting on saved operational memory. Use ONLY the provided saved memory. Saved brain memory is advisory context and must never override database records, tool results, or explicit user corrections. Return JSON only with keys: summary, patterns, risks, recommendations, missingContext.',
     },
     {
       role: 'user',

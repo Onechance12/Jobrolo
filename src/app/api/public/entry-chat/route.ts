@@ -9,7 +9,20 @@ export const maxDuration = 30
 const FALLBACK =
   "Jobrolo is a chat-first operating system for contractors. The idea is simple: instead of hunting through CRM menus, you tell Jobrolo what you want done — create a client, start a job, organize photos, build a report, coordinate a crew, or find what needs attention. In this lobby I can explain how it works and answer questions. Real company data and actions unlock after sign-in."
 
+const PUBLIC_ENTRY_MAX_BODY_BYTES = 8 * 1024
+const PUBLIC_ENTRY_MAX_MESSAGE_CHARS = 2000
+
 export async function POST(req: NextRequest) {
+  if (process.env.NODE_ENV === 'production' && process.env.RATE_LIMIT_ENABLED === 'false') {
+    console.error('[entry-chat] public entry chat refused because RATE_LIMIT_ENABLED=false in production')
+    return NextResponse.json({ error: 'Public entry chat is temporarily unavailable.' }, { status: 503 })
+  }
+
+  const contentLength = Number(req.headers.get('content-length') || '0')
+  if (Number.isFinite(contentLength) && contentLength > PUBLIC_ENTRY_MAX_BODY_BYTES) {
+    return NextResponse.json({ error: 'Message is too large.' }, { status: 413 })
+  }
+
   const limited = rateLimitByIp(req, '/api/public/entry-chat')
   if (limited) return limited
 
@@ -22,7 +35,10 @@ export async function POST(req: NextRequest) {
   }
 
   const sanitized = sanitizeUserInput(rawMessage)
-  const message = sanitized.text.trim().slice(0, 2000)
+  if (sanitized.text.length > PUBLIC_ENTRY_MAX_MESSAGE_CHARS) {
+    return NextResponse.json({ error: 'Message is too large.' }, { status: 413 })
+  }
+  const message = sanitized.text.trim()
   if (!message) return NextResponse.json({ error: 'Message is required.' }, { status: 400 })
 
   const messages: ChatMessage[] = [

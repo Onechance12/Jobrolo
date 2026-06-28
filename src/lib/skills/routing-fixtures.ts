@@ -4,20 +4,34 @@ import { selectSkills } from './select-skill'
 export const skillRoutingFixtures = [
   {
     name: 'price sheet routes company pricing',
-    input: { filename: 'SUPPLIER_PRICE_LIST_2026.pdf', mimeType: 'application/pdf' },
+    input: {
+      filename: 'download.pdf',
+      mimeType: 'application/pdf',
+      recentUserText: 'Upload this supplier price list.',
+      visibleText: 'Supplier Price List SKU item unit price branch account pricing roofing materials',
+    },
     expectedStorageScope: 'company_pricing',
     expectedFileType: 'price_sheet',
     expectedSkill: 'price-list',
   },
   {
     name: 'estimate template routes company template',
-    input: { filename: 'Roofing estimate template.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    input: {
+      filename: 'download.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      visibleText: 'Estimate template blank form signature line terms and conditions customer name placeholders',
+    },
     expectedStorageScope: 'company_template',
     expectedSkill: 'template-intake',
   },
   {
     name: 'xactimate estimate routes project file',
-    input: { filename: 'Smith Xactimate estimate.pdf', mimeType: 'application/pdf' },
+    input: {
+      filename: 'scan.pdf',
+      mimeType: 'application/pdf',
+      visibleText: 'Xactimate estimate claim number line items RCV ACV depreciation deductible',
+      hasProjectContext: true,
+    },
     expectedStorageScope: 'project_file',
     expectedSkill: 'save-scope',
   },

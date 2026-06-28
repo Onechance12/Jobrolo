@@ -37,6 +37,8 @@ tsconfig.tsbuildinfo
 
 # misc
 skills/
+!src/lib/skills/
+!src/lib/skills/**
 .zscripts/
 .initial_snapshot.json
 mini-services/

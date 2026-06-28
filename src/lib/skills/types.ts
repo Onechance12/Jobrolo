@@ -85,6 +85,14 @@ export type JobroloSkillDefinition = JobroloSkill
 export interface UploadSkillInput {
   filename: string
   mimeType?: string
+  /**
+   * Visible/extracted content signals are trusted more than filenames.
+   * `metadataTitle` is intentionally treated as weak evidence, similar to filename.
+   */
+  visibleText?: string
+  extractedText?: string
+  contentHints?: string[]
+  metadataTitle?: string
   uploadPurpose?: string
   suggestedUploadPurpose?: string
   uploadIntentSource?: string
@@ -130,6 +138,7 @@ export interface UploadSkillClassification {
   projectLevel: boolean
   needsClarification: boolean
   reason: string
+  evidence: 'user_intent' | 'visible_content' | 'context' | 'filename_fallback' | 'unknown'
   confidence: number
   suggestedPrompt?: string
 }
@@ -151,6 +160,41 @@ export interface SkillSelection {
   skill: JobroloSkill
   confidence: number
   reason: string
+}
+
+export type SkillConsultRole = 'primary' | 'supporting'
+
+export interface SkillConsult {
+  skillId: string
+  role: SkillConsultRole
+  finding: string
+  confidence: number
+  suggestedAction?: string
+  requiredContext?: string[]
+  approvalNeeded?: boolean
+  allowedTools?: string[]
+  blockedTools?: string[]
+  userVisible?: boolean
+}
+
+export interface SkillOrchestrationPlan {
+  primarySkill: string
+  supportingSkills: string[]
+  consults: SkillConsult[]
+  selectedEntities: {
+    customerId?: string | null
+    projectId?: string | null
+    workspaceId?: string | null
+    documentIds?: string[]
+  }
+  requiredContext: string[]
+  riskLevel: JobroloSkillRisk
+  approvalNeeded: boolean
+  allowedTools: string[]
+  blockedTools: string[]
+  recommendedAction: string
+  userFacingSummary: string
+  highComplexity: boolean
 }
 
 export interface RenderedSkillInstructions {

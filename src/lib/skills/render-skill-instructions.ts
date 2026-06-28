@@ -1,6 +1,11 @@
 import { getSkillLabel } from './registry'
 import type { JobroloSkill, SkillRoutingContext, SkillSelection } from './types'
 
+// Runtime note: `allowedTools` and `forbiddenTools` are compact prompt guidance today.
+// Deterministic guards still live in the upload classifier, agent loop, and tools.
+// TODO: add a lightweight runtime validator that compares selected skills against
+// requested tool calls before execution, without turning skills into a giant policy engine.
+
 function ruleToText(rule: JobroloSkill['decisionRules'][number]): string {
   if (typeof rule === 'string') return rule
   return `If ${rule.if}, then ${rule.then}.`

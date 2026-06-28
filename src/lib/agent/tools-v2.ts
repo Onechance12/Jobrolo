@@ -67,6 +67,7 @@ export interface ToolDef {
 const TRUSTED_DIRECT_TOOLS = new Set(['create_customer', 'link_document_to_project'])
 const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
 const COMPANY_PROFILE_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator'])
+const INTERNAL_BRAIN_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator', 'sales', 'production', 'supplement', 'supplementer', 'office'])
 const PROJECT_CHAT_TYPES = [
   'main',
   'customer',
@@ -120,6 +121,10 @@ function normalizeDocumentLinkRole(role: string) {
 
 function canManageCompanyProfile(ctx: ToolContext) {
   return COMPANY_PROFILE_ROLES.has(normalizeRole(ctx.userRole))
+}
+
+function canUseInternalBrain(ctx: ToolContext) {
+  return INTERNAL_BRAIN_ROLES.has(normalizeRole(ctx.userRole))
 }
 
 function stableStringify(value: unknown): string {
@@ -1134,6 +1139,9 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
+      if (!canUseInternalBrain(ctx)) {
+        return { success: false, data: null, error: 'Brain memory is available only to internal company roles.' }
+      }
       const saved = await saveBrainMemory({
         contractorId,
         layer: args.layer,
@@ -1173,6 +1181,9 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
+      if (!canUseInternalBrain(ctx)) {
+        return { success: false, data: null, error: 'Brain memory is available only to internal company roles.' }
+      }
       const context = await getBrainContext({
         contractorId,
         customerId: args.customerId,
@@ -1210,6 +1221,9 @@ export const TOOLS: ToolDef[] = [
     }),
     allowedChannels: ['main', 'management'],
     execute: async (args, contractorId, ctx) => {
+      if (!canUseInternalBrain(ctx)) {
+        return { success: false, data: null, error: 'Brain reflection is available only to internal company roles.' }
+      }
       const reflection = await reflectOnBrain({
         contractorId,
         customerId: args.customerId,
