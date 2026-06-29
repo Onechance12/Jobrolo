@@ -75,6 +75,13 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
   if (context?.uploadClassification) {
     const route = context.uploadClassification
     lines.push(`Upload route: ${route.documentType} -> ${route.storageScope}. fileType=${route.fileType}. companyLevel=${route.companyLevel}. needsClarification=${route.needsClarification}. reason=${route.reason}`)
+    if (route.evidencePacket) {
+      const packet = route.evidencePacket
+      const signals = packet.signals.slice(0, 5).map(signal => `${signal.label}=${signal.value ?? signal.kind} (${signal.trust})`).join('; ')
+      lines.push(`Evidence intake packet: source=${packet.source}. primaryEvidence=${packet.primaryEvidence}. route=${packet.route}. confidence=${packet.confidence.toFixed(2)}. visibleContent=${packet.visibleContentAvailable ? 'yes' : 'no'}. signals=${signals || 'none'}.`)
+      if (packet.location) lines.push(`Evidence location: ${packet.location.latitude}, ${packet.location.longitude}${packet.location.accuracyMeters ? ` ±${Math.round(packet.location.accuracyMeters)}m` : ''}. Treat GPS as evidence, not confirmed customer truth.`)
+      if (packet.recommendedQuestion) lines.push(`Evidence next question: ${packet.recommendedQuestion}`)
+    }
   }
 
   return lines.join('\n')

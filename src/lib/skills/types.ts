@@ -97,6 +97,14 @@ export interface UploadSkillInput {
   uploadPurpose?: string
   suggestedUploadPurpose?: string
   uploadIntentSource?: string
+  actionSource?: string
+  activeRoute?: string
+  captureMode?: 'upload' | 'camera' | 'voice' | 'video' | 'ar_capture' | 'manual_note' | 'system'
+  captureSource?: string
+  captureLatitude?: number
+  captureLongitude?: number
+  captureAccuracyMeters?: number
+  capturedAt?: string
   photoSection?: string
   photoSectionLabel?: string
   hasCustomerContext?: boolean
@@ -123,10 +131,60 @@ export type UploadSkillRoute =
   | 'brand_asset'
   | 'user_profile'
   | 'project_scope'
+  | 'project_invoice'
   | 'project_cost'
   | 'inspection_photo'
   | 'customer_project_file'
   | 'unassigned_review'
+
+export type UploadEvidenceKind = 'user_intent' | 'visible_content' | 'document_structure' | 'context' | 'filename_fallback' | 'mixed' | 'unknown'
+
+export type EvidenceSignalTrust = 'strong' | 'medium' | 'weak'
+
+export interface EvidenceSignal {
+  kind:
+    | 'user_intent'
+    | 'visible_text'
+    | 'document_structure'
+    | 'app_context'
+    | 'filename'
+    | 'mime_type'
+    | 'gps'
+    | 'photo_section'
+    | 'capture_source'
+  label: string
+  value?: string
+  confidence: number
+  trust: EvidenceSignalTrust
+}
+
+export interface EvidencePacket {
+  source: 'upload' | 'camera' | 'voice' | 'video' | 'ar_capture' | 'manual_note' | 'system'
+  filename?: string
+  mimeType?: string
+  userIntent?: string
+  visibleContentAvailable: boolean
+  appContext: {
+    hasCustomer: boolean
+    hasProject: boolean
+    hasWorkspace: boolean
+    activeRoute?: string
+  }
+  location?: {
+    latitude: number
+    longitude: number
+    accuracyMeters?: number
+    source?: string
+    capturedAt?: string
+  }
+  signals: EvidenceSignal[]
+  primaryEvidence: UploadEvidenceKind
+  route: UploadSkillRoute
+  storageScope: SkillStorageScope
+  confidence: number
+  needsClarification: boolean
+  recommendedQuestion?: string
+}
 
 export interface UploadSkillClassification {
   skillIds: string[]
@@ -139,9 +197,12 @@ export interface UploadSkillClassification {
   projectLevel: boolean
   needsClarification: boolean
   reason: string
-  evidence: 'user_intent' | 'visible_content' | 'context' | 'filename_fallback' | 'unknown'
+  evidence: UploadEvidenceKind
   confidence: number
   suggestedPrompt?: string
+  routeLabel?: string
+  confidenceReasons?: string[]
+  evidencePacket?: EvidencePacket
 }
 
 export interface SkillRoutingContext {

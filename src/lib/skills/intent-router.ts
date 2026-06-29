@@ -38,6 +38,8 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       ? ['upload-classifier', 'supplier', 'approval']
       : upload.route === 'project_scope'
         ? ['document-type-routing', 'project-context', 'approval']
+        : upload.route === 'project_invoice'
+          ? ['document-type-routing', 'project-context', 'job-cost', 'approval']
         : upload.route === 'project_cost'
           ? ['upload-classifier', 'project-context', 'approval']
         : ['upload-classifier', 'document-type-routing', upload.companyLevel ? 'company-profile' : 'project-context', 'approval']
@@ -49,6 +51,8 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         ? 'price-list'
         : upload.route === 'project_scope'
           ? 'save-scope'
+          : upload.route === 'project_invoice'
+            ? 'invoice'
           : upload.route === 'project_cost'
             ? 'supplier-invoice'
             : 'upload-classifier',

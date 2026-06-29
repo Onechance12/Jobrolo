@@ -25,6 +25,10 @@ export const skillRoutingTestCases = [
   'profile photo/avatar routes to user profile behavior',
   'ambiguous documents ask one clarification',
   'filename-only price list hints do not auto-route',
+  'price list intent conflicting with invoice content asks clarification',
+  'customer invoice routes to revenue/collections lane',
+  'field/photo capture carries evidence packet with GPS context',
+  'evidence intake card is selected for upload classifier',
   'generic image uploads route as photos, not price sheets',
   'image filename price-list hint does not override image/photo evidence',
   'show price list selects price-list behavior',
@@ -127,6 +131,50 @@ export function assertSkillRoutingContracts() {
   assert(filenameOnly.route === 'unassigned_review', 'Filename-only price list hint should not auto-route')
   assert(filenameOnly.evidence === 'filename_fallback', 'Filename-only classification must be marked weak')
   assert(filenameOnly.needsClarification, 'Filename-only classification should ask or wait for extraction')
+
+  const conflictingPriceInvoice = classifyUploadForSkills({
+    filename: 'abc-price-list.pdf',
+    mimeType: 'application/pdf',
+    recentUserText: 'Upload this as my supplier price list.',
+    visibleText: 'Invoice #8831 bill to job address remit payment subtotal tax total due ABC Supply',
+  })
+  assert(conflictingPriceInvoice.route === 'unassigned_review', 'Price list intent conflicting with invoice content should not auto-route')
+  assert(conflictingPriceInvoice.needsClarification, 'Conflicting price/invoice evidence should ask one clarification')
+  assert(Boolean(conflictingPriceInvoice.evidencePacket?.primaryEvidence === 'filename_fallback' || conflictingPriceInvoice.evidencePacket?.needsClarification), 'Conflicting evidence should carry a clarification packet')
+
+  const customerInvoice = classifyUploadForSkills({
+    filename: 'invoice.pdf',
+    mimeType: 'application/pdf',
+    visibleText: 'Customer invoice payment request balance due from customer pay this invoice total due',
+    hasProjectContext: true,
+  })
+  assert(customerInvoice.route === 'project_invoice', 'Customer invoice should route to project invoice/revenue lane')
+  assert(customerInvoice.skillIds.includes('invoice'), 'Customer invoice should select invoice skill')
+  assert(!customerInvoice.skillIds.includes('supplier'), 'Customer invoice should not select supplier skill by default')
+
+  const gpsPhoto = classifyUploadForSkills({
+    filename: 'IMG_5001.jpeg',
+    mimeType: 'image/jpeg',
+    recentUserText: 'Saw window screen damage from the ground.',
+    hasProjectContext: true,
+    captureMode: 'camera',
+    captureSource: 'browser_gps',
+    captureLatitude: 32.9574,
+    captureLongitude: -97.2574,
+    captureAccuracyMeters: 11,
+  })
+  assert(gpsPhoto.route === 'inspection_photo', 'Field photo with project context and damage intent should route as inspection/photo evidence')
+  assert(gpsPhoto.storageScope === 'field_evidence', 'Field photo should store as field evidence')
+  assert(gpsPhoto.evidencePacket?.location?.latitude === 32.9574, 'Field photo should carry GPS evidence packet')
+  assert(Boolean(gpsPhoto.evidencePacket?.signals.some(signal => signal.kind === 'gps')), 'Evidence packet should include GPS signal')
+  assert(Boolean(gpsPhoto.evidencePacket?.signals.some(signal => signal.kind === 'user_intent')), 'Evidence packet should include user intent signal')
+
+  const uploadSkills = selectSkills(buildSkillRoutingContext({
+    latestText: 'Upload this document.',
+    upload: { filename: 'scan.pdf', mimeType: 'application/pdf' },
+  })).map((selection) => selection.skill)
+  const uploadClassifier = uploadSkills.find(skill => skill.id === 'upload-classifier')
+  assert(Boolean(uploadClassifier?.output?.cards?.includes('evidence-intake')), 'Upload classifier should advertise evidence intake card')
 
   const roofPhoto = classifyUploadForSkills({
     filename: 'roof-photo.png',

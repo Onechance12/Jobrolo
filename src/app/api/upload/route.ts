@@ -141,6 +141,9 @@ export async function POST(req: NextRequest) {
       storageScope?: string
       skillRoute?: string
       skillIds?: string[]
+      needsClarification?: boolean
+      suggestedPrompt?: string
+      evidencePacket?: unknown
     }> = []
 
     for (const file of files) {
@@ -157,6 +160,12 @@ export async function POST(req: NextRequest) {
         uploadPurpose,
         suggestedUploadPurpose,
         uploadIntentSource,
+        captureMode: photoSection || photoSectionLabel ? 'camera' : 'upload',
+        captureSource: captureLocation?.source,
+        captureLatitude: captureLocation?.latitude,
+        captureLongitude: captureLocation?.longitude,
+        captureAccuracyMeters: captureLocation?.accuracyMeters,
+        capturedAt: captureLocation?.capturedAt,
         photoSection,
         photoSectionLabel,
         hasCustomerContext: Boolean(customerId),
@@ -199,6 +208,12 @@ export async function POST(req: NextRequest) {
               skillStorageScope: classification.storageScope,
               skillRoute: classification.route,
               skillConfidence: classification.confidence,
+              skillEvidence: classification.evidence,
+              skillRouteLabel: classification.routeLabel,
+              needsClarification: classification.needsClarification,
+              suggestedPrompt: classification.suggestedPrompt,
+              confidenceReasons: classification.confidenceReasons,
+              evidencePacket: classification.evidencePacket,
               documentType: classification.documentType,
               classificationReason: classification.reason,
             },
@@ -212,6 +227,12 @@ export async function POST(req: NextRequest) {
                 skillStorageScope: classification.storageScope,
                 skillRoute: classification.route,
                 skillConfidence: classification.confidence,
+                skillEvidence: classification.evidence,
+                skillRouteLabel: classification.routeLabel,
+                needsClarification: classification.needsClarification,
+                suggestedPrompt: classification.suggestedPrompt,
+                confidenceReasons: classification.confidenceReasons,
+                evidencePacket: classification.evidencePacket,
                 documentType: classification.documentType,
                 classificationReason: classification.reason,
               },
@@ -337,6 +358,9 @@ export async function POST(req: NextRequest) {
         storageScope: classification.storageScope,
         skillRoute: classification.route,
         skillIds: classification.skillIds,
+        needsClarification: classification.needsClarification,
+        suggestedPrompt: classification.suggestedPrompt,
+        evidencePacket: classification.evidencePacket,
       })
     }
 
