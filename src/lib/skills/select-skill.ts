@@ -120,7 +120,7 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('approval', 0.86, 'Approval/destructive or replay-sensitive intent.'))
   }
 
-  if (/(hey cody|note to cody|bug|test failed)/.test(text)) {
+  if (/(cody cody cody|end cody|note to cody|codex packet|bug|test failed)/.test(text)) {
     pushUnique(selections, select('qa', 0.9, 'Tester note or QA report.'))
   }
 

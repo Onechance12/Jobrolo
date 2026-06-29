@@ -69,7 +69,7 @@ export function suggestJobroloNextPaths(context: SkillRoutingContext): JobroloNe
     pushUnique(paths, {
       id: 'save-field-observation',
       label: 'Save field note',
-      prompt: 'Save this as a field observation with my current GPS and ask before converting it to a customer or job.',
+      prompt: 'Save this as a field observation with GPS if available, and ask before converting it to a customer or job.',
       reason: 'Field evidence should be captured before conversion.',
       priority: 82,
     })

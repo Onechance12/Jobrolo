@@ -5,7 +5,6 @@ export type JobroloSkillCategory =
   | 'company_setup'
   | 'uploads_documents'
   | 'customers_projects'
-  | 'customers-projects'
   | 'production'
   | 'suppliers'
   | 'homeowner'

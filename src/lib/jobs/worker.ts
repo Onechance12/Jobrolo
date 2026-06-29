@@ -382,6 +382,8 @@ export async function processAgentJob(job: AgentJobRow) {
     // 2. Build system prompt
     let systemPrompt: string
     let channelType: ChannelType | undefined
+    let activeProjectId: string | null | undefined
+    let activeCustomerId: string | null | undefined
     if (job.workspaceId && job.chatId) {
       const ws = await db.workspace.findFirst({
         where: { id: job.workspaceId, contractorId: job.contractorId },
@@ -396,6 +398,8 @@ export async function processAgentJob(job: AgentJobRow) {
       })
       if (!ws || !chat) throw new Error('Workspace/chat not found')
       channelType = chat.chatType as ChannelType
+      activeProjectId = ws.projectId ?? undefined
+      activeCustomerId = ws.customerId ?? ws.project?.customer?.id ?? undefined
 
       const recentMemory = await db.workspaceMemory.findMany({ where: { workspaceId: job.workspaceId }, orderBy: { createdAt: 'desc' }, take: 30 })
       const otherChats = await db.workspaceChat.findMany({ where: { workspaceId: job.workspaceId, NOT: { id: job.chatId } }, select: { id: true, chatType: true } })
@@ -474,6 +478,8 @@ IMPORTANT: You MUST call get_document_content for each uploaded document before 
       conversationId: conversation.id,
       workspaceId: job.workspaceId ?? undefined,
       chatId: job.chatId ?? undefined,
+      activeProjectId,
+      activeCustomerId,
       channelType,
       documentIds: input.documentIds,  // pass uploaded doc IDs so create_customer can auto-link
       userId: execCtx.user?.id,

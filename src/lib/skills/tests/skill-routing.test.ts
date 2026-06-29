@@ -195,6 +195,16 @@ export function assertSkillRoutingContracts() {
   const integrationSkills = selectSkills(integrationContext).map((selection) => selection.skill.id)
   assert(integrationSkills.includes('integration-provider'), `Integration request should select integration-provider, got ${integrationSkills.join(', ')}`)
 
+  const growthContext = buildSkillRoutingContext({ latestText: 'What should I do next to grow? Use my saved Jobrolo KPIs, public company research, and setup gaps.' })
+  assert(growthContext.requestIntent?.id === 'company_intelligence', `Growth request should resolve to company_intelligence intent, got ${growthContext.requestIntent?.id}`)
+  assert(Boolean(growthContext.requestIntent?.allowedTools?.includes('get_company_intelligence')), 'Company intelligence should allow get_company_intelligence')
+  assert(Boolean(growthContext.requestIntent?.allowedTools?.includes('get_company_kpis')), 'Company intelligence should allow saved KPI reads')
+  assert(Boolean(growthContext.requestIntent?.allowedTools?.includes('get_contractor_profile')), 'Company intelligence should allow saved profile reads for setup gaps')
+  assert(Boolean(growthContext.requestIntent?.blockedTools?.includes('update_contractor_profile')), 'Company intelligence should not save public research without approval')
+  const growthSkills = selectSkills(growthContext).map((selection) => selection.skill.id)
+  assert(growthSkills.includes('company-intelligence'), `Growth request should select company-intelligence, got ${growthSkills.join(', ')}`)
+  assert(growthSkills.includes('company-profile'), 'Growth request should support company-profile for setup gaps')
+
   const permissionContext = buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' })
   assert(permissionContext.requestIntent?.id === 'role_permissions', `Permission request should resolve to role_permissions intent, got ${permissionContext.requestIntent?.id}`)
   const permissionSkills = selectSkills(permissionContext).map((selection) => selection.skill.id)

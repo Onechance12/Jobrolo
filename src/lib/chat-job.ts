@@ -127,10 +127,14 @@ export async function processJob(jobId: string, opts: {
     }
 
     let systemPrompt: string
+    let activeProjectId: string | null | undefined
+    let activeCustomerId: string | null | undefined
     if (workspaceId && chatId) {
       const ws = await db.workspace.findUnique({ where: { id: workspaceId }, include: { project: { include: { customer: { select: { id: true, name: true, phone: true, email: true } } } }, customer: { select: { id: true, name: true, phone: true, email: true, address: true } }, subcontractor: { select: { id: true, name: true, company: true, specialty: true, phone: true } } } })
       const chat = await db.workspaceChat.findFirst({ where: { id: chatId, workspaceId } })
       if (!ws || !chat) throw new Error('Workspace/chat not found')
+      activeProjectId = ws.projectId ?? undefined
+      activeCustomerId = ws.customerId ?? ws.project?.customer?.id ?? undefined
       const recentMemory = await db.workspaceMemory.findMany({ where: { workspaceId }, orderBy: { createdAt: 'desc' }, take: 30 })
       const otherChats = await db.workspaceChat.findMany({ where: { workspaceId, NOT: { id: chatId } }, select: { id: true, chatType: true } })
       let crossActivity: Array<{ chatType: string; role: string; content: string; createdAt: string }> = []
@@ -150,7 +154,7 @@ export async function processJob(jobId: string, opts: {
     messages.push({ role: 'user', content: message })
 
     job.heartbeat = 'Thinking...'
-    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, conversationId: conversation.id, workspaceId, chatId, documentIds, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { const toolNames = iter.toolCalls.map(tc => tc.name); j.thinking.push({ text: safeThinkingText(iter.text, toolNames), toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.success ? 'Done' : 'Needs attention' })) }); j.heartbeat = safeThinkingText(iter.text, toolNames) } } } })
+    const loopResult = await runAgentLoop({ messages, contractorId: contractor.id, conversationId: conversation.id, workspaceId, chatId, activeProjectId, activeCustomerId, documentIds, maxIterations: 4, onIteration: (iter) => { if (!iter.final) { const j = jobs.get(jobId); if (j) { const toolNames = iter.toolCalls.map(tc => tc.name); j.thinking.push({ text: safeThinkingText(iter.text, toolNames), toolCalls: iter.toolCalls.map(tc => ({ name: tc.name, args: tc.args })), toolResults: iter.toolResults?.map(r => ({ name: r.name, success: r.success, summary: r.success ? 'Done' : 'Needs attention' })) }); j.heartbeat = safeThinkingText(iter.text, toolNames) } } } })
     clearInterval(hb)
 
     const finalText = sanitizeGeneratedStorageUrls(loopResult.final.text || '(no response)')

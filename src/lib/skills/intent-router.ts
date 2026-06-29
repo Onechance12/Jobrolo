@@ -249,13 +249,14 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       supportingSkills: ['company-profile'],
       workflowName: 'Company intelligence',
       sticky: false,
-      allowedTools: ['get_company_intelligence', 'research_contractor_website'],
+      allowedTools: ['get_company_intelligence', 'get_company_kpis', 'get_contractor_profile', 'research_company_presence', 'research_contractor_website'],
       blockedTools: ['update_contractor_profile'],
       nextStep: 'call_tool',
       summary: 'Company intelligence lane: use DB truth for KPIs and label public web/social evidence clearly.',
       laneRules: [
         'Do not overwrite company profile from public research without approval.',
         'Use saved Jobrolo data for lead/project counts.',
+        'Use saved contractor profile data for setup gaps and document-readiness fields.',
         'Label online/social findings as public evidence, not private analytics.',
       ],
     })

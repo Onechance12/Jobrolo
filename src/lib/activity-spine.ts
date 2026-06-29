@@ -63,7 +63,7 @@ function boundedConfidence(value: number | null | undefined) {
 }
 
 function locationSummary(location: ActivitySpineLocation | null | undefined) {
-  if (!location?.latitude || !location?.longitude) return ''
+  if (typeof location?.latitude !== 'number' || typeof location?.longitude !== 'number') return ''
   const accuracy = typeof location.accuracyMeters === 'number'
     ? ` ±${Math.round(location.accuracyMeters)}m`
     : ''

@@ -37,6 +37,8 @@ export interface AgentLoopOptions {
   conversationId?: string
   workspaceId?: string
   chatId?: string
+  activeCustomerId?: string | null
+  activeProjectId?: string | null
   channelType?: ChannelType
   documentIds?: string[]  // IDs of documents uploaded with the current message
   maxIterations?: number
@@ -1556,6 +1558,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       documentIds: opts.documentIds,
       channelType: opts.channelType,
       role: opts.userRole,
+      activeCustomerId: opts.activeCustomerId,
+      activeProjectId: opts.activeProjectId,
       activeWorkspaceId: opts.workspaceId,
     })
     const skillSelections = selectSkills(skillContext)

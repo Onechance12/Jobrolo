@@ -1,6 +1,8 @@
 import { normalizeActivitySpineEvent, renderActivitySpineMemory } from '../../activity-spine'
 import { buildActiveJobroloContext } from '../../jobrolo-context'
 import { suggestJobroloNextPaths } from '../../next-paths'
+import { renderSkillInstructions } from '../../skills/render-skill-instructions'
+import { selectSkills } from '../../skills/select-skill'
 import { buildSkillRoutingContext } from '../../skills/context'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -23,6 +25,16 @@ export function assertFoundationContextContracts() {
   assert(fieldEvent.shouldWriteProjectTimeline, 'Project field observations should be timeline-write candidates')
   assert(fieldEvent.memorySummary.includes('GPS'), 'Activity memory should preserve GPS summary')
   assert(fieldEvent.confidence === 0.92, 'Activity confidence should be preserved when valid')
+
+  const zeroCoordinateEvent = normalizeActivitySpineEvent({
+    contractorId: 'contractor_1',
+    projectId: 'project_1',
+    type: 'field_observation',
+    source: 'field',
+    title: 'Equator/prime-meridian test observation',
+    location: { latitude: 0, longitude: 0, accuracyMeters: 7, source: 'browser_gps' },
+  })
+  assert(zeroCoordinateEvent.memorySummary.includes('GPS 0.000000, 0.000000'), 'GPS summary should preserve valid zero coordinates')
 
   const noProjectEvent = normalizeActivitySpineEvent({
     contractorId: 'contractor_1',
@@ -62,12 +74,28 @@ export function assertFoundationContextContracts() {
   })
   const fieldPaths = suggestJobroloNextPaths(fieldContext)
   assert(fieldPaths.some(path => path.id === 'save-field-observation'), 'Field observations should suggest saving field note')
+  assert(
+    fieldPaths.some(path => path.id === 'save-field-observation' && path.prompt.includes('GPS if available')),
+    'Field observation path should not over-claim current GPS when none is present',
+  )
 
   const filesContext = buildSkillRoutingContext({
     latestText: 'Show files for Timothy grouped by photos and documents.',
   })
   const filePaths = suggestJobroloNextPaths(filesContext)
   assert(filePaths.some(path => path.id === 'show-file-hub'), 'File requests should suggest grouped file hub')
+
+  const projectContext = buildSkillRoutingContext({
+    latestText: 'Show me the files for this job.',
+    activeCustomerId: 'customer_1',
+    activeProjectId: 'project_1',
+    activeWorkspaceId: 'workspace_1',
+    documentIds: ['doc_1'],
+    channelType: 'main',
+  })
+  const skillInstructions = renderSkillInstructions(selectSkills(projectContext), projectContext)
+  assert(skillInstructions.includes('Active context: project project_1'), 'Skill instructions should preserve active project context')
+  assert(!skillInstructions.includes('Context confidence is low'), 'Resolved job chat context should not be treated as low confidence')
 
   return true
 }
