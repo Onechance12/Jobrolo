@@ -7,6 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import {
+  JobroloCard,
+  JobroloCardSection,
+  JobroloFact,
+  JobroloFactGrid,
+  JobroloPromptButton,
+  JobroloPromptPills,
+} from './card-system'
+import {
   AlertTriangle,
   Building2,
   CalendarDays,
@@ -741,30 +749,31 @@ function ScopeBreakdownCard({ data }: { data: any }) {
   const customerName = textValue(data.customer?.name)
   const projectTitle = textValue(data.project?.title)
   const title = textValue(data.filename) || projectTitle || customerName || 'Scope breakdown'
+  const scopeLabel = [customerName, projectTitle].filter(Boolean).join(' · ') || title
   return (
-    <Card className="mt-2 w-full overflow-hidden border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:max-w-xl">
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm text-emerald-950 dark:text-emerald-100">
-              <ClipboardCheck className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 truncate">Scope Breakdown</span>
-            </CardTitle>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{title}</p>
-          </div>
-          <Badge variant="secondary" className="text-[10px]">{lineItems.length} items</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-          <MetricTile label="Selected RCV" value={money(data.selectedRcv)} />
-          <MetricTile label="Deductible" value={money(data.deductible)} />
-          <MetricTile label="Offset pool" value={money(data.offsetPoolTotal)} />
-          <MetricTile label="Out of pocket" value={money(data.remainingOutOfPocket)} />
-        </div>
+    <JobroloCard
+      tone="emerald"
+      title="Scope breakdown"
+      subtitle={title}
+      badge={`${lineItems.length} items`}
+      icon={<ClipboardCheck className="h-5 w-5" />}
+      footer={(
+        <>
+          <JobroloPromptButton tone="emerald" variant="default" label="Cash quote" prompt={`Create a cash quote/bid from this saved scope for ${scopeLabel}. Use the deductible, selected RCV, offset pool, and included/excluded line items. Show me the draft before saving or sending.`} />
+          <JobroloPromptButton tone="emerald" label="Deductible pool" prompt={`Explain the deductible pool and out-of-pocket math for this saved scope: ${scopeLabel}. Use saved scope data only and call out anything that needs verification.`} />
+          <JobroloPromptButton tone="emerald" label="Report summary" prompt={`Create a clean customer-facing scope summary for ${scopeLabel}. Keep it professional, avoid raw line-item tables, and ask before creating a report or PDF.`} />
+          <JobroloPromptButton tone="emerald" label="Edit lines" prompt={`Help me edit this saved scope for ${scopeLabel}. Let me choose line items to include, exclude, or explain before changing anything.`} />
+        </>
+      )}
+    >
+        <JobroloFactGrid columns={4}>
+          <JobroloFact label="Selected RCV" value={money(data.selectedRcv)} />
+          <JobroloFact label="Deductible" value={money(data.deductible)} />
+          <JobroloFact label="Offset pool" value={money(data.offsetPoolTotal)} />
+          <JobroloFact label="Out of pocket" value={money(data.remainingOutOfPocket)} />
+        </JobroloFactGrid>
         {trades.length ? (
-          <div className="rounded-xl border bg-background/70 p-3">
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Trade breakdown</div>
+          <JobroloCardSection tone="emerald" eyebrow="Scope math" title="Trade breakdown">
             <div className="space-y-2">
               {trades.slice(0, 5).map((trade: any) => (
                 <div key={String(trade.trade)} className="flex items-center justify-between gap-3 text-xs">
@@ -776,12 +785,11 @@ function ScopeBreakdownCard({ data }: { data: any }) {
                 </div>
               ))}
             </div>
-          </div>
+          </JobroloCardSection>
         ) : null}
         {shownItems.length ? (
-          <div className="rounded-xl border bg-background/70 p-3">
+          <JobroloCardSection tone="emerald" eyebrow="Saved scope" title="Included line items">
             <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-              <span className="font-medium uppercase tracking-wide text-muted-foreground">Included line items</span>
               {lineItems.length > shownItems.length ? <span className="text-muted-foreground">Showing {shownItems.length} of {lineItems.length}</span> : null}
             </div>
             <div className="space-y-2">
@@ -797,13 +805,14 @@ function ScopeBreakdownCard({ data }: { data: any }) {
                 </div>
               ))}
             </div>
-          </div>
+          </JobroloCardSection>
         ) : null}
-      </CardContent>
-      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2 text-xs text-muted-foreground">
-        Ask “exclude line 4” or “what’s my deductible pool?” and I’ll update this from saved scope data.
-      </CardFooter>
-    </Card>
+        <JobroloCardSection tone="emerald">
+          <div className="text-xs text-muted-foreground">
+            This card is based on saved scope data. Use the pills below to draft an editable prompt instead of jumping into a form.
+          </div>
+        </JobroloCardSection>
+    </JobroloCard>
   )
 }
 
@@ -1023,36 +1032,27 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
     { label: 'Upload agreement', prompt: 'I want to upload my current agreement or contract so Jobrolo can help create a reusable document template.' },
   ].filter(Boolean) as Array<{ label: string; prompt: string }>
 
-  function insertPrompt(text: string) {
-    window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text } }))
-  }
-
   return (
-    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
-      <CardHeader className="border-b border-blue-200/70 bg-gradient-to-br from-blue-500/10 via-transparent to-cyan-500/10 pb-3 dark:border-blue-900/60">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            {logoUrl ? (
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-sm">
-                <img src={logoUrl} alt={`${name} logo`} className="max-h-full max-w-full object-contain" />
-              </div>
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
-                <Building2 className="h-6 w-6" />
-              </div>
-            )}
-            <div className="min-w-0">
-              <CardTitle className="truncate text-base text-blue-950 dark:text-blue-100">{name}</CardTitle>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                Company profile for estimates, invoices, reports, contracts, and signatures
-              </p>
-            </div>
-          </div>
-          <Badge variant="secondary" className="shrink-0 text-[10px]">{data?.status === 'updated' ? 'updated' : 'saved'}</Badge>
+    <JobroloCard
+      tone="blue"
+      title={name}
+      subtitle="Company profile for estimates, invoices, reports, contracts, and signatures"
+      badge={data?.status === 'updated' ? 'updated' : 'saved'}
+      icon={<Building2 className="h-6 w-6" />}
+      hero={logoUrl ? (
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-sm">
+          <img src={logoUrl} alt={`${name} logo`} className="max-h-full max-w-full object-contain" />
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="grid gap-2 text-xs sm:grid-cols-2">
+      ) : undefined}
+      footer={(
+        <>
+          <JobroloPromptButton tone="blue" label={<><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit from chat</>} prompt="Make edits to company profile: " />
+          <JobroloPromptButton tone="blue" label={<><Globe2 className="mr-1.5 h-3.5 w-3.5" />Research</>} prompt={`Research my company online and suggest missing company profile updates. Show what is new before saving.${website ? ` Website: ${website}` : ''}`} />
+          {!hasLogo ? <JobroloPromptButton tone="blue" label="Add logo" prompt="I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures." /> : null}
+        </>
+      )}
+    >
+        <JobroloFactGrid columns={2}>
           {legalName && legalName !== name ? <ProfileRow label="Legal name" value={legalName} /> : null}
           {phone ? <ProfileRow icon={<Phone className="h-3.5 w-3.5" />} label="Phone" value={phone} /> : null}
           {email ? <ProfileRow icon={<Mail className="h-3.5 w-3.5" />} label="Email" value={email} /> : null}
@@ -1061,41 +1061,16 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
           {licenseNumber ? <ProfileRow label="License" value={licenseNumber} /> : null}
           {ownerName ? <ProfileRow label="Owner" value={ownerName} /> : null}
           {contact ? <ProfileRow label="Public contact" value={contact} /> : null}
-        </div>
+        </JobroloFactGrid>
         {missing.length ? (
-          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            <div>
-              Setup gaps: {missing.slice(0, 8).join(', ')}{missing.length > 8 ? ` + ${missing.length - 8} more` : ''}. These help estimates, invoices, reports, contracts, and signatures look complete.
+          <JobroloCardSection tone="amber" title="Setup gaps" eyebrow="Documents + brand readiness">
+            <div className="text-xs text-muted-foreground">
+              Missing: {missing.slice(0, 8).join(', ')}{missing.length > 8 ? ` + ${missing.length - 8} more` : ''}. These help estimates, invoices, reports, contracts, and signatures look complete.
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {setupActions.slice(0, 12).map(action => (
-                <button
-                  key={action.label}
-                  type="button"
-                  onClick={() => insertPrompt(action.prompt)}
-                  className="rounded-full border border-amber-300/70 bg-amber-100/80 px-2.5 py-1 text-[11px] font-semibold text-amber-950 transition hover:bg-amber-200 dark:border-amber-700/70 dark:bg-amber-900/40 dark:text-amber-50 dark:hover:bg-amber-900/70"
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
+            <JobroloPromptPills tone="amber" className="mt-2" pills={setupActions.slice(0, 12)} />
+          </JobroloCardSection>
         ) : null}
-      </CardContent>
-      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
-        <Button size="sm" variant="outline" onClick={() => insertPrompt('Make edits to company profile: ')}>
-          <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit from chat
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => insertPrompt(`Research my company online and suggest missing company profile updates. Show what is new before saving.${website ? ` Website: ${website}` : ''}`)}>
-          <Globe2 className="mr-1.5 h-3.5 w-3.5" />Research
-        </Button>
-        {!hasLogo ? (
-          <Button size="sm" variant="outline" onClick={() => insertPrompt('I want to add my company logo to my company profile for estimates, invoices, reports, contracts, and signatures.')}>
-            Add logo
-          </Button>
-        ) : null}
-      </CardFooter>
-    </Card>
+    </JobroloCard>
   )
 }
 

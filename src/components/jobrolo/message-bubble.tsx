@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { User, Loader2, FileText, ChevronLeft, ChevronRight, X, Zap, CheckCircle2, XCircle, Circle, Volume2, Square, Brain, ExternalLink } from 'lucide-react'
 import { cn, formatMessageTime, formatFileSize, stripJsonWrapper } from '@/lib/utils'
 import { getChannelConfig } from '@/lib/channels'
+import { findJobroloCardTemplate } from '@/lib/cards/templates'
 import { DocumentCard } from './document-card'
 import { CopilotCardFromMessage } from './copilot-cards'
 import type { ClientMessage, MessageAttachment, ActionResult, ThinkingStep } from '@/lib/types'
@@ -22,12 +23,16 @@ export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Prop
   const isUser = message.role === 'user'
   const content = isUser ? message.content : stripJsonWrapper(message.content)
   const cardType = String((message.contextData as any)?.cardType || (message.contextData as any)?.type || message.contextType || '').toLowerCase()
+  const cardTemplate = findJobroloCardTemplate(cardType)
   const structuredOnlyCard = (
+    Boolean(cardTemplate) ||
     cardType.includes('company_profile') ||
     cardType.includes('company_research') ||
     cardType.includes('company_intelligence') ||
+    cardType.includes('customer_list') ||
     cardType.includes('customer_file') ||
     cardType.includes('scope_breakdown') ||
+    cardType.includes('template_review') ||
     cardType.includes('document_review') ||
     cardType.includes('document_link_review') ||
     cardType.includes('action_center') ||
@@ -42,30 +47,46 @@ export function MessageBubble({ message, onSpeak, isSpeaking, userAvatar }: Prop
     cardType.includes('property_observation') ||
     cardType.includes('door_attempt') ||
     cardType.includes('schedule_calendar') ||
+    cardType.includes('schedule_event') ||
+    cardType.includes('signature_request') ||
+    cardType.includes('signed_document') ||
+    cardType.includes('generated_document_pdf') ||
+    cardType.includes('operator_briefing') ||
+    cardType.includes('radar_alert') ||
     cardType.includes('created_chat') ||
     cardType.includes('chat_invite')
   )
-  const preferStructuredCard = !isUser && structuredOnlyCard && content.length > 180
+  const preferStructuredCard = !isUser && structuredOnlyCard
   const visibleContent = preferStructuredCard
     ? cardType.includes('company_research')
       ? 'I found company profile suggestions. Review the card below and tell me what to save or change.'
       : cardType.includes('company_intelligence')
         ? 'Here’s the company intelligence snapshot.'
+        : cardType.includes('customer_list')
+          ? 'Here are the saved clients.'
         : cardType.includes('customer_file')
           ? 'Here’s the saved customer file.'
           : cardType.includes('scope_breakdown')
             ? 'Here’s the saved scope breakdown.'
-            : cardType.includes('action_center')
-              ? 'Here’s what needs attention.'
-              : cardType.includes('field_inspection_lead')
-                ? 'Here’s the field inspection lead.'
-                : cardType.includes('roof_report')
-                  ? 'Here’s the roof report workspace.'
-                  : cardType.includes('created_chat') || cardType.includes('chat_invite')
-                    ? 'Here’s the shared chat.'
-                    : cardType.includes('company_profile')
-                      ? 'Here’s the saved company profile.'
-                      : 'Here’s the card.'
+            : cardType.includes('template_review')
+              ? 'Here’s the document template review.'
+              : cardType.includes('action_center')
+                ? 'Here’s what needs attention.'
+                : cardType.includes('schedule')
+                  ? 'Here’s the schedule card.'
+                  : cardType.includes('signature')
+                    ? 'Here’s the signature card.'
+                    : cardType.includes('field_inspection_lead')
+                      ? 'Here’s the field inspection lead.'
+                      : cardType.includes('roof_report') || cardType.includes('report_')
+                        ? 'Here’s the report workspace.'
+                        : cardType.includes('created_chat') || cardType.includes('chat_invite')
+                          ? 'Here’s the shared chat.'
+                          : cardType.includes('company_profile')
+                            ? 'Here’s the saved company profile.'
+                            : cardTemplate
+                              ? `Here’s the ${cardTemplate.family} card.`
+                              : 'Here’s the card.'
     : content
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className={cn('flex w-full max-w-full min-w-0 gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 overflow-hidden', isUser ? 'flex-row-reverse' : 'flex-row')}>
