@@ -42,6 +42,10 @@ function usage() {
   npm run debug:truth -- --limit 25
   npm run debug:classify -- --filename estimate.pdf --mime application/pdf --intent "this is a price list"
   npm run debug:synthetic -- --message "Show Timothy file" --projectId <projectId>
+  npm run debug:cleanup -- --limit 25
+  npm run debug:cleanup-dry -- --action move_price_sheet_to_company_pricing --documentId <documentId>
+  npm run debug:chat-test -- --message "Show saved clients"
+  npm run debug:chat-test -- --live --confirm --contractorId <contractorId> --message "Show saved clients"
 
 Environment:
   JOBROLO_BASE_URL defaults to https://jobrolo.onrender.com
@@ -68,6 +72,17 @@ function collectText(flag) {
   const index = args.indexOf(flag)
   if (index === -1 || index + 1 >= args.length) return undefined
   return args.slice(index + 1).join(' ')
+}
+
+function collectUntilNextFlag(flag) {
+  const index = args.indexOf(flag)
+  if (index === -1 || index + 1 >= args.length) return undefined
+  const values = []
+  for (let i = index + 1; i < args.length; i++) {
+    if (args[i].startsWith('--')) break
+    values.push(args[i])
+  }
+  return values.length ? values.join(' ') : undefined
 }
 
 function has(flag) {
@@ -206,6 +221,64 @@ async function synthetic() {
   }))
 }
 
+async function cleanup() {
+  printJson(await request(`/api/dev/cleanup-candidates${query({
+    limit: valueAfter('--limit', '50'),
+    staleMinutes: valueAfter('--stale-minutes', valueAfter('--staleMinutes', '30')),
+  })}`))
+}
+
+async function cleanupDry() {
+  const action = valueAfter('--action')
+  const documentId = valueAfter('--documentId') || valueAfter('--document-id') || args.find(arg => !arg.startsWith('--'))
+  if (!action || !documentId) {
+    console.error('Missing --action or --documentId.')
+    usage()
+    process.exit(2)
+  }
+  printJson(await request('/api/dev/cleanup-dry-run', {
+    method: 'POST',
+    body: { action, documentId },
+  }))
+}
+
+function repeatedValues(flag) {
+  const values = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === flag && i + 1 < args.length) values.push(args[i + 1])
+  }
+  return values
+}
+
+async function chatTest() {
+  const message = collectUntilNextFlag('--message') || collectText('--text') || args.filter(arg => !arg.startsWith('--')).join(' ')
+  if (!message) {
+    console.error('Missing --message.')
+    usage()
+    process.exit(2)
+  }
+  printJson(await request('/api/dev/chat-test', {
+    method: 'POST',
+    body: {
+      mode: has('--live') ? 'live' : valueAfter('--mode', has('--local-only') ? 'local_only' : 'dry_run'),
+      confirm: has('--confirm'),
+      message,
+      displayMessage: valueAfter('--display-message'),
+      contractorId: valueAfter('--contractorId') || valueAfter('--contractor-id'),
+      userId: valueAfter('--userId') || valueAfter('--user-id'),
+      conversationId: valueAfter('--conversationId') || valueAfter('--conversation-id'),
+      workspaceId: valueAfter('--workspaceId') || valueAfter('--workspace-id'),
+      chatId: valueAfter('--chatId') || valueAfter('--chat-id'),
+      activeCustomerId: valueAfter('--customerId') || valueAfter('--customer-id'),
+      activeProjectId: valueAfter('--projectId') || valueAfter('--project-id'),
+      channelType: valueAfter('--channel'),
+      role: valueAfter('--role'),
+      highComplexity: has('--high'),
+      documentIds: repeatedValues('--documentId').concat(repeatedValues('--document-id')),
+    },
+  }))
+}
+
 if (command === 'version') await version()
 else if (command === 'actions') await actions()
 else if (command === 'runtime') await runtime()
@@ -215,4 +288,7 @@ else if (command === 'smoke') await smoke()
 else if (command === 'truth') await truth()
 else if (command === 'classify') await classify()
 else if (command === 'synthetic') await synthetic()
+else if (command === 'cleanup') await cleanup()
+else if (command === 'cleanup-dry') await cleanupDry()
+else if (command === 'chat-test') await chatTest()
 else usage()
