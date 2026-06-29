@@ -238,6 +238,7 @@ export type JobroloIntentId =
   | 'communication_routing'
   | 'activity_timeline'
   | 'role_permissions'
+  | 'project_closeout'
   | 'integration_provider'
   | 'cody_review'
   | 'company_profile'

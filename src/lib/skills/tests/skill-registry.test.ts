@@ -42,6 +42,7 @@ const RUNTIME_CRITICAL_SKILLS = [
   'project-creation',
   'project-context',
   'project-status',
+  'project-closeout',
   'lead-intake',
   'appointment-scheduling',
   'bid-quote',

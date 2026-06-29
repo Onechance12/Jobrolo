@@ -79,6 +79,13 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('supplier', 0.78, 'Supplier context may be needed.'))
   }
 
+  if (/(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)/.test(text)) {
+    pushUnique(selections, select('project-closeout', 0.94, 'Project closeout/readiness workflow intent.'))
+    pushUnique(selections, select('project-status', 0.86, 'Closeout needs saved project stage and blockers.'))
+    pushUnique(selections, select('job-cost', 0.84, 'Closeout needs invoices, payments, costs, commission, and margin truth.'))
+    pushUnique(selections, select('activity-timeline', 0.78, 'Closeout needs recent activity/history context.'))
+  }
+
   if (/(scope breakdown|save scope|xactimate|symbility|carrier estimate|estimate document)/.test(text)) {
     pushUnique(selections, select('save-scope', 0.88, 'Scope/estimate persistence or review request.'))
   }

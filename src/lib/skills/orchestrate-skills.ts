@@ -23,6 +23,7 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'save-scope': ['document-type-routing', 'project-context', 'approval'],
   'upload-classifier': ['document-type-routing', 'project-context', 'approval'],
   'production-coordinator': ['project-status', 'material-ordering', 'job-cost', 'approval'],
+  'project-closeout': ['project-status', 'job-cost', 'activity-timeline', 'approval'],
   'job-cost': ['project-context', 'supplier-invoice', 'approval'],
   'invoice': ['project-context', 'job-cost', 'approval'],
   'labor-cost': ['project-context', 'job-cost', 'approval'],
@@ -50,6 +51,7 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   'photo-evidence': 'Preserve photo section, GPS, damage type, and report usage context.',
   'project-context': 'Confirm the customer/project before attaching, saving, or updating records.',
   'project-status': 'Check saved project readiness before claiming a job is ready to build.',
+  'project-closeout': 'Check closeout readiness from saved project, document, schedule, financial, signature, report, and activity records.',
   'role-permissions': 'Protect visibility and role boundaries before invites, sharing, or external access.',
   supplier: 'Keep supplier documents separate from customer/project files and company pricebook records.',
   'material-ordering': 'Check material order, delivery, and supplier readiness before production-ready claims.',
@@ -66,6 +68,7 @@ const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
   commission: 'Read the project financial truth sheet first. Commission is internal-only and should stay estimated until the compensation rule, revenue basis, collections, and job-cost inputs are known.',
   invoice: 'Use the project financial truth sheet before answering. Separate customer invoices/payments from supplier invoices/job costs, and require approval before creating or sending customer-facing payment records.',
   'job-cost': 'Use get_project_financial_summary first. Treat ProjectFinancialEntry rows as the money truth and documents as evidence; show missing contract, cost, payment, or commission inputs before calling margin final.',
+  'project-closeout': 'Build a closeout readiness checklist from saved project status, docs/reports/signatures, invoices/payments, job costs, commission, warranty packet, schedule, and activity. Do not mark the job closed without approval.',
   'labor-cost': 'Resolve the project and source evidence, then treat labor/subcontractor amounts as internal job-cost truth. Separate quoted, approved, invoiced, and paid states.',
   'material-ordering': 'Use saved supplier/order/delivery evidence first. If supplier APIs are not configured, say so and offer a manual check instead of pretending live status.',
   'production-coordinator': 'Check project status, material readiness, financial/job-cost completeness, and approvals before saying a job is ready to build.',
@@ -98,6 +101,7 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (upload?.route === 'project_scope') return 'save-scope'
   if (upload) return 'upload-classifier'
 
+  if (/(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)/.test(text)) return 'project-closeout'
   if (/(ready to build|build ready|ready for production|production ready)/.test(text)) return 'production-coordinator'
   if (/(job\s*cost|project financial|margin|gross profit|profit|cost to build|what did we make)/.test(text)) return 'job-cost'
   if (/(customer invoice|unpaid invoice|balance due|payment request|record payment|accounts receivable|collect payment)/.test(text)) return 'invoice'

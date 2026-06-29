@@ -126,7 +126,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       supportingSkills: ['entity-resolver', 'project-context', 'communication-routing'],
       workflowName: 'Appointment scheduling',
       sticky: false,
-      allowedTools: ['list_appointments', 'create_appointment', 'update_appointment', 'consult_orchestrator'],
+      allowedTools: ['list_schedule', 'show_calendar', 'create_appointment', 'update_project_schedule', 'consult_orchestrator'],
       blockedTools: ['start_field_inspection_lead'],
       requiredContext: ['date/time/person/project or request to view calendar'],
       nextStep: 'call_tool',
@@ -169,7 +169,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       supportingSkills: ['photo-evidence', 'project-context', 'approval', 'communication-routing'],
       workflowName: 'Roof/property report',
       sticky: true,
-      allowedTools: ['create_roof_report', 'get_project_document_packet', 'update_roof_report_photo', 'finalize_roof_report', 'consult_orchestrator'],
+      allowedTools: ['create_roof_report', 'get_project_document_packet', 'review_roof_report_photos', 'add_photos_to_roof_report', 'update_roof_report_photo_selection', 'finalize_roof_report', 'consult_orchestrator'],
       blockedTools: ['import_price_sheet_items'],
       requiredContext: ['customer/project or existing report draft'],
       nextStep: 'call_tool',
@@ -191,7 +191,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       supportingSkills: ['file-attachment', 'project-context', 'activity-timeline'],
       workflowName: 'Photo evidence',
       sticky: false,
-      allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'update_roof_report_photo', 'consult_orchestrator'],
+      allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'review_roof_report_photos', 'add_photos_to_roof_report', 'update_roof_report_photo_selection', 'consult_orchestrator'],
       blockedTools: ['import_price_sheet_items'],
       nextStep: 'call_tool',
       summary: 'Photo evidence lane: group/tag photos as jobsite evidence instead of dumping generic file text.',
@@ -306,6 +306,28 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)\b/.test(text)) {
+    return buildIntent({
+      id: 'project_closeout',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'project-closeout',
+      supportingSkills: ['project-status', 'job-cost', 'activity-timeline', 'approval'],
+      workflowName: 'Project closeout',
+      sticky: true,
+      allowedTools: ['get_project_context', 'get_project_document_packet', 'get_project_financial_summary', 'list_schedule', 'show_calendar', 'consult_orchestrator'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'import_price_sheet_items'],
+      requiredContext: ['project/customer'],
+      nextStep: 'show_card',
+      summary: 'Closeout lane: verify project stage, documents, report/signature status, invoices, payments, job cost, warranty, and final tasks before closing.',
+      laneRules: [
+        'Use saved project, document, schedule, activity, and financial records before claiming a job is closed.',
+        'Treat closeout as a checklist/readiness workflow, not a generic chat answer.',
+        'Changing stage to closed, sending closeout packets, or recording financial truth requires approval.',
+      ],
+    })
+  }
+
   if (/\b(role|permission|access|who can see|visibility|owner|admin|employee|sales rep|project manager|homeowner access|crew access|sub access|delete chats?)\b/.test(text)) {
     return buildIntent({
       id: 'role_permissions',
@@ -315,7 +337,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       supportingSkills: ['communication-routing', 'approval'],
       workflowName: 'Role permissions',
       sticky: false,
-      allowedTools: ['get_workspace_members', 'update_workspace_member_role', 'consult_orchestrator'],
+      allowedTools: ['get_workspace_memory', 'invite_user_to_chat', 'consult_orchestrator'],
       blockedTools: ['delete_customer', 'delete_project'],
       nextStep: 'ask_clarification',
       summary: 'Role/permission lane: protect visibility boundaries before adding users, sharing data, or changing access.',

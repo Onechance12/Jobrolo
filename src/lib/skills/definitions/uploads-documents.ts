@@ -12,7 +12,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
     whenToUse: ['Inspection photos', 'Roof photos', 'Front elevation', 'Damage photo', 'Soft metals', 'Window screen damage', 'Add photos to report'],
     allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'office', 'crew', 'system'],
     optionalContext: ['photo section', 'GPS/location', 'customer/project', 'reportId', 'damage type', 'before/after status'],
-    allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'update_roof_report_photo', 'consult_orchestrator'],
+    allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'review_roof_report_photos', 'add_photos_to_roof_report', 'update_roof_report_photo_selection', 'consult_orchestrator'],
     approvalRequiredFor: ['external sharing', 'deleting photos', 'adding photos to customer-facing reports when ambiguous'],
     decisionRules: [
       'If a user selected an inspection/photo section, preserve that section and do not ask again.',

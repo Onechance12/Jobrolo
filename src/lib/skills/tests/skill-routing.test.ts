@@ -1,4 +1,5 @@
 import { buildSkillRoutingContext, classifyUploadForSkills } from '../context'
+import { JOBROLO_SKILLS } from '../registry'
 import { selectSkills } from '../select-skill'
 
 function assert(condition: boolean, message: string) {
@@ -36,9 +37,11 @@ export const skillRoutingTestCases = [
   'field observations stay in field evidence lane',
   'lead intake routes into lead lane',
   'appointment scheduling does not start field inspection',
+  'skill allowed tools use current real tool names',
   'photo evidence routes into photo lane',
   'roof reports route into report lane',
   'activity timeline routes into timeline lane',
+  'project closeout routes into closeout/readiness lane',
   'integration provider requests route into provider lane',
   'role permission requests route into permission lane',
   'Cody activation stays in read-only QA lane',
@@ -219,8 +222,20 @@ export function assertSkillRoutingContracts() {
   const appointmentContext = buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' })
   assert(appointmentContext.requestIntent?.id === 'appointment_scheduling', `Future inspection should resolve to appointment_scheduling intent, got ${appointmentContext.requestIntent?.id}`)
   assert(Boolean(appointmentContext.requestIntent?.blockedTools?.includes('start_field_inspection_lead')), 'Appointment scheduling should block active inspection lead creation')
+  assert(Boolean(appointmentContext.requestIntent?.allowedTools?.includes('list_schedule')), 'Appointment scheduling should use list_schedule')
+  assert(Boolean(appointmentContext.requestIntent?.allowedTools?.includes('show_calendar')), 'Appointment scheduling should use show_calendar')
+  assert(Boolean(appointmentContext.requestIntent?.allowedTools?.includes('update_project_schedule')), 'Appointment scheduling should use update_project_schedule')
+  assert(!appointmentContext.requestIntent?.allowedTools?.includes('list_appointments'), 'Appointment scheduling should not reference stale list_appointments tool')
+  assert(!appointmentContext.requestIntent?.allowedTools?.includes('update_appointment'), 'Appointment scheduling should not reference stale update_appointment tool')
   const appointmentSkills = selectSkills(appointmentContext).map((selection) => selection.skill.id)
   assert(appointmentSkills.includes('appointment-scheduling'), `Appointment scheduling should select appointment-scheduling, got ${appointmentSkills.join(', ')}`)
+
+  const staleAllowedTools = new Set(['list_appointments', 'update_appointment', 'update_roof_report_photo', 'get_workspace_members', 'update_workspace_member_role', 'queue_outbound_message'])
+  for (const skill of JOBROLO_SKILLS) {
+    for (const toolName of skill.allowedTools ?? []) {
+      assert(!staleAllowedTools.has(toolName), `${skill.id} should not reference stale/nonexistent allowed tool ${toolName}`)
+    }
+  }
 
   const photoContext = buildSkillRoutingContext({ latestText: 'Show photos for Timothy grouped by roof photos and damage photos.' })
   assert(photoContext.requestIntent?.id === 'photo_evidence', `Photo request should resolve to photo_evidence intent, got ${photoContext.requestIntent?.id}`)
@@ -237,6 +252,15 @@ export function assertSkillRoutingContracts() {
   assert(timelineContext.requestIntent?.id === 'activity_timeline', `Activity request should resolve to activity_timeline intent, got ${timelineContext.requestIntent?.id}`)
   const timelineSkills = selectSkills(timelineContext).map((selection) => selection.skill.id)
   assert(timelineSkills.includes('activity-timeline'), `Timeline request should select activity-timeline, got ${timelineSkills.join(', ')}`)
+
+  const closeoutContext = buildSkillRoutingContext({ latestText: 'Is this job ready to close? Show final invoice, warranty packet, payments, job cost, and blockers.' })
+  assert(closeoutContext.requestIntent?.id === 'project_closeout', `Closeout request should resolve to project_closeout intent, got ${closeoutContext.requestIntent?.id}`)
+  assert(Boolean(closeoutContext.requestIntent?.allowedTools?.includes('get_project_financial_summary')), 'Closeout should allow financial truth read')
+  assert(Boolean(closeoutContext.requestIntent?.allowedTools?.includes('get_project_document_packet')), 'Closeout should allow project packet read')
+  assert(Boolean(closeoutContext.requestIntent?.blockedTools?.includes('create_customer')), 'Closeout should not create customers')
+  const closeoutSkills = selectSkills(closeoutContext).map((selection) => selection.skill.id)
+  assert(closeoutSkills.includes('project-closeout'), `Closeout should select project-closeout, got ${closeoutSkills.join(', ')}`)
+  assert(closeoutSkills.includes('job-cost'), 'Closeout should support job-cost/financial truth')
 
   const integrationContext = buildSkillRoutingContext({ latestText: 'Is the ABC Supply API connected and ready?' })
   assert(integrationContext.requestIntent?.id === 'integration_provider', `Integration request should resolve to integration_provider intent, got ${integrationContext.requestIntent?.id}`)

@@ -99,7 +99,7 @@ export const corePlatformSkills: JobroloSkill[] = [
     allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'office', 'system'],
     requiredContext: ['recipient type or chat/project context for external sends'],
     optionalContext: ['phone/email', 'message draft', 'link', 'visibility', 'role'],
-    allowedTools: ['create_project_chat', 'invite_user_to_chat', 'queue_outbound_message', 'consult_orchestrator'],
+    allowedTools: ['create_project_chat', 'invite_user_to_chat', 'consult_orchestrator'],
     approvalRequiredFor: ['SMS/email sends', 'external invites', 'public/share links'],
     decisionRules: [
       'Creating a chat, copying a link, inviting a user, and sending a notification are separate actions.',

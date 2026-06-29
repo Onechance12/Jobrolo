@@ -61,6 +61,15 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(production.supportingSkills.includes('material-ordering'), 'Ready-to-build should consult material-ordering')
   assert(production.supportingSkills.includes('job-cost'), 'Ready-to-build should consult job-cost')
 
+  const closeout = planForText('Is this job ready to close? Check final invoice, payments, job cost, commission, report, signatures, and warranty packet.')
+  assert(closeout.primarySkill === 'project-closeout', `Closeout primary should be project-closeout, got ${closeout.primarySkill}`)
+  assert(closeout.supportingSkills.includes('project-status'), 'Closeout should consult project-status')
+  assert(closeout.supportingSkills.includes('job-cost'), 'Closeout should consult job-cost')
+  assert(closeout.supportingSkills.includes('activity-timeline'), 'Closeout should consult activity-timeline')
+  assert(closeout.approvalNeeded, 'Closeout should require approval before mutating closeout status or sending packets')
+  assert(closeout.blockedTools.includes('create_customer'), 'Closeout should block accidental customer creation')
+  assert(closeout.recommendedAction.includes('closeout readiness checklist'), 'Closeout orchestration should explain checklist behavior')
+
   const simplePriceList = planForText('Show price list')
   assert(simplePriceList.primarySkill === 'price-list', `Show price list primary should be price-list, got ${simplePriceList.primarySkill}`)
   assert(simplePriceList.supportingSkills.length === 0, `Show price list should stay simple, got ${simplePriceList.supportingSkills.join(', ')}`)

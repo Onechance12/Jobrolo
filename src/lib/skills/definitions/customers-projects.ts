@@ -37,7 +37,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
     allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'office', 'system'],
     requiredContext: ['date/time or request to find availability', 'customer/project/person when creating appointment'],
     optionalContext: ['location', 'attendees', 'appointment type', 'notes', 'duration'],
-    allowedTools: ['list_appointments', 'create_appointment', 'update_appointment', 'consult_orchestrator'],
+    allowedTools: ['list_schedule', 'show_calendar', 'create_appointment', 'update_project_schedule', 'consult_orchestrator'],
     approvalRequiredFor: ['sending invites or notifications externally'],
     decisionRules: [
       'Do not confuse starting an inspection now with scheduling a future inspection.',
