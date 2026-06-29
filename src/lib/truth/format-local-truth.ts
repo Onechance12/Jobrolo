@@ -12,6 +12,7 @@ const PRE_AI_LOCAL_TRUTH_TOOLS = new Set([
   'get_recent_uploads',
   'review_price_sheet_items',
   'get_project_document_packet',
+  'get_project_financial_summary',
 ])
 
 export function canRunLocalTruthBeforeAi(call: ToolCall | null) {
@@ -227,6 +228,61 @@ function formatLocalProjectPacket(data: Record<string, unknown>) {
   return lines.join('\n')
 }
 
+function formatLocalProjectFinancialSummary(data: Record<string, unknown>) {
+  const project = objectField(data, 'project')
+  const customer = objectField(data, 'customer')
+  const summary = objectField(data, 'summary') ?? {}
+  const entries = arrayField(data, 'entries').filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+  const missingInputs = arrayField(data, 'missingInputs').filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  const projectTitle = project ? stringField(project, 'title') : null
+  const projectNumber = project ? stringField(project, 'customerProjectNumber') ?? stringField(project, 'projectNumber') : null
+  const customerName = customer ? stringField(customer, 'name') : null
+  const lines = [
+    `Loaded financial truth from saved Jobrolo ledger rows${projectTitle ? ` for ${projectNumber ? `${projectNumber} · ` : ''}${projectTitle}` : ''}.`,
+    customerName ? `Customer: ${customerName}` : null,
+  ].filter(Boolean)
+  const fields = [
+    ['Revenue', 'adjustedRevenue'],
+    ['Costs', 'approvedCosts'],
+    ['Commission', 'approvedCommission'],
+    ['Payments', 'approvedPayments'],
+    ['Gross profit', 'grossProfit'],
+    ['Margin', 'marginPercent'],
+    ['Balance due', 'balanceDue'],
+  ] as const
+
+  for (const [label, key] of fields) {
+    const value = numberField(summary, key)
+    if (value == null) continue
+    lines.push(`- ${label}: ${key === 'marginPercent' ? `${value.toFixed(2)}%` : moneyText(value)}`)
+  }
+
+  const candidateRevenue = numberField(summary, 'candidateRevenue')
+  const candidateCosts = numberField(summary, 'candidateCosts')
+  if ((candidateRevenue ?? 0) > 0 || (candidateCosts ?? 0) > 0) {
+    lines.push(`Candidate/estimated: ${moneyText(candidateRevenue ?? 0)} revenue · ${moneyText(candidateCosts ?? 0)} costs. Do not treat candidate values as final.`)
+  }
+
+  if (missingInputs.length) {
+    lines.push(`Missing inputs: ${missingInputs.slice(0, 6).join(', ')}.`)
+  }
+
+  if (entries.length) {
+    lines.push('Recent ledger rows:')
+    for (const entry of entries.slice(0, 6)) {
+      const description = stringField(entry, 'description') ?? 'Financial entry'
+      const direction = stringField(entry, 'direction')
+      const entryType = stringField(entry, 'entryType')
+      const status = stringField(entry, 'status')
+      const amount = moneyText(entry.amount)
+      lines.push(`- ${compactLine([description, direction, entryType, status, amount].filter(Boolean).join(' · '), 180)}`)
+    }
+  }
+
+  lines.push('Source rule: documents are evidence; ProjectFinancialEntry ledger rows are the money truth.')
+  return lines.join('\n')
+}
+
 export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionResultLike) {
   if (!result.success) {
     return `I tried to load that from saved Jobrolo records, but it failed. ${result.error ? `Error: ${result.error}` : 'Please try again.'}`
@@ -238,6 +294,7 @@ export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionR
   if (call.name === 'review_price_sheet_items' && data) return formatLocalPriceSheetReview(data)
   if (call.name === 'get_customer_file' && data) return formatLocalCustomerFile(data)
   if (call.name === 'get_project_document_packet' && data) return formatLocalProjectPacket(data)
+  if (call.name === 'get_project_financial_summary' && data) return formatLocalProjectFinancialSummary(data)
   const message = typeof data?.message === 'string' ? data.message : null
   if (message) return message
   if (call.name === 'get_contractor_profile') return 'Loaded your saved company profile.'

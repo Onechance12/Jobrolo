@@ -84,6 +84,16 @@ function isProjectDocumentPacketRequest(text: string, activeProjectId?: string |
   )
 }
 
+function isProjectFinancialSummaryRequest(text: string, activeProjectId?: string | null) {
+  if (!activeProjectId) return false
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  if (/\b(closeout|close out|ready to close|close the job|warranty packet|final walkthrough)\b/.test(lower)) return false
+  const asksToRead = /\b(show|pull|view|open|display|list|what(?:'s| is)|check|explain|calculate|how much|where are we|do we have)\b/.test(lower)
+  const financialSubject = /\b(job\s*cost|job-cost|cost sheet|financials?|financial summary|ledger|margin|profit|gross profit|balance due|amount due|payments?|paid|collected|collections?|commission|customer invoice|invoice status|invoices?|material costs?|labor costs?|subcontractor costs?)\b/.test(lower)
+  return asksToRead && financialSubject
+}
+
 function buildDocumentReadToolCall(text: string): ToolCall | null {
   const lower = plainTruthText(text).toLowerCase()
   if (!lower || hasLocalTruthMutationIntent(lower)) return null
@@ -117,6 +127,15 @@ export function resolveLocalTruthRoute(text: string, context: LocalTruthContext 
       reason: 'User asked for the active job/project file packet.',
       confidence: 0.86,
       toolCall: { name: 'get_project_document_packet', args: { projectId: context.activeProjectId } },
+    }
+  }
+
+  if (isProjectFinancialSummaryRequest(userText, context.activeProjectId) && context.activeProjectId) {
+    return {
+      id: 'active-project-financial-summary',
+      reason: 'User asked for active project financial truth from saved ledger rows.',
+      confidence: 0.87,
+      toolCall: { name: 'get_project_financial_summary', args: { projectId: context.activeProjectId } },
     }
   }
 

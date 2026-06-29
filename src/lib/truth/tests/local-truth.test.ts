@@ -37,6 +37,16 @@ export function assertLocalTruthContracts() {
   assert(activePacket?.name === 'get_project_document_packet', `Active job packet should route to get_project_document_packet, got ${activePacket?.name}`)
   assert(activePacket.args.projectId === 'project_123', 'Active job packet should pass the active project id')
 
+  const activeFinancials = buildLocalTruthToolCall('Show this job cost and margin.', { activeProjectId: 'project_123' })
+  assert(activeFinancials?.name === 'get_project_financial_summary', `Active job cost should route to get_project_financial_summary, got ${activeFinancials?.name}`)
+  assert(activeFinancials.args.projectId === 'project_123', 'Active financial summary should pass the active project id')
+
+  const activeFinancialsWithoutProject = buildLocalTruthToolCall('Show this job cost and margin.')
+  assert(!activeFinancialsWithoutProject, 'Active job financial summary needs activeProjectId before local routing')
+
+  const createInvoice = buildLocalTruthToolCall('Create an invoice for this job.', { activeProjectId: 'project_123' })
+  assert(!createInvoice, 'Financial mutations should not route through local truth')
+
   const activePacketWithoutProject = buildLocalTruthToolCall('Show this job file packet.')
   assert(!activePacketWithoutProject, 'Active job packet needs activeProjectId before local routing')
 
@@ -131,6 +141,34 @@ export function assertLocalTruthContracts() {
   assert(projectPacketText.includes('2 photos · 1 job files'), 'Project packet formatter should summarize section counts')
   assert(projectPacketText.includes('Needs review: 1 required'), 'Project packet formatter should include OCR review counts')
   assert(projectPacketText.includes('price sheets should be reviewed/imported into company pricing'), 'Project packet formatter should protect price sheet routing')
+
+  const financialText = formatLocalTruthFinalText({ name: 'get_project_financial_summary', args: { projectId: 'project_123' } }, {
+    success: true,
+    data: {
+      project: { title: 'Job #783289 — Roof Repair Project', customerProjectNumber: 'C-VHUHGG-1' },
+      customer: { name: 'Timothy Disen' },
+      summary: {
+        adjustedRevenue: 10000,
+        approvedCosts: 4000,
+        approvedCommission: 1000,
+        approvedPayments: 2500,
+        grossProfit: 5000,
+        marginPercent: 50,
+        balanceDue: 7500,
+        candidateRevenue: 500,
+        candidateCosts: 250,
+      },
+      missingInputs: ['customer payments / collection status'],
+      entries: [
+        { description: 'Contract amount', direction: 'revenue', entryType: 'contract_amount', status: 'approved', amount: 10000 },
+        { description: 'ABC material invoice', direction: 'cost', entryType: 'material_cost', status: 'approved', amount: 4000 },
+      ],
+    },
+  })
+  assert(financialText.includes('Loaded financial truth from saved Jobrolo ledger rows'), 'Financial formatter should identify saved ledger source')
+  assert(financialText.includes('Gross profit: $5000.00'), 'Financial formatter should include gross profit')
+  assert(financialText.includes('Margin: 50.00%'), 'Financial formatter should include margin percent')
+  assert(financialText.includes('ProjectFinancialEntry ledger rows are the money truth'), 'Financial formatter should explain money truth source')
 
   return true
 }
