@@ -89,18 +89,18 @@ async function request(path, { dev = true, method = 'GET', body } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   const text = await res.text()
-  let body
+  let responseBody
   try {
-    body = JSON.parse(text)
+    responseBody = JSON.parse(text)
   } catch {
-    body = { raw: text }
+    responseBody = { raw: text }
   }
   if (!res.ok) {
     console.error(`Request failed: ${res.status}`)
-    console.error(JSON.stringify(body, null, 2))
+    console.error(JSON.stringify(responseBody, null, 2))
     process.exit(1)
   }
-  return body
+  return responseBody
 }
 
 function printJson(body) {
