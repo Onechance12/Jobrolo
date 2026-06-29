@@ -38,6 +38,10 @@ function usage() {
   npm run debug:upload -- <documentId>
   npm run debug:trace -- --chatId <chatId>
   npm run debug:trace -- --conversationId <conversationId>
+  npm run smoke:live
+  npm run debug:truth -- --limit 25
+  npm run debug:classify -- --filename estimate.pdf --mime application/pdf --intent "this is a price list"
+  npm run debug:synthetic -- --message "Show Timothy file" --projectId <projectId>
 
 Environment:
   JOBROLO_BASE_URL defaults to https://jobrolo.onrender.com
@@ -60,16 +64,29 @@ function query(params) {
   return text ? `?${text}` : ''
 }
 
-async function request(path, { dev = true } = {}) {
+function collectText(flag) {
+  const index = args.indexOf(flag)
+  if (index === -1 || index + 1 >= args.length) return undefined
+  return args.slice(index + 1).join(' ')
+}
+
+function has(flag) {
+  return args.includes(flag)
+}
+
+async function request(path, { dev = true, method = 'GET', body } = {}) {
   if (dev && !token) {
     console.error('Missing CODY_BRIDGE_TOKEN. Add it to .env.local or export it in your shell.')
     process.exit(2)
   }
   const res = await fetch(`${baseUrl}${path}`, {
+    method,
     headers: {
       ...(dev ? { authorization: `Bearer ${token}` } : {}),
       accept: 'application/json',
+      ...(body ? { 'content-type': 'application/json' } : {}),
     },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   })
   const text = await res.text()
   let body
@@ -128,9 +145,74 @@ async function trace() {
   })}`))
 }
 
+async function smoke() {
+  printJson(await request('/api/dev/smoke'))
+}
+
+async function truth() {
+  printJson(await request(`/api/dev/local-truth-audit${query({
+    limit: valueAfter('--limit', '25'),
+    staleMinutes: valueAfter('--stale-minutes', '30'),
+  })}`))
+}
+
+async function classify() {
+  const filename = valueAfter('--filename') || args.find(arg => !arg.startsWith('--'))
+  if (!filename) {
+    console.error('Missing --filename.')
+    usage()
+    process.exit(2)
+  }
+  printJson(await request('/api/dev/upload-classify', {
+    method: 'POST',
+    body: {
+      filename,
+      mimeType: valueAfter('--mime'),
+      uploadPurpose: valueAfter('--purpose'),
+      suggestedUploadPurpose: valueAfter('--suggested-purpose'),
+      uploadIntentSource: valueAfter('--intent'),
+      actionSource: valueAfter('--action-source'),
+      activeRoute: valueAfter('--route'),
+      visibleText: valueAfter('--visible-text'),
+      extractedText: valueAfter('--extracted-text'),
+      metadataTitle: valueAfter('--metadata-title'),
+      recentUserText: valueAfter('--recent-user-text'),
+      photoSection: valueAfter('--photo-section'),
+      hasCustomerContext: has('--customer'),
+      hasProjectContext: has('--project'),
+      hasWorkspaceContext: has('--workspace'),
+    },
+  }))
+}
+
+async function synthetic() {
+  const message = valueAfter('--message') || collectText('--text') || args.join(' ')
+  if (!message) {
+    console.error('Missing --message.')
+    usage()
+    process.exit(2)
+  }
+  printJson(await request('/api/dev/synthetic-chat', {
+    method: 'POST',
+    body: {
+      message,
+      activeProjectId: valueAfter('--projectId'),
+      activeCustomerId: valueAfter('--customerId'),
+      activeWorkspaceId: valueAfter('--workspaceId'),
+      channelType: valueAfter('--channel'),
+      role: valueAfter('--role'),
+      highComplexity: has('--high'),
+    },
+  }))
+}
+
 if (command === 'version') await version()
 else if (command === 'actions') await actions()
 else if (command === 'runtime') await runtime()
 else if (command === 'upload') await upload()
 else if (command === 'trace') await trace()
+else if (command === 'smoke') await smoke()
+else if (command === 'truth') await truth()
+else if (command === 'classify') await classify()
+else if (command === 'synthetic') await synthetic()
 else usage()
