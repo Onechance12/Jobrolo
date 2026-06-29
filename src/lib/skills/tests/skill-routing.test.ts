@@ -38,6 +38,7 @@ export const skillRoutingTestCases = [
   'integration provider requests route into provider lane',
   'role permission requests route into permission lane',
   'Cody activation stays in read-only QA lane',
+  'brain stem detects learning without turning on training/development organ',
 ]
 
 export function assertSkillRoutingContracts() {
@@ -202,6 +203,13 @@ export function assertSkillRoutingContracts() {
   const codyContext = buildSkillRoutingContext({ latestText: 'Cody Cody Cody this button says approved but nothing happens.' })
   assert(codyContext.requestIntent?.id === 'cody_review', `Cody activation should resolve to cody_review intent, got ${codyContext.requestIntent?.id}`)
   assert(Boolean(codyContext.requestIntent?.blockedTools?.includes('create_customer')), 'Cody lane should block normal customer mutations')
+
+  const learningContext = buildSkillRoutingContext({ latestText: 'Help me practice my sales pitch and roleplay homeowner objections.' })
+  assert(Boolean(learningContext.brain?.signals.some(signal => signal.id === 'learning_needed')), 'Learning/coaching requests should be noticed by brain context')
+  assert(learningContext.requestIntent?.id === 'general', `Training/development organ should not route yet, got ${learningContext.requestIntent?.id}`)
+  const learningSkills = selectSkills(learningContext).map((selection) => selection.skill.id)
+  assert(learningSkills.includes('brain-stem'), `Learning requests should select brain-stem context, got ${learningSkills.join(', ')}`)
+  assert(!learningSkills.includes('personal-brain'), 'Personal/training brain skill should not exist or route before supporting data connections are ready')
 
   return true
 }

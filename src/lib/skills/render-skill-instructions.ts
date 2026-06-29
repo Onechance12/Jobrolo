@@ -1,5 +1,6 @@
 import { getSkillLabel } from './registry'
 import type { JobroloSkill, SkillRoutingContext, SkillSelection } from './types'
+import { renderBrainInstructions } from '../brain'
 
 // Runtime note: `allowedTools` and `forbiddenTools` are compact prompt guidance today.
 // Deterministic guards still live in the upload classifier, agent loop, and tools.
@@ -28,6 +29,11 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
     if (intent.allowedTools?.length) lines.push(`Lane allowed tools: ${intent.allowedTools.join(', ')}`)
     if (intent.blockedTools?.length) lines.push(`Lane blocked tools: ${intent.blockedTools.join(', ')}`)
     if (intent.requiredContext?.length) lines.push(`Lane required context: ${intent.requiredContext.join(', ')}`)
+  }
+
+  if (context?.brain) {
+    const brainInstruction = renderBrainInstructions(context.brain)
+    if (brainInstruction) lines.push(brainInstruction)
   }
 
   for (const selection of selections) {

@@ -2,6 +2,23 @@ import type { JobroloSkill } from '../types'
 
 export const corePlatformSkills: JobroloSkill[] = [
   {
+    id: 'brain-stem',
+    name: 'Brain Stem Context',
+    category: 'core_platform',
+    status: 'active',
+    risk: 'read',
+    priority: 94,
+    purpose: 'Summarize the active moment — field, upload, Cody, setup, company, customer/project, support, or planning — without replacing database truth.',
+    whenToUse: ['Every agent turn with meaningful context', 'When user asks what next', 'When frustration or ambiguous workflow is present'],
+    allowedRoles: ['system'],
+    decisionRules: [
+      'Brain context is situational guidance, not saved fact.',
+      'Use brain signals to choose safer next paths and tone, but use tools/database for truth.',
+      'Training and development coaching should wait for activity/KPI evidence before making personal performance claims.',
+    ],
+    outputFormat: 'Compact internal guidance only; do not expose as a separate bot.',
+  },
+  {
     id: 'command-center',
     name: 'Command Center',
     category: 'core_platform',

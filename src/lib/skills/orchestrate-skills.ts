@@ -48,6 +48,7 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   supplier: 'Keep supplier documents separate from customer/project files and company pricebook records.',
   'supplier-order-status': 'Check material readiness before production-ready claims.',
   'upload-classifier': 'Classify the upload before deciding where it belongs.',
+  'brain-stem': 'Use situational brain signals for safer routing and tone without overriding saved database truth.',
 }
 
 function unique(values: Array<string | undefined | null>) {

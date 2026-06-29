@@ -1,3 +1,5 @@
+import type { JobroloBrainContext } from '../brain/types'
+
 export type JobroloSkillCategory =
   | 'core_platform'
   | 'company_setup'
@@ -155,6 +157,7 @@ export interface SkillRoutingContext {
   upload?: UploadSkillInput
   uploadClassification?: UploadSkillClassification
   requestIntent?: JobroloRequestIntent
+  brain?: JobroloBrainContext
 }
 
 export interface SkillSelection {

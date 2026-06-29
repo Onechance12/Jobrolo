@@ -29,6 +29,9 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
   pushUnique(selections, select('command-center', 0.6, 'Default chat-first operating mode.'))
   pushUnique(selections, select('intent-routing', 0.6, 'Select narrow skills before tools.'))
   pushUnique(selections, select('failure-handling', 0.6, 'Prevent narrated work without tool execution.'))
+  if (context.brain?.signals.length) {
+    pushUnique(selections, select('brain-stem', 0.66, context.brain.summary))
+  }
 
   if (intent?.primarySkill) {
     pushUnique(selections, select(intent.primarySkill, intent.confidence, `Intent lane: ${intent.summary}`))

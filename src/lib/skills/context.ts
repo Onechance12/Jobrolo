@@ -1,5 +1,6 @@
 import type { SkillRoutingContext, UploadSkillClassification, UploadSkillInput } from './types'
 import { resolveJobroloIntent } from './intent-router'
+import { buildBrainContext } from '../brain'
 
 type SkillContextMessage = {
   role: string
@@ -330,5 +331,17 @@ export function buildSkillRoutingContext(input: {
     uploadClassification,
   }
   context.requestIntent = resolveJobroloIntent(context)
+  context.brain = buildBrainContext({
+    latestText,
+    recentText,
+    normalizedText: context.normalizedText,
+    channelType: input.channelType,
+    role: input.role,
+    hasUpload: Boolean(input.upload),
+    requestIntentId: context.requestIntent.id,
+    hasActiveCustomer: Boolean(input.activeCustomerId),
+    hasActiveProject: Boolean(input.activeProjectId),
+    hasActiveWorkspace: Boolean(input.activeWorkspaceId),
+  })
   return context
 }
