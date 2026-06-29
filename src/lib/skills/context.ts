@@ -1,4 +1,5 @@
 import type { SkillRoutingContext, UploadSkillClassification, UploadSkillInput } from './types'
+import { resolveJobroloIntent } from './intent-router'
 
 type SkillContextMessage = {
   role: string
@@ -316,7 +317,7 @@ export function buildSkillRoutingContext(input: {
   const latestText = input.latestText ?? messageToText(externalMessages.at(-1))
   const recentText = externalMessages.slice(-4).map(messageToText).join('\n')
   const uploadClassification = input.upload ? classifyUploadForSkills(input.upload) : undefined
-  return {
+  const context: SkillRoutingContext = {
     latestText,
     normalizedText: normalizeSkillText(`${recentText}\n${latestText}`),
     documentIds: input.documentIds,
@@ -328,4 +329,6 @@ export function buildSkillRoutingContext(input: {
     upload: input.upload,
     uploadClassification,
   }
+  context.requestIntent = resolveJobroloIntent(context)
+  return context
 }

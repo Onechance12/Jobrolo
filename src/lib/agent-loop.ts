@@ -1548,8 +1548,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     : null
   if (latestUserAtStart) {
     const skillContext = buildSkillRoutingContext({
+      messages: messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      })),
       latestText: plainMessageText(latestUserAtStart.message.content),
       documentIds: opts.documentIds,
+      channelType: opts.channelType,
+      role: opts.userRole,
+      activeWorkspaceId: opts.workspaceId,
     })
     const skillSelections = selectSkills(skillContext)
     const skillInstruction = renderSkillInstructions(skillSelections, skillContext)

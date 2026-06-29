@@ -154,12 +154,43 @@ export interface SkillRoutingContext {
   activeWorkspaceId?: string | null
   upload?: UploadSkillInput
   uploadClassification?: UploadSkillClassification
+  requestIntent?: JobroloRequestIntent
 }
 
 export interface SkillSelection {
   skill: JobroloSkill
   confidence: number
   reason: string
+}
+
+export type JobroloIntentId =
+  | 'cash_quote_bid'
+  | 'upload_routing'
+  | 'field_inspection'
+  | 'field_observation'
+  | 'cody_review'
+  | 'company_profile'
+  | 'company_intelligence'
+  | 'customer_project_inventory'
+  | 'chat_invite'
+  | 'general'
+
+export type JobroloIntentMode = 'chat' | 'workflow' | 'qa' | 'onboarding'
+
+export interface JobroloRequestIntent {
+  id: JobroloIntentId
+  mode: JobroloIntentMode
+  confidence: number
+  primarySkill?: string
+  supportingSkills?: string[]
+  workflowName?: string
+  sticky?: boolean
+  allowedTools?: string[]
+  blockedTools?: string[]
+  requiredContext?: string[]
+  nextStep?: 'call_tool' | 'ask_clarification' | 'show_card' | 'answer'
+  summary: string
+  laneRules: string[]
 }
 
 export type SkillConsultRole = 'primary' | 'supporting'

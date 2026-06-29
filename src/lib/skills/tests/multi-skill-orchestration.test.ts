@@ -64,6 +64,18 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(simplePriceList.primarySkill === 'price-list', `Show price list primary should be price-list, got ${simplePriceList.primarySkill}`)
   assert(simplePriceList.supportingSkills.length === 0, `Show price list should stay simple, got ${simplePriceList.supportingSkills.join(', ')}`)
 
+  const cashQuote = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a cash quote for Timothy using saved project files.' }))
+  assert(cashQuote.primarySkill === 'bid-quote', `Cash quote primary should be bid-quote, got ${cashQuote.primarySkill}`)
+  assert(cashQuote.supportingSkills.includes('entity-resolver'), 'Cash quote should consult entity-resolver')
+  assert(cashQuote.supportingSkills.includes('price-list'), 'Cash quote should consult price-list/material pricing context')
+  assert(cashQuote.blockedTools.includes('start_field_inspection_lead'), 'Cash quote should block accidental field inspection creation')
+  assert(cashQuote.recommendedAction.includes('Cash quote/bid lane'), 'Cash quote orchestration should explain the selected lane')
+
+  const fieldObservation = orchestrateSkills(buildSkillRoutingContext({ latestText: 'No soliciting sign and renters at the door. Saw window screen damage.' }))
+  assert(fieldObservation.primarySkill === 'field-copilot', `Field observation primary should be field-copilot, got ${fieldObservation.primarySkill}`)
+  assert(fieldObservation.blockedTools.includes('create_customer'), 'Field observation should not create customer records before confirmation')
+  assert(fieldObservation.recommendedAction.includes('Field observation lane'), 'Field observation orchestration should explain the selected lane')
+
   const capped = orchestrateSkills(priceSheetContext, { highComplexity: false, supportLimit: 2 })
   assert(capped.supportingSkills.length <= 2, 'Supporting skills should be capped unless high complexity is requested')
   const highComplexity = orchestrateSkills(priceSheetContext, { highComplexity: true })

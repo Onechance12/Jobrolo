@@ -2,6 +2,29 @@ import type { JobroloSkill } from '../types'
 
 export const productionSkills: JobroloSkill[] = [
   {
+    id: 'field-copilot',
+    name: 'Field Copilot',
+    version: '0.1.0',
+    category: 'production',
+    status: 'active',
+    risk: 'medium',
+    priority: 88,
+    purpose: 'Handle field/inspection/location observations as property evidence first, then convert to leads/customers/jobs only after confirmation.',
+    whenToUse: ['start inspection', 'where I am', 'roof damage from ground', 'no soliciting sign', 'field observation', 'GPS/photo evidence'],
+    allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'system'],
+    optionalContext: ['browser GPS', 'active project', 'property memory', 'photo section'],
+    allowedTools: ['start_field_inspection_lead', 'record_field_observation_at_location', 'resolve_field_location', 'research_property_now'],
+    forbiddenTools: ['create_customer', 'create_project_for_customer'],
+    approvalRequiredFor: ['converting field lead into customer/project', 'sending external notifications'],
+    decisionRules: [
+      'Start inspections as field leads until customer/project is confirmed.',
+      'Attach GPS/location context to observations and inspection photos when present.',
+      'Do not require homeowner name or phone before starting a field inspection lead.',
+      'Ask before converting property observations into real customer/project records.',
+    ],
+    outputFormat: 'Short field card or next-action prompt tied to location, lead, or project context.',
+  },
+  {
     id: 'production-coordinator',
     name: 'Production Coordinator',
     version: '0.1.0',

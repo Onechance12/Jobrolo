@@ -2,6 +2,28 @@ import type { JobroloSkill } from '../types'
 
 export const customersProjectsSkills: JobroloSkill[] = [
   {
+    id: 'bid-quote',
+    name: 'Bid / Quote Workflow',
+    category: 'customers_projects',
+    status: 'active',
+    risk: 'medium',
+    priority: 91,
+    purpose: 'Keep cash quote, bid, proposal, and estimate requests grounded in saved customer/project/address/document context before drafting numbers or documents.',
+    whenToUse: ['Create bid', 'Cash quote', 'Draft proposal', 'Research this address for quote', 'Price this job'],
+    allowedRoles: ['owner', 'admin', 'sales', 'office', 'system'],
+    requiredContext: ['customer or property', 'project/job or explicit new-job intent'],
+    optionalContext: ['scope document', 'photos', 'price list', 'labor assumptions'],
+    allowedTools: ['get_customer_file', 'list_customers', 'get_project_document_packet', 'get_document_content', 'review_price_sheet_items', 'consult_orchestrator'],
+    forbiddenTools: ['start_field_inspection_lead', 'create_roof_report'],
+    approvalRequiredFor: ['creating or sending customer-facing proposal documents'],
+    decisionRules: [
+      'Stay in bid/quote workflow once selected unless the user clearly changes task.',
+      'Resolve customer/project/address/files before drafting.',
+      'Do not create a lead, inspection, or roof report just because a quote mentions an address.',
+      'If a customer/project is ambiguous, ask one concise clarification.',
+    ],
+  },
+  {
     id: 'entity-resolver',
     name: 'Entity Resolver',
     category: 'customers_projects',

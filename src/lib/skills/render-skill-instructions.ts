@@ -20,6 +20,16 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
     'Only claim saved/created/updated/imported/deleted after a successful tool/database result.',
   ]
 
+  if (context?.requestIntent) {
+    const intent = context.requestIntent
+    lines.push(`INTENT LANE: ${intent.id} (${intent.mode}, confidence ${intent.confidence.toFixed(2)}): ${intent.summary}`)
+    if (intent.workflowName) lines.push(`Workflow: ${intent.workflowName}. Sticky=${intent.sticky ? 'yes' : 'no'}. Next step=${intent.nextStep ?? 'answer'}.`)
+    for (const rule of intent.laneRules.slice(0, 5)) lines.push(`Lane rule: ${rule}`)
+    if (intent.allowedTools?.length) lines.push(`Lane allowed tools: ${intent.allowedTools.join(', ')}`)
+    if (intent.blockedTools?.length) lines.push(`Lane blocked tools: ${intent.blockedTools.join(', ')}`)
+    if (intent.requiredContext?.length) lines.push(`Lane required context: ${intent.requiredContext.join(', ')}`)
+  }
+
   for (const selection of selections) {
     const skill = selection.skill
     const rules = skill.decisionRules.slice(0, 4).map(ruleToText)

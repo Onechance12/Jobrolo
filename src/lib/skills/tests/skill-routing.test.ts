@@ -1,4 +1,4 @@
-import { classifyUploadForSkills } from '../context'
+import { buildSkillRoutingContext, classifyUploadForSkills } from '../context'
 import { selectSkills } from '../select-skill'
 
 function assert(condition: boolean, message: string) {
@@ -28,6 +28,9 @@ export const skillRoutingTestCases = [
   'generic image uploads route as photos, not price sheets',
   'image filename price-list hint does not override image/photo evidence',
   'show price list selects price-list behavior',
+  'cash quote requests stay in bid/quote lane',
+  'field observations stay in field evidence lane',
+  'Cody activation stays in read-only QA lane',
 ]
 
 export function assertSkillRoutingContracts() {
@@ -137,6 +140,23 @@ export function assertSkillRoutingContracts() {
   assertSkillSelected('Show my material price list and first 10 rows', 'price-list', 'Show price list should select price-list behavior')
   const showPriceListSkills = skillIdsFor('Show my material price list and first 10 rows')
   assert(!showPriceListSkills.includes('file-attachment'), 'Show price list should not primarily route as generic file listing')
+
+  const bidContext = buildSkillRoutingContext({ latestText: 'Create a cash quote for Timothy using the saved project photos.' })
+  assert(bidContext.requestIntent?.id === 'cash_quote_bid', `Cash quote should resolve to cash_quote_bid intent, got ${bidContext.requestIntent?.id}`)
+  const bidSkills = selectSkills(bidContext).map((selection) => selection.skill.id)
+  assert(bidSkills.includes('bid-quote'), `Cash quote should select bid-quote, got ${bidSkills.join(', ')}`)
+  assert(bidSkills.includes('entity-resolver'), 'Cash quote should select entity resolver before drafting')
+  assert(!bidSkills.includes('field-copilot'), 'Cash quote should not drift into field/inspection lane')
+
+  const observationContext = buildSkillRoutingContext({ latestText: 'Saw roof damage from ground. Missing shingles and dents to soft metals.' })
+  assert(observationContext.requestIntent?.id === 'field_observation', `Field observation should resolve to field_observation intent, got ${observationContext.requestIntent?.id}`)
+  const observationSkills = selectSkills(observationContext).map((selection) => selection.skill.id)
+  assert(observationSkills.includes('field-copilot'), `Field observation should select field-copilot, got ${observationSkills.join(', ')}`)
+  assert(!observationSkills.includes('customer-creation'), 'Field observation should not jump into customer creation')
+
+  const codyContext = buildSkillRoutingContext({ latestText: 'Cody Cody Cody this button says approved but nothing happens.' })
+  assert(codyContext.requestIntent?.id === 'cody_review', `Cody activation should resolve to cody_review intent, got ${codyContext.requestIntent?.id}`)
+  assert(Boolean(codyContext.requestIntent?.blockedTools?.includes('create_customer')), 'Cody lane should block normal customer mutations')
 
   return true
 }

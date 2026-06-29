@@ -24,10 +24,18 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
   const selections: SkillSelection[] = []
   const text = context.normalizedText || ''
   const upload = context.uploadClassification
+  const intent = context.requestIntent
 
   pushUnique(selections, select('command-center', 0.6, 'Default chat-first operating mode.'))
   pushUnique(selections, select('intent-routing', 0.6, 'Select narrow skills before tools.'))
   pushUnique(selections, select('failure-handling', 0.6, 'Prevent narrated work without tool execution.'))
+
+  if (intent?.primarySkill) {
+    pushUnique(selections, select(intent.primarySkill, intent.confidence, `Intent lane: ${intent.summary}`))
+  }
+  intent?.supportingSkills?.forEach(skillId => {
+    pushUnique(selections, select(skillId, Math.max(0.62, intent.confidence - 0.08), `Supporting ${intent.workflowName ?? intent.id} lane.`))
+  })
 
   if (upload) {
     upload.skillIds.forEach((skillId) => pushUnique(selections, select(skillId, upload.confidence, upload.reason)))
@@ -62,6 +70,11 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
 
   if (/(create project|create job|new project|job number|project number)/.test(text)) {
     pushUnique(selections, select('project-creation', 0.86, 'Project creation intent.'))
+  }
+
+  if (/(cash\s+quote|cash\s+bid|\bbid\b|proposal|create quote|create a quote)/.test(text)) {
+    pushUnique(selections, select('bid-quote', 0.94, 'Bid/quote/proposal workflow intent.'))
+    pushUnique(selections, select('entity-resolver', 0.88, 'Bid/quote needs customer/project context.'))
   }
 
   if (/(crew chat|sub chat|subcontractor|roofer|gutter crew|window crew)/.test(text)) {

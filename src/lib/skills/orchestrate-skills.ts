@@ -52,6 +52,9 @@ function maxRisk(skillIds: string[]): JobroloSkillRisk {
 function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): string {
   const text = context.normalizedText || ''
   const upload = context.uploadClassification
+  const intentPrimary = context.requestIntent?.primarySkill
+
+  if (intentPrimary && getSkillById(intentPrimary)) return intentPrimary
 
   if (upload?.route === 'company_pricing') return 'price-list'
   if (upload?.route === 'project_cost') return 'supplier-invoice'
@@ -73,8 +76,9 @@ function supportFor(primarySkill: string, selectedIds: string[], context: SkillR
   }
 
   const configured = WORKFLOW_SUPPORTS[primarySkill] ?? []
+  const intentSupports = context.requestIntent?.supportingSkills ?? []
   const selected = selectedIds.filter(id => id !== primarySkill && !['command-center', 'intent-routing', 'failure-handling'].includes(id))
-  return unique([...configured, ...selected]).filter(id => Boolean(getSkillById(id)) && id !== primarySkill)
+  return unique([...intentSupports, ...configured, ...selected]).filter(id => Boolean(getSkillById(id)) && id !== primarySkill)
 }
 
 function buildConsult(skillId: string, role: 'primary' | 'supporting', confidence: number): SkillConsult {
@@ -98,6 +102,7 @@ function buildConsult(skillId: string, role: 'primary' | 'supporting', confidenc
 function summarize(primarySkill: string, supportingSkills: string[], context: SkillRoutingContext) {
   const upload = context.uploadClassification
   if (upload) return `${upload.documentType} routed as ${upload.storageScope}. Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
+  if (context.requestIntent?.id !== 'general') return `${context.requestIntent?.summary} Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   if (primarySkill === 'production-coordinator') return `Production readiness check. Primary skill: production-coordinator. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   return `Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
 }
