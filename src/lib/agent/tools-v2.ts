@@ -2119,6 +2119,20 @@ export const TOOLS: ToolDef[] = [
           notes: true,
           createdAt: true,
           updatedAt: true,
+          projects: {
+            orderBy: { updatedAt: 'desc' },
+            take: 8,
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              priority: true,
+              address: true,
+              value: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
           _count: {
             select: {
               projects: true,
@@ -2146,6 +2160,10 @@ export const TOOLS: ToolDef[] = [
             notes: c.notes,
             createdAt: c.createdAt,
             updatedAt: c.updatedAt,
+            projects: c.projects.map((project, index) => ({
+              ...withProjectNumber(project),
+              customerProjectNumber: customerNumber(c) ? `${customerNumber(c)}-${index + 1}` : null,
+            })),
             counts: {
               projects: c._count.projects,
               documents: c._count.documents,
@@ -2156,6 +2174,32 @@ export const TOOLS: ToolDef[] = [
           message: customers.length
             ? `Found ${customers.length} saved customer${customers.length === 1 ? '' : 's'}.`
             : 'No saved customer records found for this contractor.',
+          card: {
+            cardType: 'customer_list',
+            query: query || null,
+            count: customers.length,
+            customers: customers.map(c => ({
+              id: c.id,
+              clientNumber: customerNumber(c),
+              customerNumber: customerNumber(c),
+              name: c.name,
+              email: c.email,
+              phone: c.phone,
+              address: c.address,
+              notes: c.notes,
+              projects: c.projects.map((project, index) => ({
+                ...withProjectNumber(project),
+                customerProjectNumber: customerNumber(c) ? `${customerNumber(c)}-${index + 1}` : null,
+              })),
+              counts: {
+                projects: c._count.projects,
+                documents: c._count.documents,
+                notes: c._count.noteRecords,
+                followUps: c._count.followUps,
+              },
+            })),
+            guidance: 'Customers are grouped with their saved jobs/projects. Use the action pills to open files, create a job, start a quote/report, or follow up from chat.',
+          },
         },
       }
     },

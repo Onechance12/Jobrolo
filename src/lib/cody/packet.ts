@@ -240,6 +240,15 @@ function likelyIssueFromContent(area: CodyArea, content: string) {
   if (/\bwithout a valid executable tool call|narrated operational work|did not include any tool_calls|no executable\b/i.test(content)) {
     return 'Agent promised operational work without an executable tool call. Tighten deterministic intent routing and tool-call recovery for this workflow.'
   }
+  if (/\b(saved clients?|client card|customer card|projects? card|client\/job|client and project|customer.*project|project.*customer)\b/i.test(content)) {
+    return 'Saved-client inventory is returning flat text or disconnected cards instead of a grouped customer → projects card with prompt-driven action pills.'
+  }
+  if (/\b(cash quote|cash bid|\bbid\b|proposal|create a quote|create quote|research this address)\b/i.test(content)) {
+    return 'Cash quote/bid intent is drifting into generic CRM questioning instead of first gathering saved customer/project/address/document context and producing a safe quote plan.'
+  }
+  if (/\b(end cody|cody cody cody|cody session|cody chat)\b/i.test(content)) {
+    return 'Cody session routing needs deterministic open/close handling with captured chat context, not normal assistant narration.'
+  }
   if (/\bInvalid (?:tool )?args|expected array|expected.*approved|expected.*rejected|decide_(?:pending_)?action_request/i.test(content)) {
     return 'Approval replay emitted malformed tool arguments before the stored action could run. Normalize approval decisions and actionRequestIds before schema validation.'
   }
@@ -256,6 +265,36 @@ function likelyIssueFromContent(area: CodyArea, content: string) {
     return 'Onboarding/account-entry state is bleeding into normal navigation or failing to route Cody/sign-in/setup actions through the expected chat-first path.'
   }
   return `Likely ${area} workflow issue based on tester feedback. Confirm with captured chat/log evidence before patching.`
+}
+
+function likelyFilesFromContent(area: CodyArea, content: string) {
+  if (/\b(saved clients?|client card|customer card|projects? card|client\/job|client and project|customer.*project|project.*customer)\b/i.test(content)) {
+    return [
+      'src/lib/agent/tools-v2.ts',
+      'src/components/jobrolo/copilot-cards.tsx',
+      'src/lib/prompts.ts',
+      'src/components/jobrolo/message-bubble.tsx',
+    ]
+  }
+  if (/\b(cash quote|cash bid|\bbid\b|proposal|create a quote|create quote|research this address)\b/i.test(content)) {
+    return [
+      'src/lib/agent-loop.ts',
+      'src/lib/agent/tools-v2.ts',
+      'src/lib/prompts.ts',
+      'src/lib/skills/select-skill.ts',
+      'src/lib/skills/definitions/customers-projects.ts',
+    ]
+  }
+  if (/\b(end cody|cody cody cody|cody session|cody chat)\b/i.test(content)) {
+    return [
+      'src/lib/agent-loop.ts',
+      'src/lib/cody/packet.ts',
+      'src/lib/cody/observations.ts',
+      'src/app/api/dev/cody-notes/route.ts',
+      'scripts/cody-notes.mjs',
+    ]
+  }
+  return AREA_FILES[area] ?? AREA_FILES.general
 }
 
 function codexTaskForArea(area: CodyArea, likelyFiles: string[], likelyIssue: string) {
@@ -441,7 +480,7 @@ export function buildCodyPacket(input: CodyPacketInput): CodyPacket {
   const evidence = evidenceFromInput(input)
   const expectedBehavior = expectedForArea(area)
   const actualBehavior = summary || 'Tester reported a problem but did not provide details.'
-  const likelyFiles = AREA_FILES[area] ?? AREA_FILES.general
+  const likelyFiles = likelyFilesFromContent(area, content)
   const likelyIssue = likelyIssueFromContent(area, content)
   const suggestedFixDirection = fixDirectionForArea(area)
   const safetyNotes = safetyNotesForArea(area)

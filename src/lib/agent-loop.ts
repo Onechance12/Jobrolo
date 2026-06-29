@@ -751,6 +751,34 @@ function buildCompanyIntelligenceToolCall(text: string): ToolCall {
   }
 }
 
+function isCashQuoteBidRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  return (
+    /\b(cash\s+quote|cash\s+bid|bid|quote|proposal|estimate)\b/.test(lower) &&
+    /\b(create|make|build|draft|start|need|generate|prepare|write|put together|price|pricing|cash|research)\b/.test(lower)
+  )
+}
+
+function buildCashQuoteBidToolCall(userText: string, opts?: Pick<AgentLoopOptions, 'documentIds' | 'channelType' | 'workspaceId' | 'chatId'>): ToolCall {
+  const latestDocumentId = opts?.documentIds?.slice(-1)[0]
+  if (latestDocumentId) {
+    return { name: 'get_document_content', args: { documentId: latestDocumentId } }
+  }
+  return {
+    name: 'consult_orchestrator',
+    args: {
+      userRequest: userText.slice(0, 1200),
+      channelType: opts?.channelType,
+      entityContext: [
+        opts?.workspaceId ? `workspaceId=${opts.workspaceId}` : '',
+        opts?.chatId ? `chatId=${opts.chatId}` : '',
+        'Cash quote/bid/proposal workflow: gather saved customer, project, address, and document context first. Do not claim a quote was created until a real quote/template/document tool succeeds. If a customer/project/address is ambiguous, ask one clear clarification.',
+      ].filter(Boolean).join(' · '),
+    },
+  }
+}
+
 type TesterFeedbackArgs = {
   content: string
   source: 'note_to_cody' | 'note_to_codex' | 'tester_feedback'
@@ -1273,6 +1301,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isIntegrationReadinessRequest(userText)) return buildIntegrationReadinessToolCall(userText)
   if (isCompanyIntelligenceRequest(userText)) return buildCompanyIntelligenceToolCall(userText)
+  if (isCashQuoteBidRequest(userText)) return buildCashQuoteBidToolCall(userText, opts)
   if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
   if (isCompanyProfileResearchRequest(userText)) {
     const website = websiteHintFromText(userText)

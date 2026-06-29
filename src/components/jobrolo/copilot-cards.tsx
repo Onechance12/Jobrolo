@@ -159,6 +159,28 @@ type CustomerFileLike = {
   guidance?: string
 }
 
+type CustomerListLike = {
+  count?: number
+  query?: string | null
+  guidance?: string
+  customers?: Array<{
+    id?: string
+    name?: string | null
+    email?: string | null
+    phone?: string | null
+    address?: string | null
+    customerNumber?: string | null
+    clientNumber?: string | null
+    projects?: CustomerFileLike['projects']
+    counts?: {
+      projects?: number
+      documents?: number
+      notes?: number
+      followUps?: number
+    }
+  }>
+}
+
 type ReportPhotoCandidateLike = {
   documentId?: string
   reportPhotoId?: string | null
@@ -330,6 +352,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('document_link_review')) {
     return <DocumentLinkReviewCard data={contextData as any} />
   }
+  if (cardType.includes('customer_list')) {
+    return <CustomerListCard data={contextData as CustomerListLike} />
+  }
   if (cardType.includes('customer_file')) {
     return <CustomerFileCard data={contextData as CustomerFileLike} />
   }
@@ -364,6 +389,98 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
     return <InboxActionCard item={contextData as InboxLike} />
   }
   return null
+}
+
+function CustomerListCard({ data }: { data?: CustomerListLike | null }) {
+  const customers = data?.customers ?? []
+  return (
+    <Card className="mt-2 w-full overflow-hidden border-blue-200 bg-blue-50/60 shadow-sm dark:border-blue-900/60 dark:bg-blue-950/20 sm:max-w-xl">
+      <CardHeader className="border-b border-blue-200/70 bg-gradient-to-br from-blue-500/10 via-transparent to-cyan-500/10 pb-3 dark:border-blue-900/60">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="text-base text-blue-950 dark:text-blue-100">Saved clients</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {customers.length ? `${customers.length} customer${customers.length === 1 ? '' : 's'} grouped with saved jobs/projects.` : 'No saved customer records found.'}
+            </p>
+          </div>
+          <Badge variant="secondary" className="shrink-0 text-[10px]">{data?.count ?? customers.length}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {customers.length ? customers.slice(0, 12).map(customer => {
+          const customerName = textValue(customer.name) || 'Unnamed customer'
+          const customerNumber = textValue(customer.customerNumber || customer.clientNumber)
+          const projects = customer.projects ?? []
+          return (
+            <section key={customer.id || customerName} className="rounded-xl border bg-background/75 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="truncate font-semibold text-foreground">{customerName}</div>
+                    {customerNumber ? <Badge variant="outline" className="text-[10px]">{customerNumber}</Badge> : null}
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                    {[textValue(customer.phone), textValue(customer.email), textValue(customer.address)].filter(Boolean).join(' · ') || 'No contact details saved'}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Open ${customerName}'s customer file. Use saved database records only and show projects, files, photos, notes, and next actions.`)}>
+                  Open
+                </Button>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                {projects.length ? projects.slice(0, 4).map((project, index) => (
+                  <div key={project.id || `${customer.id}-project-${index}`} className="rounded-lg border bg-background/60 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">{textValue(project.title) || `Project ${index + 1}`}</div>
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{textValue(project.address) || textValue(customer.address) || 'No project address saved'}</div>
+                      </div>
+                      <Badge variant="secondary" className="shrink-0 text-[10px]">
+                        {textValue(project.customerProjectNumber) || textValue(project.projectNumber) || `Job ${index + 1}`}
+                      </Badge>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-lg border border-dashed bg-background/50 p-2 text-xs text-muted-foreground">
+                    No saved projects yet.
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <Button size="sm" variant="secondary" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Create a new project/job for ${customerName}. Ask what the job is for and use the next customer project number.`)}>
+                  New job
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Show files and photos for ${customerName} as clickable grouped cards. Use saved database records only.`)}>
+                  Files
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Start a cash quote/bid workflow for ${customerName}. Use saved project/files first, then ask only for missing quote details.`)}>
+                  Quote
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-xs" onClick={() => insertJobroloPrompt(`Who needs follow-up for ${customerName}? Check saved tasks, notes, projects, and chats.`)}>
+                  Follow up
+                </Button>
+              </div>
+            </section>
+          )
+        }) : (
+          <div className="rounded-xl border border-dashed bg-background/70 p-4 text-sm text-muted-foreground">
+            No clients are saved yet. You can say “create a lead” or “add a customer” and Jobrolo will walk through it in chat.
+          </div>
+        )}
+        {data?.guidance ? <p className="rounded-lg border bg-background/70 p-2 text-xs text-muted-foreground">{data.guidance}</p> : null}
+      </CardContent>
+      <CardFooter className="flex flex-wrap gap-2 border-t bg-background/60 py-2">
+        <Button size="sm" onClick={() => insertJobroloPrompt('Create a clean client/job overview grouped by customer, with active projects, next actions, and missing information. Use saved database records only.')}>
+          Overview
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => insertJobroloPrompt('Create a new lead/customer. Ask for homeowner name, phone, address, source, and notes only if missing.')}>
+          Add client
+        </Button>
+      </CardFooter>
+    </Card>
+  )
 }
 
 function CustomerFileCard({ data }: { data?: CustomerFileLike | null }) {
