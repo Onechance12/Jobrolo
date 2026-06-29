@@ -107,11 +107,11 @@ function usageFromResponses(data: any) {
 export async function openAIWebSearch(prompt: string, opts: OpenAIWebSearchOptions = {}): Promise<OpenAIWebSearchResult> {
   const apiKey = process.env.LLM_API_KEY
   const baseUrl = openAIBaseUrl()
-  // Keep chat on LLM_MODEL, but default public web research to the current
-  // Responses API web-search model. Render can override with LLM_WEB_SEARCH_MODEL
-  // if pricing/model availability needs to be tuned.
-  const model = process.env.LLM_WEB_SEARCH_MODEL || process.env.OPENAI_WEB_SEARCH_MODEL || 'gpt-5.5'
-  const searchContextSize = opts.searchContextSize || (process.env.LLM_WEB_SEARCH_CONTEXT as 'low' | 'medium' | 'high' | undefined) || 'medium'
+  // Keep chat on LLM_MODEL, and keep public web research on a cheaper model by
+  // default. Deep research can still opt up via env/searchMode, but normal
+  // company/property checks should not burn the heavy research lane.
+  const model = process.env.LLM_WEB_SEARCH_MODEL || process.env.OPENAI_WEB_SEARCH_MODEL || 'gpt-4.1-mini'
+  const searchContextSize = opts.searchContextSize || (process.env.LLM_WEB_SEARCH_CONTEXT as 'low' | 'medium' | 'high' | undefined) || 'low'
 
   if (!isOpenAIWebSearchConfigured() || !apiKey) {
     return { ok: false, text: '', sources: [], model, provider: 'openai-compatible', error: 'OpenAI web search is not configured. Set LLM_PROVIDER=openai-compatible, LLM_BASE_URL=https://api.openai.com/v1, and LLM_API_KEY.' }
@@ -156,7 +156,7 @@ export async function openAIWebSearch(prompt: string, opts: OpenAIWebSearchOptio
         }],
         tool_choice: opts.forceSearch === false ? 'auto' : 'required',
         include: ['web_search_call.action.sources'],
-        max_output_tokens: opts.maxOutputTokens ?? 1800,
+        max_output_tokens: opts.maxOutputTokens ?? Number(process.env.LLM_WEB_SEARCH_MAX_OUTPUT_TOKENS || 1200),
       }),
       signal: controller.signal,
     })

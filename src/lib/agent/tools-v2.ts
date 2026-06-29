@@ -1042,7 +1042,7 @@ export const TOOLS: ToolDef[] = [
         companyName: args.companyName || savedCompanyName || undefined,
         preferredCompanyName,
         includeWebPresence: true,
-        searchMode: args.searchMode || 'normal',
+        searchMode: args.searchMode || 'cheap',
       })
       if (!research) {
         return {
@@ -1184,7 +1184,7 @@ export const TOOLS: ToolDef[] = [
         contractorId,
         periodDays: args.periodDays,
         includePublicResearch: Boolean(args.includePublicResearch),
-        searchMode: args.searchMode || 'normal',
+        searchMode: args.searchMode || 'cheap',
         website: args.website,
         companyName: args.companyName,
       })
@@ -1206,7 +1206,7 @@ export const TOOLS: ToolDef[] = [
     schema: z.object({
       website: z.string().max(500).optional(),
       companyName: z.string().max(200).optional(),
-      searchMode: z.enum(['cheap', 'normal', 'deep']).default('normal'),
+      searchMode: z.enum(['cheap', 'normal', 'deep']).default('cheap'),
       periodDays: z.number().int().min(1).max(90).optional(),
     }),
     allowedChannels: ['main', 'management'],

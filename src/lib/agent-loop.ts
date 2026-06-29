@@ -737,6 +737,16 @@ function isCompanyIntelligenceRequest(text: string) {
   )
 }
 
+function isCompanyKpiReadRequest(text: string) {
+  const lower = plainMessageText(text).toLowerCase()
+  if (!lower) return false
+  if (/\b(research|search|online|social|reviews?|grow|growth|what should|improve|strategy)\b/.test(lower)) return false
+  return (
+    /\b(how many|show|list|check|what are|what is)\b[\s\S]{0,80}\b(leads?|projects?|customers?|clients?|appointments?|jobs?)\b/.test(lower) ||
+    /\b(how are (our|my) leads|lead kpis?|saved kpis?|jobrolo kpis?|company kpis?)\b/.test(lower)
+  )
+}
+
 function buildCompanyIntelligenceToolCall(text: string): ToolCall {
   const lower = plainMessageText(text).toLowerCase()
   const includePublicResearch = /\b(fresh|research online|search online|public company research|public research|online presence|web presence|social|reviews?)\b/.test(lower)
@@ -1302,6 +1312,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
   if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
   if (isIntegrationReadinessRequest(userText)) return buildIntegrationReadinessToolCall(userText)
+  if (isCompanyKpiReadRequest(userText)) return { name: 'get_company_kpis', args: {} }
   if (isCompanyIntelligenceRequest(userText)) return buildCompanyIntelligenceToolCall(userText)
   if (isCashQuoteBidRequest(userText)) return buildCashQuoteBidToolCall(userText, opts)
   if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
@@ -1510,6 +1521,33 @@ function rateLimitFinalText(err: unknown, completedToolCalls: number) {
   return null
 }
 
+const PRE_AI_LOCAL_TOOLS = new Set([
+  'get_contractor_profile',
+  'get_copilot_inbox',
+  'get_company_kpis',
+  'get_integration_readiness',
+])
+
+function canRunBeforeAi(call: ToolCall | null) {
+  if (!call) return false
+  if (!PRE_AI_LOCAL_TOOLS.has(call.name)) return false
+  return true
+}
+
+function directLocalToolFinalText(call: ToolCall, result: Awaited<ReturnType<typeof executeTool>>) {
+  if (!result.success) {
+    return `I tried to load that from saved Jobrolo records, but it failed. ${result.error ? `Error: ${result.error}` : 'Please try again.'}`
+  }
+  const data = result.data as Record<string, unknown> | null
+  const message = typeof data?.message === 'string' ? data.message : null
+  if (message) return message
+  if (call.name === 'get_contractor_profile') return 'Loaded your saved company profile.'
+  if (call.name === 'get_copilot_inbox') return 'Loaded Action Needed from saved Jobrolo records.'
+  if (call.name === 'get_company_kpis') return 'Loaded company KPIs from saved Jobrolo records.'
+  if (call.name === 'get_integration_readiness') return 'Loaded integration readiness from Jobrolo configuration.'
+  return 'Loaded that from saved Jobrolo records.'
+}
+
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxIterations = opts.maxIterations ?? 4
   const messages = [...opts.messages]
@@ -1567,6 +1605,45 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         area: inferCodyArea(codyBlockAtStart.content || 'Cody review session'),
       }
     : null
+  const preAiLocalToolCall = !codyBlockAtStart.active
+    ? buildDeterministicToolCall(messages, opts)
+    : null
+  if (canRunBeforeAi(preAiLocalToolCall)) {
+    console.log(`[agent-loop] running local deterministic tool before AI contractorId=${opts.contractorId} tool=${preAiLocalToolCall!.name}`)
+    const result = await executeTool(preAiLocalToolCall!.name, preAiLocalToolCall!.args, opts.contractorId, {
+      userId: opts.userId,
+      userRole: opts.userRole,
+      trustedDirectExecution: opts.trustedDirectExecution,
+      conversationId: opts.conversationId,
+      workspaceId: opts.workspaceId,
+      chatId: opts.chatId,
+      channelType: opts.channelType,
+      documentIds: opts.documentIds,
+    })
+    const card = toolResultCardPayload(result.data)
+    const finalText = directLocalToolFinalText(preAiLocalToolCall!, result)
+    const iteration: AgentIteration = {
+      iteration: 0,
+      text: finalText,
+      toolCalls: [preAiLocalToolCall!],
+      toolResults: [{ name: preAiLocalToolCall!.name, success: result.success, data: result.data, error: result.error }],
+      final: true,
+    }
+    opts.onIteration?.(iteration)
+    return {
+      final: {
+        text: finalText,
+        contextType: card?.contextType ?? null,
+        contextData: card?.contextData ?? null,
+        actions: [],
+        tool_calls: [],
+        attachments: [],
+        final: true,
+      },
+      iterations: [iteration],
+      totalToolCalls: 1,
+    }
+  }
   if (latestUserAtStart) {
     const skillContext = buildSkillRoutingContext({
       messages: messages.map(message => ({
