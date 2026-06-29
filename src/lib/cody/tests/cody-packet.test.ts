@@ -42,7 +42,11 @@ export function assertCodyPacketContracts() {
       channelType: 'project',
       documentIds: ['doc_1', 'doc_2'],
       userRole: 'owner',
+      route: '/projects/project_123',
+      toolNames: ['link_document_to_project'],
+      lastError: 'Approval required but replay did not finish.',
     },
+    relevantIds: { projectId: 'project_123', actionRequestId: 'action_123' },
     recentMessages: [
       { role: 'user', text: 'Upload these front elevation photos.' },
       { role: 'assistant', text: 'Approval required.' },
@@ -54,6 +58,8 @@ export function assertCodyPacketContracts() {
   assert(packet.priority === 'P1', 'approval-does-nothing packet should be P1')
   assert(packet.area === 'uploads/files' || packet.area === 'notifications', 'packet should route to a useful area')
   assert(packet.likelyFiles.length > 0, 'packet should include likely files')
+  assert(packet.evidence.some(item => item.includes('project_123')), 'packet should include relevant project/action evidence')
+  assert(packet.evidence.some(item => item.includes('link_document_to_project')), 'packet should include tool evidence when present')
   assert(packet.safetyNotes.some(note => note.toLowerCase().includes('approval') || note.toLowerCase().includes('mutate')), 'packet should include safety notes')
   assert(packet.testChecklist.length > 0, 'packet should include test checklist')
 }

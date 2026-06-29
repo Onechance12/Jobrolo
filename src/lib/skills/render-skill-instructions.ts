@@ -1,6 +1,8 @@
 import { getSkillLabel } from './registry'
 import type { JobroloSkill, SkillRoutingContext, SkillSelection } from './types'
 import { renderBrainInstructions } from '../brain'
+import { buildActiveJobroloContext, renderActiveJobroloContext } from '../jobrolo-context'
+import { renderJobroloNextPaths, suggestJobroloNextPaths } from '../next-paths'
 
 // Runtime note: `allowedTools` and `forbiddenTools` are compact prompt guidance today.
 // Deterministic guards still live in the upload classifier, agent loop, and tools.
@@ -34,6 +36,14 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
   if (context?.brain) {
     const brainInstruction = renderBrainInstructions(context.brain)
     if (brainInstruction) lines.push(brainInstruction)
+  }
+
+  if (context) {
+    const activeContext = buildActiveJobroloContext(context)
+    lines.push(renderActiveJobroloContext(activeContext))
+    const nextPaths = suggestJobroloNextPaths(context)
+    const renderedNextPaths = renderJobroloNextPaths(nextPaths)
+    if (renderedNextPaths) lines.push(renderedNextPaths)
   }
 
   for (const selection of selections) {

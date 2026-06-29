@@ -9,7 +9,9 @@ const { assertMultiSkillOrchestrationContracts } = jiti('./src/lib/skills/tests/
 const { assertCodyPacketContracts } = jiti('./src/lib/cody/tests/cody-packet.test.ts')
 const { assertIntegrationRegistryContracts } = jiti('./src/lib/integrations/tests/integrations.test.ts')
 const { assertBrainContextContracts } = jiti('./src/lib/brain/tests/brain-context.test.ts')
+const { assertFoundationContextContracts } = jiti('./src/lib/brain/tests/foundation-context.test.ts')
 
+assertFoundationContextContracts()
 assertBrainContextContracts()
 assertSkillRoutingFixtures()
 assertSkillRoutingContracts()

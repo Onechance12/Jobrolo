@@ -452,6 +452,16 @@ function evidenceFromInput(input: CodyPacketInput) {
   }
   const docIds = Array.isArray(context.documentIds) ? context.documentIds.filter(value => typeof value === 'string') : []
   if (docIds.length) evidence.push(`Document IDs in current turn: ${docIds.join(', ')}`)
+  for (const [key, value] of Object.entries(input.relevantIds ?? {})) {
+    if (typeof value === 'string' && value) evidence.push(`${key}: ${value}`)
+    else if (typeof value === 'number' || typeof value === 'boolean') evidence.push(`${key}: ${String(value)}`)
+  }
+  const route = context.route ?? context.currentRoute ?? context.pathname
+  if (typeof route === 'string' && route) evidence.push(`Route: ${route}`)
+  const toolNames = Array.isArray(context.toolNames) ? context.toolNames.filter(value => typeof value === 'string') : []
+  if (toolNames.length) evidence.push(`Tools involved: ${toolNames.join(', ')}`)
+  const lastError = context.lastError ?? context.error
+  if (typeof lastError === 'string' && lastError) evidence.push(`Error observed: ${lastError.slice(0, 420)}`)
   if (input.recentMessages?.length) evidence.push(`Recent chat turns captured: ${input.recentMessages.length}`)
   return evidence
 }
