@@ -6,8 +6,8 @@
 // a clear reason "OCR provider not configured."
 //
 // To enable OCR, set OCR_PROVIDER env var and configure the corresponding
-// credentials. Provider implementations are stubs that throw "not implemented"
-// until wired up — they exist so the integration surface is clear.
+// credentials. Only implemented providers report available. Stub providers
+// return null until wired up so document processing can degrade gracefully.
 //
 // Future providers (priority order):
 //   1. openai_vision   — configured OpenAI-compatible vision provider
@@ -19,7 +19,7 @@
 // Each provider implements:
 //   - extractFromPdf(filePath): extract text from a PDF (rendering pages internally)
 //   - extractFromImage(filePath): extract text from an image file
-//   - isAvailable(): returns true if credentials are configured
+//   - isAvailable(): returns true if the provider is implemented and configured
 // =============================================================================
 
 import { readStoredFile } from '@/lib/storage'
@@ -65,10 +65,10 @@ export class NoOcrProvider implements DocumentOcrProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Stub providers — exist so the integration surface is documented. Each one
-// throws "not implemented" if called, but `isAvailable()` returns false until
-// credentials are configured. Replace the body of `extractFromPdf` /
-// `extractFromImage` with real implementations when wiring up.
+// Stub providers — exist so the integration surface is documented. They are
+// intentionally not selectable at runtime until their extraction methods are
+// implemented. This prevents a half-configured env var from breaking document
+// processing with a "not implemented" exception in production.
 // ---------------------------------------------------------------------------
 
 export class OpenAiVisionOcrProvider implements DocumentOcrProvider {
@@ -148,15 +148,17 @@ export class GoogleVisionOcrProvider implements DocumentOcrProvider {
   readonly name = 'google_vision'
 
   isAvailable(): boolean {
-    return !!process.env.GOOGLE_APPLICATION_CREDENTIALS || !!process.env.GOOGLE_VISION_API_KEY
+    return false
   }
 
   async extractFromPdf(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('GoogleVisionOcrProvider.extractFromPdf not implemented — TODO: call documents.detectText with PDF')
+    console.warn('[ocr-provider] google_vision PDF extraction is not implemented — returning null')
+    return null
   }
 
   async extractFromImage(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('GoogleVisionOcrProvider.extractFromImage not implemented — TODO: call documents.detectText with image')
+    console.warn('[ocr-provider] google_vision image extraction is not implemented — returning null')
+    return null
   }
 }
 
@@ -164,15 +166,17 @@ export class AwsTextractOcrProvider implements DocumentOcrProvider {
   readonly name = 'aws_textract'
 
   isAvailable(): boolean {
-    return !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_TEXTRACT_REGION)
+    return false
   }
 
   async extractFromPdf(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('AwsTextractOcrProvider.extractFromPdf not implemented — TODO: call StartDocumentAnalysis')
+    console.warn('[ocr-provider] aws_textract PDF extraction is not implemented — returning null')
+    return null
   }
 
   async extractFromImage(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('AwsTextractOcrProvider.extractFromImage not implemented — TODO: call DetectDocumentText')
+    console.warn('[ocr-provider] aws_textract image extraction is not implemented — returning null')
+    return null
   }
 }
 
@@ -374,15 +378,17 @@ export class AzureVisionOcrProvider implements DocumentOcrProvider {
   readonly name = 'azure_vision'
 
   isAvailable(): boolean {
-    return !!(process.env.AZURE_VISION_ENDPOINT && process.env.AZURE_VISION_KEY)
+    return false
   }
 
   async extractFromPdf(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('AzureVisionOcrProvider.extractFromPdf not implemented — TODO: call Read API with PDF')
+    console.warn('[ocr-provider] azure_vision PDF extraction is not implemented — returning null')
+    return null
   }
 
   async extractFromImage(_filePath: string): Promise<OcrResult | null> {
-    throw new Error('AzureVisionOcrProvider.extractFromImage not implemented — TODO: call Read API with image')
+    console.warn('[ocr-provider] azure_vision image extraction is not implemented — returning null')
+    return null
   }
 }
 
@@ -437,7 +443,7 @@ export function isOcrAvailable(): boolean {
 export function getOcrUnavailableReason(): string {
   const provider = getOcrProvider()
   if (provider.name === 'none') {
-    return 'OCR provider not configured. Set OCR_PROVIDER env var to one of: openai_vision, google_vision, aws_textract, apilayer_ocr, azure_vision.'
+    return 'OCR provider not configured. Set OCR_PROVIDER to an implemented provider: openai_vision or apilayer_ocr.'
   }
-  return `OCR provider '${provider.name}' is configured but not available (missing credentials).`
+  return `OCR provider '${provider.name}' is configured but not available or not implemented. Use openai_vision or apilayer_ocr, or finish the provider integration first.`
 }

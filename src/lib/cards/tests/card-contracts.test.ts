@@ -17,6 +17,15 @@ export function assertCardContracts() {
     'signature_request',
     'project_closeout',
     'closeout_checklist',
+    'command_shortcuts',
+    'brain_memory_saved',
+    'brain_context',
+    'brain_reflection',
+    'agent_lesson_saved',
+    'tester_feedback',
+    'connection_onboarding',
+    'cody_review',
+    'canvassing_game_plan',
   ]
 
   for (const cardType of expectedStructuredTypes) {
@@ -30,6 +39,12 @@ export function assertCardContracts() {
 
   const jobCostTemplate = findJobroloCardTemplate('job_cost')
   assert(Boolean(jobCostTemplate?.primaryPromptPills.some(pill => /margin/i.test(pill.label) || /cost/i.test(pill.label))), 'Job-cost card should expose cost/margin prompt pills')
+
+  const memoryTemplate = findJobroloCardTemplate('brain_context')
+  assert(Boolean(memoryTemplate?.displayRules.some(rule => /database records are truth/i.test(rule))), 'Memory card should warn that database records remain truth')
+
+  const shortcutTemplate = findJobroloCardTemplate('command_shortcuts')
+  assert(Boolean(shortcutTemplate?.displayRules.some(rule => /insert prompts/i.test(rule))), 'Shortcut card should explain shortcuts insert prompts')
 
   return true
 }

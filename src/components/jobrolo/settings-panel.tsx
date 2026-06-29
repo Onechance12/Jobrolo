@@ -157,7 +157,7 @@ export function SettingsButton() {
                   Notifications
                 </div>
                 <p className="text-xs text-slate-500">
-                  Push notifications coming soon — for now Jobrolo is quiet.
+                  Push notifications are off until a notification provider is connected.
                 </p>
               </section>
 
