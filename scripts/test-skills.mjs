@@ -11,6 +11,7 @@ const { assertCodyPacketContracts } = jiti('./src/lib/cody/tests/cody-packet.tes
 const { assertIntegrationRegistryContracts } = jiti('./src/lib/integrations/tests/integrations.test.ts')
 const { assertBrainContextContracts } = jiti('./src/lib/brain/tests/brain-context.test.ts')
 const { assertFoundationContextContracts } = jiti('./src/lib/brain/tests/foundation-context.test.ts')
+const { assertLocalTruthContracts } = jiti('./src/lib/truth/tests/local-truth.test.ts')
 
 assertFoundationContextContracts()
 assertBrainContextContracts()
@@ -20,4 +21,5 @@ assertSkillRoutingContracts()
 assertMultiSkillOrchestrationContracts()
 assertCodyPacketContracts()
 assertIntegrationRegistryContracts()
+assertLocalTruthContracts()
 console.log('skill routing contracts passed')

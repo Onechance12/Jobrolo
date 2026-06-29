@@ -1,0 +1,157 @@
+import type { ToolCall } from '@/lib/prompts'
+import type { LocalTruthContext, LocalTruthRoute } from './types'
+
+export function plainTruthText(text: string) {
+  return text
+    .replace(/<UNTRUSTED_CONTENT[^>]*>/gi, '')
+    .replace(/<\/UNTRUSTED_CONTENT>/gi, '')
+    .trim()
+}
+
+export function hasLocalTruthMutationIntent(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  return /\b(create|add|save|update|edit|change|delete|remove|archive|attach|link|import|send|text|email|invite|approve|reject|finalize|convert)\b/.test(lower)
+}
+
+export function isPriceSheetReviewRequest(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!/\b(price\s*(?:sheet|list)|supplier|material|materials|unit price|unit and price|pending import|imported|first\s+\d+\s+(?:rows|items))\b/.test(lower)) return false
+  if (/\b(delete|detach|remove|unassign|clear|replace|import these|import them|import rows|import items)\b/.test(lower)) return false
+  return /\b(review|show|list|tell me|first|rows|items|unit|price|pending|imported|saved)\b/.test(lower)
+}
+
+export function documentHintFromPriceSheetText(text: string) {
+  const clean = plainTruthText(text)
+  const filename = clean.match(/\b([A-Za-z0-9][A-Za-z0-9._ -]{2,}\.(?:pdf|xlsx?|csv))\b/i)?.[1]
+  if (filename) return filename
+  const lower = clean.toLowerCase()
+  if (lower.includes('price sheet') || lower.includes('price list') || lower.includes('supplier')) return 'price sheet'
+  return ''
+}
+
+function isSavedCustomerListRequest(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  if (/\b(how many|count|kpi|kpis|analytics?|trend|this week|last week|month|quarter)\b/.test(lower)) return false
+  return (
+    /\b(what|which|show|list|view|pull|display|see|who)\b[\s\S]{0,80}\b(saved\s+)?(clients?|customers?|homeowners?)\b/.test(lower) ||
+    /\b(clients?|customers?|homeowners?)\b[\s\S]{0,50}\b(do we have|are saved|on file|in jobrolo|in the system)\b/.test(lower) ||
+    /\b(saved\s+)?(clients?|customers?|homeowners?)\b$/.test(lower.trim())
+  )
+}
+
+function customerFileQueryFromText(text: string) {
+  const clean = plainTruthText(text).replace(/\s+/g, ' ').trim()
+  const lower = clean.toLowerCase()
+  if (!clean || hasLocalTruthMutationIntent(lower)) return null
+  if (!/\b(file|packet|customer record|client record|saved record|what do we have|what's saved|show|pull|view|open|display|files?|documents?|docs?|photos?)\b/.test(lower)) return null
+  if (/\b(price\s*(?:sheet|list)|material prices?|company profile|company info|action needed|notifications?|inbox|recent uploads?)\b/.test(lower)) return null
+
+  const patterns = [
+    /\b(?:show|pull|view|open|display)\s+(?:me\s+)?(.+?)\s+(?:customer|client|homeowner)?\s*(?:file|packet|record)\b/i,
+    /\b(?:show|pull|view|open|display)\s+(?:the\s+)?(?:customer|client|homeowner)?\s*(?:file|packet|record)\s+(?:for|on)\s+(.+?)$/i,
+    /\b(?:what\s+do\s+we\s+have|what(?:'s| is)\s+saved)\s+(?:for|on)\s+(.+?)$/i,
+    /\b(.+?)'s\s+(?:customer|client|homeowner)?\s*(?:file|packet|record)\b/i,
+    /\b(?:files?|documents?|docs?|photos?)\s+(?:for|on)\s+(.+?)$/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = clean.match(pattern)?.[1]?.trim()
+    if (!match) continue
+    const query = match
+      .replace(/\b(only use saved database records|use saved database records only|saved database records only|please|the|my|our|saved)\b/gi, ' ')
+      .replace(/'s\b/gi, '')
+      .replace(/[?.!,]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!query) continue
+    if (/^(this|that|current|active|the|a|an|customer|client|homeowner|project|job|file|packet|record|it|them)$/i.test(query)) continue
+    if (/^(this|that|current|active|the)?\s*(customer|client|homeowner|project|job|file|packet|record)$/i.test(query)) continue
+    if (query.length < 2) continue
+    return query
+  }
+
+  return null
+}
+
+function isProjectDocumentPacketRequest(text: string, activeProjectId?: string | null) {
+  if (!activeProjectId) return false
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  return (
+    /\b(show|pull|view|open|display|list|what(?:'s| is))\b[\s\S]{0,80}\b(this|current|active|the)?\s*(job|project)\s+(file|packet|documents?|docs?|files?|photos?)\b/.test(lower) ||
+    /\b(what files?|what documents?|what docs?|what photos?)\b[\s\S]{0,80}\b(this|current|active|the)?\s*(job|project)\b/.test(lower)
+  )
+}
+
+function buildDocumentReadToolCall(text: string): ToolCall | null {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return null
+  if (/\b(this|current|active|the)\s+(job|project)\b/.test(lower)) return null
+  if (/\b(recent uploads?|latest uploads?|uploaded files?|upload status|still processing|analyzing|analysis status|pending analysis|unassigned uploads?)\b/.test(lower)) {
+    return { name: 'get_recent_uploads', args: { limit: 12 } }
+  }
+  if (/\b(show|list|view|pull|display|open|what|which)\b[\s\S]{0,80}\b(files?|documents?|docs?|uploads?|photos?|images?)\b/.test(lower)) {
+    const args: Record<string, unknown> = { limit: 20 }
+    if (/\b(photos?|images?|pictures?)\b/.test(lower)) args.fileType = 'photo'
+    return { name: 'list_documents', args }
+  }
+  return null
+}
+
+export function resolveLocalTruthRoute(text: string, context: LocalTruthContext = {}): LocalTruthRoute | null {
+  const userText = plainTruthText(text)
+  if (isPriceSheetReviewRequest(userText)) {
+    const filename = documentHintFromPriceSheetText(userText)
+    return {
+      id: 'price-list-review',
+      reason: 'User asked to review/show saved supplier/material price rows.',
+      confidence: 0.84,
+      toolCall: { name: 'review_price_sheet_items', args: { limit: 10, ...(filename ? { filename } : {}) } },
+    }
+  }
+
+  if (isProjectDocumentPacketRequest(userText, context.activeProjectId) && context.activeProjectId) {
+    return {
+      id: 'active-project-document-packet',
+      reason: 'User asked for the active job/project file packet.',
+      confidence: 0.86,
+      toolCall: { name: 'get_project_document_packet', args: { projectId: context.activeProjectId } },
+    }
+  }
+
+  const customerFileQuery = customerFileQueryFromText(userText)
+  if (customerFileQuery) {
+    return {
+      id: 'customer-file',
+      reason: 'User asked for a saved customer/client file by name or context.',
+      confidence: 0.82,
+      toolCall: { name: 'get_customer_file', args: { query: customerFileQuery } },
+    }
+  }
+
+  if (isSavedCustomerListRequest(userText)) {
+    return {
+      id: 'saved-customer-list',
+      reason: 'User asked to list saved customers/clients from Jobrolo records.',
+      confidence: 0.88,
+      toolCall: { name: 'list_customers', args: { limit: 25 } },
+    }
+  }
+
+  const documentReadToolCall = buildDocumentReadToolCall(userText)
+  if (documentReadToolCall) {
+    return {
+      id: documentReadToolCall.name === 'get_recent_uploads' ? 'recent-uploads' : 'document-list',
+      reason: 'User asked to view saved uploads/documents/photos.',
+      confidence: 0.78,
+      toolCall: documentReadToolCall,
+    }
+  }
+
+  return null
+}
+
+export function buildLocalTruthToolCall(text: string, context: LocalTruthContext = {}): ToolCall | null {
+  return resolveLocalTruthRoute(text, context)?.toolCall ?? null
+}
