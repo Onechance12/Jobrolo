@@ -19,6 +19,7 @@ export const crewsSubsSkills: JobroloSkill[] = [
       'If the crew type is unclear, ask whether this is roofing, gutters, windows, interior, general labor, or another crew.',
       'When a crew chat is created, return the chat card with open, copy link, and invite actions immediately.',
     ],
+    output: { cards: ['shared-chat', 'production-status'] },
     outputFormat: 'Crew chat card with project, crew type, visibility, invite/link actions, and one editable starter prompt.',
   },
 ]

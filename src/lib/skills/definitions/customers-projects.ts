@@ -22,6 +22,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'If information is missing, save what is known and ask one useful next question.',
       'Do not start an inspection unless the user says inspection or current-location field context is present.',
     ],
+    output: { cards: ['lead-intake'] },
     outputFormat: 'Lead intake card with known fields, missing fields, source, next-step pills, and conversion actions.',
   },
   {
@@ -44,6 +45,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'Tie appointments to customer/project/lead context when available.',
       'When showing a calendar, present a compact card and prompt pills instead of a bulky form.',
     ],
+    output: { cards: ['schedule'] },
   },
   {
     id: 'bid-quote',
@@ -66,6 +68,30 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'Do not create a lead, inspection, or roof report just because a quote mentions an address.',
       'If a customer/project is ambiguous, ask one concise clarification.',
     ],
+    output: { cards: ['cash-quote', 'estimate-proposal', 'job-cost', 'scope-breakdown', 'document-file'] },
+  },
+  {
+    id: 'invoice',
+    name: 'Invoice / Payment',
+    category: 'customers_projects',
+    status: 'active',
+    risk: 'high',
+    priority: 84,
+    purpose: 'Create, review, and explain customer invoices, payment requests, payments received, balances due, and accounts-receivable status from project financial truth.',
+    whenToUse: ['Customer invoice', 'Payment request', 'Balance due', 'Record payment', 'Accounts receivable', 'Unpaid invoice'],
+    allowedRoles: ['owner', 'admin', 'office', 'project_manager', 'sales', 'system'],
+    requiredContext: ['project/customer when creating or recording invoice/payment truth'],
+    optionalContext: ['signed contract', 'approved change orders', 'payment terms', 'payment method', 'source document'],
+    allowedTools: ['get_project_financial_summary', 'create_project_financial_entry', 'get_project_document_packet', 'consult_orchestrator'],
+    approvalRequiredFor: ['creating invoice/payment ledger entries', 'sending invoices or payment links'],
+    decisionRules: [
+      'Separate customer invoices/payments from supplier invoices/job costs.',
+      'Use approved project revenue/payment entries for balance due; do not infer final balance from chat memory.',
+      'Ask for missing amount, due date, payment method, or project before creating financial truth.',
+      'Sending or sharing customer-facing invoices requires approval.',
+    ],
+    output: { cards: ['invoice', 'job-cost'] },
+    outputFormat: 'Invoice/payment card with amount, balance, due date/status, source document, and approval-safe next actions.',
   },
   {
     id: 'entity-resolver',
@@ -83,6 +109,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'When multiple customers/projects match, ask the user to choose.',
       'When the user says saved records only, use DB tools and not chat memory.',
     ],
+    output: { cards: ['customer-file'] },
   },
   {
     id: 'customer-creation',
@@ -99,6 +126,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'Do not create customers from contractor company names or supplier names.',
       'Use extracted document parties only after conflict checks or user confirmation.',
     ],
+    output: { cards: ['customer-file', 'lead-intake'] },
   },
   {
     id: 'project-creation',
@@ -116,6 +144,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'If a document conflicts with an existing customer, ask before linking.',
       'Use real customerId/projectId in approval cards and tool calls.',
     ],
+    output: { cards: ['customer-file', 'shared-chat'] },
   },
   {
     id: 'project-context',
@@ -133,6 +162,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'Do not call project tools with null projectId.',
       'If active context is stale or ambiguous, ask one concise clarification.',
     ],
+    output: { cards: ['customer-file', 'production-status'] },
   },
   {
     id: 'project-status',
@@ -149,6 +179,7 @@ export const customersProjectsSkills: JobroloSkill[] = [
       'Do not call a job ready to build unless saved requirements, approvals, material status, schedule, and customer-facing blockers are checked.',
       'If readiness data is missing, say what is missing instead of guessing.',
     ],
+    output: { cards: ['production-status', 'operations-radar'] },
     outputFormat: 'Compact readiness/status card with blockers, ready items, next actions, and source labels from saved records.',
   },
 ]

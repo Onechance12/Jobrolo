@@ -58,7 +58,8 @@ export function assertMultiSkillOrchestrationContracts() {
   const production = planForText('Is this job ready to build?')
   assert(production.primarySkill === 'production-coordinator', `Ready-to-build primary should be production-coordinator, got ${production.primarySkill}`)
   assert(production.supportingSkills.includes('project-status'), 'Ready-to-build should consult project-status')
-  assert(production.supportingSkills.includes('supplier-order-status'), 'Ready-to-build should consult supplier-order-status')
+  assert(production.supportingSkills.includes('material-ordering'), 'Ready-to-build should consult material-ordering')
+  assert(production.supportingSkills.includes('job-cost'), 'Ready-to-build should consult job-cost')
 
   const simplePriceList = planForText('Show price list')
   assert(simplePriceList.primarySkill === 'price-list', `Show price list primary should be price-list, got ${simplePriceList.primarySkill}`)

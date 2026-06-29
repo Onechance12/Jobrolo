@@ -1,5 +1,6 @@
 import { JOBROLO_SKILLS, getSkillById } from '../registry'
 import { buildSkillRoutingContext } from '../context'
+import { getInvalidSkillCardIds, getSelectedSkillCardContracts } from '../card-contracts'
 import { orchestrateSkills } from '../orchestrate-skills'
 import { selectSkills } from '../select-skill'
 
@@ -35,6 +36,7 @@ const RUNTIME_CRITICAL_SKILLS = [
   'company-profile',
   'company-intelligence',
   'brand-assets',
+  'user-profile',
   'entity-resolver',
   'customer-creation',
   'project-creation',
@@ -43,6 +45,11 @@ const RUNTIME_CRITICAL_SKILLS = [
   'lead-intake',
   'appointment-scheduling',
   'bid-quote',
+  'invoice',
+  'job-cost',
+  'labor-cost',
+  'commission',
+  'insurance-claim',
   'field-copilot',
   'photo-evidence',
   'roof-report',
@@ -76,6 +83,8 @@ export function assertSkillRegistryContracts() {
     assert(skill.purpose.trim().length > 0, `Skill "${skill.id}" must have a purpose`)
     assert(skill.whenToUse.length > 0, `Skill "${skill.id}" must describe when to use it`)
     assert(skill.decisionRules.length > 0, `Skill "${skill.id}" must include decision rules`)
+    const invalidCardIds = getInvalidSkillCardIds(skill)
+    assert(invalidCardIds.length === 0, `Skill "${skill.id}" references unknown card template(s): ${invalidCardIds.join(', ')}`)
   }
 
   for (const skillId of RUNTIME_CRITICAL_SKILLS) assertActiveSkill(skillId)
@@ -86,16 +95,49 @@ export function assertSkillRegistryContracts() {
 
   const companyHealthSkills = skillIdsFor('Show company health and what we should do this week to grow.')
   assert(companyHealthSkills.includes('company-intelligence'), `Company health should select company-intelligence, got ${companyHealthSkills.join(', ')}`)
+  const companyHealthContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Show company health and what we should do this week to grow.' })))
+  assert(companyHealthContracts.some(contract => contract.template.id === 'company-intelligence'), 'Company health should carry the company-intelligence card contract')
 
   const crewSkills = skillIdsFor('Create a roofing crew chat for this job and give me the invite link.')
   assert(crewSkills.includes('crew-subcontractor'), `Crew chat should select crew-subcontractor, got ${crewSkills.join(', ')}`)
+  const crewContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Create a roofing crew chat for this job and give me the invite link.' })))
+  assert(crewContracts.some(contract => contract.template.id === 'shared-chat'), 'Crew chat should carry the shared-chat card contract')
+
+  const quoteContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Create a cash quote for this project from the saved scope.' })))
+  assert(quoteContracts.some(contract => contract.template.id === 'cash-quote'), 'Cash quote workflow should carry the cash-quote card contract')
+  assert(quoteContracts.some(contract => contract.template.id === 'estimate-proposal'), 'Cash quote workflow should carry the estimate-proposal card contract')
+
+  const jobCostContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Show the job cost, gross profit, and margin for this project.' })))
+  assert(jobCostContracts.some(contract => contract.template.id === 'job-cost'), 'Job cost workflow should carry the job-cost card contract')
+
+  const invoiceContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Show unpaid customer invoices and balance due for this job.' })))
+  assert(invoiceContracts.some(contract => contract.template.id === 'invoice'), 'Invoice workflow should carry the invoice card contract')
+
+  const commissionContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Calculate sales rep commission for this project.' })))
+  assert(commissionContracts.some(contract => contract.template.id === 'commission'), 'Commission workflow should carry the commission card contract')
+
+  const materialOrderContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Show material order delivery status and backorders.' })))
+  assert(materialOrderContracts.some(contract => contract.template.id === 'material-order'), 'Material order workflow should carry the material-order card contract')
+
+  const claimContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Explain the deductible, RCV, ACV, and supplement gaps for this insurance claim.' })))
+  assert(claimContracts.some(contract => contract.template.id === 'insurance-claim'), 'Claim/supplement workflow should carry the insurance-claim card contract')
+
+  const templateContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Upload this agreement as a reusable company template.' })))
+  assert(templateContracts.some(contract => contract.template.id === 'template-library'), 'Template intake should carry the template-library card contract')
+
+  const profileContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Use this uploaded image as my profile photo.' })))
+  assert(profileContracts.some(contract => contract.template.id === 'user-profile'), 'User profile photo workflow should carry the user-profile card contract')
+
+  const codyContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Cody Cody Cody this onboarding card is broken.' })))
+  assert(codyContracts.some(contract => contract.template.id === 'cody-review'), 'Cody workflow should carry the Cody review card contract')
 
   const productionPlan = orchestrateSkills({ latestText: 'Is this job ready to build?', normalizedText: 'is this job ready to build?' })
   assert(productionPlan.primarySkill === 'production-coordinator', `Ready-to-build should use production-coordinator, got ${productionPlan.primarySkill}`)
   assert(productionPlan.supportingSkills.includes('project-status'), 'Ready-to-build should consult project-status')
-  assert(productionPlan.supportingSkills.includes('supplier-order-status'), 'Ready-to-build should consult supplier-order-status')
-  const supplierOrderStatus = getSkillById('supplier-order-status')
-  assert(supplierOrderStatus?.status === 'experimental', 'Supplier order status should stay experimental until live supplier APIs exist')
+  assert(productionPlan.supportingSkills.includes('material-ordering'), 'Ready-to-build should consult material-ordering')
+  assert(productionPlan.supportingSkills.includes('job-cost'), 'Ready-to-build should consult job-cost')
+  const materialOrdering = getSkillById('material-ordering')
+  assert(materialOrdering?.status === 'experimental', 'Material ordering should stay experimental until live supplier APIs exist')
 
   return true
 }

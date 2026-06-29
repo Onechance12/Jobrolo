@@ -13,6 +13,7 @@ export const partnerSkills: JobroloSkill[] = [
     allowedRoles: ['owner', 'admin', 'supplement', 'office', 'adjuster', 'system'],
     approvalRequiredFor: ['external claim sends', 'shared claim links'],
     decisionRules: ['Only share approved claim/project documents and never expose internal notes by default.'],
+    output: { cards: ['external-share', 'insurance-claim', 'shared-chat'] },
   },
   {
     id: 'realtor',
@@ -26,5 +27,6 @@ export const partnerSkills: JobroloSkill[] = [
     allowedRoles: ['owner', 'admin', 'sales', 'office', 'realtor', 'system'],
     approvalRequiredFor: ['external partner invites', 'shared customer/project updates'],
     decisionRules: ['Partners see only explicitly shared chats/files/updates, not internal CRM data.'],
+    output: { cards: ['external-share', 'shared-chat'] },
   },
 ]

@@ -9,11 +9,18 @@ import { cn } from '@/lib/utils'
 import {
   JobroloCard,
   JobroloCardSection,
+  type JobroloCardTone,
   JobroloFact,
   JobroloFactGrid,
   JobroloPromptButton,
   JobroloPromptPills,
 } from './card-system'
+import {
+  findJobroloCardTemplate,
+  getJobroloCardTemplateById,
+  type JobroloCardFamily,
+  type JobroloCardTemplate,
+} from '@/lib/cards/templates'
 import {
   AlertTriangle,
   Building2,
@@ -298,10 +305,248 @@ type TemplateReviewLike = {
   summary?: string
 }
 
+function resolveCardTemplate(cardType: string, contextData?: Record<string, unknown> | null) {
+  const explicitId =
+    textValue(contextData?.cardTemplateId) ||
+    textValue(contextData?.templateId) ||
+    textValue((contextData as any)?.cardContractId) ||
+    textValue((contextData as any)?.contractId)
+  return getJobroloCardTemplateById(explicitId) ?? findJobroloCardTemplate(cardType)
+}
+
+function cardToneForFamily(family?: JobroloCardFamily): JobroloCardTone {
+  switch (family) {
+    case 'company':
+    case 'customer':
+    case 'project':
+    case 'user':
+    case 'chat':
+      return 'blue'
+    case 'files':
+    case 'template':
+    case 'supplier':
+    case 'integration':
+    case 'finance':
+      return 'amber'
+    case 'lead':
+    case 'field':
+    case 'schedule':
+      return 'emerald'
+    case 'scope':
+    case 'estimate':
+    case 'report':
+    case 'signature':
+      return 'cyan'
+    case 'approval':
+    case 'permission':
+    case 'notification':
+      return 'violet'
+    case 'task':
+    case 'claim':
+      return 'rose'
+    case 'timeline':
+    case 'meta':
+    default:
+      return 'slate'
+  }
+}
+
+function iconForCardTemplate(template: JobroloCardTemplate) {
+  switch (template.family) {
+    case 'company':
+      return <Building2 className="h-5 w-5" />
+    case 'customer':
+    case 'lead':
+      return <Home className="h-5 w-5" />
+    case 'project':
+    case 'task':
+      return <ClipboardCheck className="h-5 w-5" />
+    case 'user':
+      return <UserPlus className="h-5 w-5" />
+    case 'files':
+    case 'template':
+    case 'signature':
+      return <FileText className="h-5 w-5" />
+    case 'scope':
+    case 'estimate':
+    case 'finance':
+      return <ClipboardCheck className="h-5 w-5" />
+    case 'report':
+      return <Camera className="h-5 w-5" />
+    case 'approval':
+    case 'permission':
+      return <ShieldCheck className="h-5 w-5" />
+    case 'schedule':
+      return <CalendarDays className="h-5 w-5" />
+    case 'field':
+      return <MapPin className="h-5 w-5" />
+    case 'chat':
+      return <MessageCircle className="h-5 w-5" />
+    case 'supplier':
+    case 'integration':
+      return <Package className="h-5 w-5" />
+    case 'notification':
+      return <Mail className="h-5 w-5" />
+    case 'timeline':
+      return <Clock className="h-5 w-5" />
+    case 'claim':
+      return <AlertTriangle className="h-5 w-5" />
+    case 'meta':
+      return <Sparkles className="h-5 w-5" />
+    default:
+      return <Sparkles className="h-5 w-5" />
+  }
+}
+
+function contractCardTitle(template: JobroloCardTemplate, data?: Record<string, unknown> | null) {
+  return (
+    textValue(data?.title) ||
+    textValue(data?.name) ||
+    textValue(data?.displayName) ||
+    textValue(data?.companyName) ||
+    textValue(data?.customerName) ||
+    textValue(data?.projectTitle) ||
+    template.glanceLabel
+  )
+}
+
+function contractCardSubtitle(template: JobroloCardTemplate, data?: Record<string, unknown> | null) {
+  return (
+    textValue(data?.summary) ||
+    textValue(data?.aiSummary) ||
+    textValue(data?.description) ||
+    textValue(data?.guidance) ||
+    template.purpose
+  )
+}
+
+function contractCardBadge(data?: Record<string, unknown> | null) {
+  return textValue(data?.status) || textValue(data?.fileType) || textValue(data?.priority) || null
+}
+
+function contractFactRows(data?: Record<string, unknown> | null) {
+  if (!data) return []
+  const excluded = new Set([
+    'cardType',
+    'type',
+    'cardTemplateId',
+    'templateId',
+    'cardContractId',
+    'contractId',
+    'payload',
+    'metadata',
+    'raw',
+    'json',
+    'sections',
+    'actions',
+    'promptPills',
+    'primaryPromptPills',
+    'quickActions',
+    'recommendations',
+    'sources',
+    'sourcePreviews',
+    'photos',
+    'documents',
+    'lineItems',
+  ])
+  return Object.entries(data)
+    .filter(([key, value]) => !excluded.has(key) && value != null && value !== '')
+    .map(([key, value]) => {
+      if (Array.isArray(value)) return [key, `${value.length} item${value.length === 1 ? '' : 's'}`] as const
+      if (typeof value === 'object') {
+        const label = textValue((value as any).name) || textValue((value as any).title) || textValue((value as any).id)
+        return [key, label || 'Available'] as const
+      }
+      return [key, String(value)] as const
+    })
+    .filter(([, value]) => value.length <= 160)
+    .slice(0, 6)
+}
+
+function promptPillsFromContract(template: JobroloCardTemplate, data?: Record<string, unknown> | null) {
+  const explicit = Array.isArray(data?.promptPills)
+    ? data.promptPills
+    : Array.isArray((data as any)?.primaryPromptPills)
+      ? (data as any).primaryPromptPills
+      : []
+  const explicitPills = explicit
+    .map((pill: any) => ({
+      label: textValue(pill?.label),
+      prompt: textValue(pill?.prompt) || textValue(pill?.promptPattern),
+    }))
+    .filter((pill: { label: string; prompt: string }) => pill.label && pill.prompt)
+
+  const contractPills = template.primaryPromptPills.map(pill => ({
+    label: pill.label,
+    prompt: pill.promptPattern,
+  }))
+
+  const seen = new Set<string>()
+  return [...explicitPills, ...contractPills]
+    .filter(pill => {
+      const key = `${pill.label}:${pill.prompt}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 6)
+}
+
+function GenericContractCard({
+  template,
+  data,
+  content,
+}: {
+  template: JobroloCardTemplate
+  data?: Record<string, unknown> | null
+  content?: string
+}) {
+  const tone = cardToneForFamily(template.family)
+  const facts = contractFactRows(data)
+  const pills = promptPillsFromContract(template, data)
+  const title = contractCardTitle(template, data)
+  const subtitle = contractCardSubtitle(template, data) || content
+  const badge = contractCardBadge(data)
+  return (
+    <JobroloCard
+      tone={tone}
+      templateId={template.id}
+      family={template.family}
+      speakableSummary={template.speakableSummary}
+      title={title}
+      subtitle={subtitle}
+      badge={badge || template.glanceLabel}
+      icon={iconForCardTemplate(template)}
+      footer={pills.length ? <JobroloPromptPills tone={tone} pills={pills} /> : null}
+    >
+      {content && subtitle !== content ? (
+        <JobroloCardSection tone={tone}>
+          <p className="text-xs leading-relaxed text-muted-foreground">{content}</p>
+        </JobroloCardSection>
+      ) : null}
+      {facts.length ? (
+        <JobroloFactGrid columns={2}>
+          {facts.map(([key, value]) => (
+            <JobroloFact key={key} label={humanize(key)} value={value} />
+          ))}
+        </JobroloFactGrid>
+      ) : (
+        <JobroloCardSection tone={tone}>
+          <p className="text-xs leading-relaxed text-muted-foreground">{template.speakableSummary}</p>
+        </JobroloCardSection>
+      )}
+      <JobroloCardSection tone={tone} eyebrow="Card contract" title={template.glanceLabel}>
+        <p className="text-xs leading-relaxed text-muted-foreground">{template.purpose}</p>
+      </JobroloCardSection>
+    </JobroloCard>
+  )
+}
+
 export function CopilotCardFromMessage({ contextType, contextData, content }: { contextType?: string | null; contextData?: Record<string, unknown> | null; content?: string }) {
   if (!contextType && !contextData) return null
   const cardType = String((contextData?.cardType || contextData?.type || contextType || '')).toLowerCase()
   if (!cardType) return null
+  const template = resolveCardTemplate(cardType, contextData)
 
   if (cardType.includes('field_briefing')) {
     return <FieldBriefingCard briefing={(contextData?.briefing as FieldBriefingLike) ?? (contextData as FieldBriefingLike)} compact />
@@ -395,6 +640,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('approval') || cardType.includes('action_request') || cardType.includes('material_request') || cardType.includes('issue_report') || cardType.includes('supplier_order')) {
     return <InboxActionCard item={contextData as InboxLike} />
+  }
+  if (template) {
+    return <GenericContractCard template={template} data={contextData} content={content} />
   }
   return null
 }

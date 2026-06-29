@@ -19,6 +19,7 @@ export const marketingGrowthSkills: JobroloSkill[] = [
       'Use saved Jobrolo records for lead/project counts; use public search only for public web/social evidence.',
       'Do not overwrite company profile data from public research without explicit user approval.',
     ],
+    output: { cards: ['company-intelligence'] },
     outputFormat: 'Company intelligence card with saved KPIs, public source previews, setup gaps, practical next moves, and clear confidence labels.',
   },
 ]

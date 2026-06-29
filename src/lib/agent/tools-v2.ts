@@ -332,6 +332,123 @@ async function resolveJobTarget(contractorId: string, input: { projectId?: strin
   return { error: 'Which job/project should I attach this to? Operational actions must be tied to a project or customer.' as const }
 }
 
+const FINANCIAL_ENTRY_TYPES = [
+  'contract_amount',
+  'supplement',
+  'change_order',
+  'customer_invoice',
+  'payment',
+  'material_cost',
+  'labor_cost',
+  'subcontractor_cost',
+  'permit_cost',
+  'commission',
+  'overhead',
+  'adjustment',
+] as const
+
+const FINANCIAL_DIRECTIONS = ['revenue', 'cost', 'payment', 'commission', 'adjustment'] as const
+const FINANCIAL_STATUSES = ['candidate', 'approved', 'rejected', 'voided', 'paid', 'collected', 'estimated'] as const
+
+type FinancialEntryType = (typeof FINANCIAL_ENTRY_TYPES)[number]
+type FinancialDirection = (typeof FINANCIAL_DIRECTIONS)[number]
+type FinancialStatus = (typeof FINANCIAL_STATUSES)[number]
+
+function normalizeFinancialEntryType(value?: string | null): FinancialEntryType {
+  const normalized = String(value ?? '').toLowerCase().replace(/[\s-]+/g, '_')
+  if ((FINANCIAL_ENTRY_TYPES as readonly string[]).includes(normalized)) return normalized as FinancialEntryType
+  if (/\b(invoice|bill)\b/.test(normalized)) return 'customer_invoice'
+  if (/\b(pay|payment|collected|deposit)\b/.test(normalized)) return 'payment'
+  if (/\b(material|supplier|delivery|abc|qxo|srs|home_depot|lowes)\b/.test(normalized)) return 'material_cost'
+  if (/\b(labor|crew|sub|installer|install)\b/.test(normalized)) return 'labor_cost'
+  if (/\b(comm|commission|rep|sales)\b/.test(normalized)) return 'commission'
+  if (/\b(change|upgrade|extra)\b/.test(normalized)) return 'change_order'
+  if (/\b(supplement|supp)\b/.test(normalized)) return 'supplement'
+  if (/\b(contract|bid|quote|estimate|rcv|price)\b/.test(normalized)) return 'contract_amount'
+  return 'adjustment'
+}
+
+function defaultFinancialDirection(entryType: FinancialEntryType): FinancialDirection {
+  if (['contract_amount', 'supplement', 'change_order', 'customer_invoice'].includes(entryType)) return 'revenue'
+  if (entryType === 'payment') return 'payment'
+  if (entryType === 'commission') return 'commission'
+  if (entryType === 'adjustment') return 'adjustment'
+  return 'cost'
+}
+
+function normalizeFinancialDirection(entryType: FinancialEntryType, direction?: string | null): FinancialDirection {
+  const normalized = String(direction ?? '').toLowerCase().replace(/[\s-]+/g, '_')
+  if ((FINANCIAL_DIRECTIONS as readonly string[]).includes(normalized)) return normalized as FinancialDirection
+  return defaultFinancialDirection(entryType)
+}
+
+function normalizeFinancialStatus(value?: string | null): FinancialStatus {
+  const normalized = String(value ?? '').toLowerCase().replace(/[\s-]+/g, '_')
+  if ((FINANCIAL_STATUSES as readonly string[]).includes(normalized)) return normalized as FinancialStatus
+  return 'candidate'
+}
+
+function money(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100
+}
+
+function summarizeFinancialEntries(entries: Array<{
+  id: string
+  entryType: string
+  direction: string
+  category: string
+  description: string
+  vendorName: string | null
+  amount: number
+  status: string
+  occurredAt: Date | null
+  createdAt: Date
+}>) {
+  const approvedStatuses = new Set(['approved', 'paid', 'collected'])
+  const approved = entries.filter(entry => approvedStatuses.has(entry.status))
+  const candidate = entries.filter(entry => ['candidate', 'estimated'].includes(entry.status))
+  const rejectedOrVoid = entries.filter(entry => ['rejected', 'voided'].includes(entry.status))
+  const sum = (rows: typeof entries, predicate: (entry: typeof entries[number]) => boolean) => money(rows.filter(predicate).reduce((total, entry) => total + Number(entry.amount || 0), 0))
+  const approvedRevenue = sum(approved, entry => entry.direction === 'revenue')
+  const approvedCosts = sum(approved, entry => entry.direction === 'cost')
+  const approvedCommission = sum(approved, entry => entry.direction === 'commission')
+  const approvedPayments = sum(approved, entry => entry.direction === 'payment')
+  const candidateRevenue = sum(candidate, entry => entry.direction === 'revenue')
+  const candidateCosts = sum(candidate, entry => entry.direction === 'cost' || entry.direction === 'commission')
+  const grossProfit = money(approvedRevenue - approvedCosts - approvedCommission)
+  const marginPercent = approvedRevenue > 0 ? money((grossProfit / approvedRevenue) * 100) : null
+  const balanceDue = money(approvedRevenue - approvedPayments)
+  const buckets = new Map<string, { category: string; revenue: number; cost: number; commission: number; payment: number; count: number }>()
+
+  for (const entry of entries) {
+    const key = entry.category || entry.entryType || 'other'
+    const bucket = buckets.get(key) ?? { category: key, revenue: 0, cost: 0, commission: 0, payment: 0, count: 0 }
+    if (entry.direction === 'revenue') bucket.revenue = money(bucket.revenue + entry.amount)
+    else if (entry.direction === 'payment') bucket.payment = money(bucket.payment + entry.amount)
+    else if (entry.direction === 'commission') bucket.commission = money(bucket.commission + entry.amount)
+    else bucket.cost = money(bucket.cost + entry.amount)
+    bucket.count += 1
+    buckets.set(key, bucket)
+  }
+
+  return {
+    approvedRevenue,
+    approvedCosts,
+    approvedCommission,
+    approvedPayments,
+    grossProfit,
+    marginPercent,
+    balanceDue,
+    candidateRevenue,
+    candidateCosts,
+    entryCount: entries.length,
+    candidateCount: candidate.length,
+    approvedCount: approved.length,
+    rejectedOrVoidCount: rejectedOrVoid.length,
+    buckets: [...buckets.values()].sort((a, b) => b.count - a.count),
+  }
+}
+
 function normalizeCustomerFileQuery(query: string) {
   return query
     .replace(/[’']/g, "'")
@@ -4032,6 +4149,225 @@ export const TOOLS: ToolDef[] = [
           summary: doc?.aiSummary ?? null,
           customer,
           project,
+        },
+      }
+    },
+  },
+  {
+    name: 'get_project_financial_summary',
+    description: 'Get the spreadsheet-like financial truth for a project/job: contract revenue, invoices, payments, material costs, labor costs, subcontractor costs, commissions, gross profit, margin, balance due, and candidate entries. Read-only. Use before answering job cost, invoice, commission, margin, balance, or profitability questions.',
+    schema: z.object({
+      projectId: z.string().max(200).optional(),
+      customerId: z.string().max(200).optional(),
+      includeCandidates: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }).refine(v => Boolean(v.projectId || v.customerId), 'projectId or customerId is required'),
+    allowedChannels: 'all',
+    execute: async (args, contractorId) => {
+      const target = await resolveJobTarget(contractorId, args)
+      if ('error' in target) return { success: false, data: null, error: target.error }
+      const [project, customer] = await Promise.all([
+        db.project.findFirst({
+          where: { id: target.projectId, contractorId },
+          select: { id: true, title: true, status: true, address: true, value: true, customerId: true },
+        }),
+        target.customerId
+          ? db.customer.findFirst({ where: { id: target.customerId, contractorId }, select: { id: true, name: true, phone: true, email: true, address: true } })
+          : null,
+      ])
+      if (!project) return { success: false, data: null, error: 'Project not found' }
+      const allowedStatuses = args.includeCandidates === false
+        ? ['approved', 'paid', 'collected']
+        : ['candidate', 'approved', 'paid', 'collected', 'estimated']
+      const entries = await db.projectFinancialEntry.findMany({
+        where: {
+          contractorId,
+          projectId: project.id,
+          status: { in: allowedStatuses },
+        },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        take: args.limit ?? 80,
+        select: {
+          id: true,
+          entryType: true,
+          direction: true,
+          category: true,
+          description: true,
+          vendorName: true,
+          sourceType: true,
+          sourceId: true,
+          quantity: true,
+          unit: true,
+          unitAmount: true,
+          amount: true,
+          status: true,
+          confidence: true,
+          documentId: true,
+          occurredAt: true,
+          createdAt: true,
+          notes: true,
+        },
+      })
+      const summary = summarizeFinancialEntries(entries)
+      const missingInputs: string[] = []
+      if (summary.approvedRevenue <= 0 && summary.candidateRevenue <= 0) missingInputs.push('approved contract amount / customer invoice')
+      if (summary.approvedCosts <= 0 && summary.candidateCosts <= 0) missingInputs.push('material/labor/subcontractor costs')
+      if (summary.approvedPayments <= 0) missingInputs.push('customer payments / collection status')
+
+      return {
+        success: true,
+        data: {
+          cardType: 'job_cost',
+          cardTemplateId: 'job-cost',
+          title: `Financial truth for ${project.title}`,
+          project: withProjectNumber(project),
+          customer: customer ? withCustomerNumber(customer) : null,
+          summary,
+          entries: entries.map(entry => ({
+            ...entry,
+            amount: money(entry.amount),
+            unitAmount: entry.unitAmount == null ? null : money(entry.unitAmount),
+          })),
+          missingInputs,
+          promptPills: [
+            { label: 'Add cost', prompt: `Add a job cost entry for ${project.title}. Ask me for vendor, category, amount, and source document if missing.` },
+            { label: 'Add invoice', prompt: `Create or record a customer invoice for ${project.title}. Use approved financial entries and ask for approval before saving.` },
+            { label: 'Commission', prompt: `Calculate commission for ${project.title} using collected revenue, approved job costs, and the saved commission rules if available.` },
+            { label: 'Explain margin', prompt: `Explain the gross profit and margin for ${project.title}, and list what financial inputs are still missing.` },
+          ],
+          note: 'Documents are evidence. ProjectFinancialEntry rows are the financial truth Jobrolo should use for invoices, job cost, profit, and commission.',
+        },
+      }
+    },
+  },
+  {
+    name: 'create_project_financial_entry',
+    description: 'Create one approved financial truth row for a project/job: contract amount, supplement, change order, customer invoice, payment, material cost, labor cost, subcontractor cost, commission, overhead, or adjustment. Requires approval. Never use raw document text alone as final truth; use this after user confirmation or after approval from a reviewed document/card.',
+    schema: z.object({
+      projectId: z.string().max(200).optional(),
+      customerId: z.string().max(200).optional(),
+      documentId: z.string().max(200).optional(),
+      entryType: z.enum(FINANCIAL_ENTRY_TYPES).or(z.string().max(80)).optional(),
+      direction: z.enum(FINANCIAL_DIRECTIONS).or(z.string().max(80)).optional(),
+      category: z.string().max(120).optional(),
+      description: z.string().min(1).max(500),
+      vendorName: z.string().max(200).optional(),
+      sourceType: z.string().max(80).optional(),
+      sourceId: z.string().max(200).optional(),
+      quantity: z.number().optional(),
+      unit: z.string().max(50).optional(),
+      unitAmount: z.number().optional(),
+      amount: z.number(),
+      status: z.enum(FINANCIAL_STATUSES).or(z.string().max(80)).optional(),
+      occurredAt: z.string().max(80).optional(),
+      notes: z.string().max(1200).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }).refine(v => Boolean(v.projectId || v.customerId), 'projectId or customerId is required'),
+    allowedChannels: ['main', 'management', 'sales', 'production', 'insurance'],
+    requiresApproval: true,
+    execute: async (args, contractorId, ctx) => {
+      const target = await resolveJobTarget(contractorId, args)
+      if ('error' in target) return { success: false, data: null, error: target.error }
+      const project = await db.project.findFirst({
+        where: { id: target.projectId, contractorId },
+        select: { id: true, title: true, customerId: true, address: true },
+      })
+      if (!project) return { success: false, data: null, error: 'Project not found' }
+      const customerId = target.customerId ?? project.customerId ?? undefined
+      let document: { id: string; originalName: string; projectId: string | null; customerId: string | null } | null = null
+      if (args.documentId) {
+        document = await db.document.findFirst({
+          where: { id: args.documentId, contractorId },
+          select: { id: true, originalName: true, projectId: true, customerId: true },
+        })
+        if (!document) return { success: false, data: null, error: 'Source document not found' }
+        if (document.projectId && document.projectId !== project.id) return { success: false, data: null, error: 'Source document belongs to a different project' }
+        if (document.customerId && customerId && document.customerId !== customerId) return { success: false, data: null, error: 'Source document belongs to a different customer' }
+      }
+
+      const entryType = normalizeFinancialEntryType(args.entryType)
+      const direction = normalizeFinancialDirection(entryType, args.direction)
+      const status = normalizeFinancialStatus(args.status ?? 'approved')
+      const occurredAt = args.occurredAt ? new Date(args.occurredAt) : null
+      if (occurredAt && Number.isNaN(occurredAt.getTime())) return { success: false, data: null, error: 'Invalid occurredAt date' }
+      const amount = money(args.amount)
+      if (!Number.isFinite(amount)) return { success: false, data: null, error: 'A valid amount is required' }
+
+      const entry = await db.projectFinancialEntry.create({
+        data: {
+          contractorId,
+          projectId: project.id,
+          customerId: customerId ?? null,
+          documentId: document?.id ?? null,
+          entryType,
+          direction,
+          category: args.category?.trim() || entryType,
+          description: args.description.trim(),
+          vendorName: args.vendorName?.trim() || null,
+          sourceType: args.sourceType?.trim() || (document ? 'document' : 'manual'),
+          sourceId: args.sourceId?.trim() || document?.id || null,
+          quantity: args.quantity ?? null,
+          unit: args.unit?.trim() || null,
+          unitAmount: args.unitAmount == null ? null : money(args.unitAmount),
+          amount,
+          status,
+          confidence: document ? 0.95 : 1,
+          approvedAt: ['approved', 'paid', 'collected'].includes(status) ? new Date() : null,
+          approvedById: ['approved', 'paid', 'collected'].includes(status) ? (ctx.userId ?? null) : null,
+          occurredAt,
+          notes: args.notes?.trim() || null,
+          metadataJson: args.metadata ? JSON.stringify(args.metadata) : null,
+        },
+      })
+
+      await createProjectTimelineEvent({
+        contractorId,
+        projectId: project.id,
+        customerId: customerId ?? null,
+        eventType: 'financial_entry_created',
+        title: `Financial entry saved: ${entry.description}`,
+        body: `${entry.direction} · ${entry.entryType} · $${entry.amount.toFixed(2)}${document ? ` · source: ${document.originalName}` : ''}`,
+        relatedType: 'financial_entry',
+        relatedId: entry.id,
+        source: 'ai',
+        actorUserId: ctx.userId ?? null,
+        metadata: {
+          entryType: entry.entryType,
+          direction: entry.direction,
+          category: entry.category,
+          status: entry.status,
+          amount: entry.amount,
+          documentId: document?.id ?? null,
+        },
+      })
+
+      const entries = await db.projectFinancialEntry.findMany({
+        where: { contractorId, projectId: project.id, status: { in: ['candidate', 'approved', 'paid', 'collected', 'estimated'] } },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        take: 80,
+        select: { id: true, entryType: true, direction: true, category: true, description: true, vendorName: true, amount: true, status: true, occurredAt: true, createdAt: true },
+      })
+
+      return {
+        success: true,
+        data: {
+          cardType: 'job_cost',
+          cardTemplateId: direction === 'commission' ? 'commission' : direction === 'payment' || entryType === 'customer_invoice' ? 'invoice' : 'job-cost',
+          created: true,
+          entry: {
+            id: entry.id,
+            entryType: entry.entryType,
+            direction: entry.direction,
+            category: entry.category,
+            description: entry.description,
+            vendorName: entry.vendorName,
+            amount: entry.amount,
+            status: entry.status,
+            documentId: entry.documentId,
+          },
+          project: withProjectNumber(project),
+          summary: summarizeFinancialEntries(entries),
+          message: `Saved ${entry.direction} entry "${entry.description}" for $${entry.amount.toFixed(2)}.`,
         },
       }
     },

@@ -20,6 +20,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Photos can belong to job evidence, roof reports, field observations, or company/user assets; classify before attaching.',
       'When the user asks to show photos, group by exterior, roof, damage, interior, documents, and other instead of dumping raw text.',
     ],
+    output: { cards: ['photo-evidence'] },
     outputFormat: 'Photo evidence card with grouped thumbnails, section filters, edit/delete prompt actions, and attach/report actions.',
   },
   {
@@ -37,6 +38,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Use explicit uploadPurpose first, then filename/mime hints, then recent chat context.',
       'If upload route is ambiguous, ask one clear question rather than attaching it to the active customer/project.',
     ],
+    output: { cards: ['document-file'] },
     failureHandling: ['Upload success means file saved; analysis/linking can still be pending.'],
     tests: ['price sheets route to company pricing', 'logos route to brand assets', 'unknown PDFs route to unassigned review'],
   },
@@ -55,6 +57,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'If extraction is pending, tell the user it is saved but still processing.',
       'If analysis fails, keep the file saved and surface the failure reason.',
     ],
+    output: { cards: ['document-file'] },
   },
   {
     id: 'document-type-routing',
@@ -72,6 +75,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Scopes, estimates, carrier docs, inspection reports, signed agreements, and invoices route to customer/project when context is known.',
       'Supplier invoices and delivery tickets route to project/job cost when a job is identified.',
     ],
+    output: { cards: ['document-file', 'price-list', 'supplier-invoice'] },
   },
   {
     id: 'save-scope',
@@ -90,6 +94,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Never pass a filename, URL, documentId, or placeholder as rawText.',
       'Resolve or create/select a project before claiming the scope is saved.',
     ],
+    output: { cards: ['scope-breakdown', 'document-file'] },
     failureHandling: ['If extracted text is missing or still processing, say the file is saved but scope analysis is not ready yet.'],
   },
   {
@@ -106,6 +111,7 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Reusable templates are company-level unless the user says this exact document belongs to a job.',
       'Ask before turning a customer-signed document into a template.',
     ],
+    output: { cards: ['template-library', 'document-file'] },
   },
   {
     id: 'file-attachment',
@@ -124,5 +130,6 @@ export const uploadsDocumentsSkills: JobroloSkill[] = [
       'Do require/resolve a projectId for job-level records like production photos, scopes, reports, and supplier invoices.',
       'Use real document/customer/project IDs from cards/tools, not labels.',
     ],
+    output: { cards: ['document-file', 'customer-file'] },
   },
 ]

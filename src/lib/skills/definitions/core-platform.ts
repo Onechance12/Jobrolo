@@ -66,6 +66,7 @@ export const corePlatformSkills: JobroloSkill[] = [
       'Never replay approvals using placeholder or guessed IDs.',
       'If a card cannot execute safely, it should insert an editable prompt.',
     ],
+    output: { cards: ['approval-action'] },
   },
   {
     id: 'approval',
@@ -83,6 +84,7 @@ export const corePlatformSkills: JobroloSkill[] = [
       'Approval replay must call the pending action tool with a real database ID.',
       'Do not ask for approval twice if a valid pending approval already exists; replay it.',
     ],
+    output: { cards: ['approval-action'] },
     failureHandling: ['If approval execution fails, say it failed and include the error/reason.'],
   },
   {
@@ -105,6 +107,7 @@ export const corePlatformSkills: JobroloSkill[] = [
       'Do not send SMS/email unless explicitly requested and contact information exists.',
       'External messages require recipient, visibility, and approval before sending.',
     ],
+    output: { cards: ['shared-chat', 'notification-outbox'] },
     outputFormat: 'Communication card with open chat, copy link, invite, draft/send options, and visibility labels.',
   },
   {
@@ -124,6 +127,7 @@ export const corePlatformSkills: JobroloSkill[] = [
       'Owners/admins can manage users; non-admin roles cannot delete company/project chats by default.',
       'If the role or scope is unclear, ask before creating access.',
     ],
+    output: { cards: ['permission-access'] },
   },
   {
     id: 'failure-handling',
@@ -140,5 +144,6 @@ export const corePlatformSkills: JobroloSkill[] = [
       'If no tool exists, name the missing workflow instead of pretending.',
       'If tool args are placeholders or filenames-as-content, block and reroute.',
     ],
+    output: { cards: ['operations-radar'] },
   },
 ]

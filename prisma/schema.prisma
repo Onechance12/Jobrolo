@@ -35,6 +35,7 @@ model Contractor {
   documents      Document[]
   priceSheets    PriceSheet[]
   materialItems  MaterialItem[]
+  financialEntries ProjectFinancialEntry[]
   workspaces     Workspace[]
   conversations  Conversation[]
   activities     ProjectActivity[]
@@ -106,6 +107,7 @@ model Customer {
   projects   Project[]
   estimates  Estimate[]
   documents  Document[]
+  financialEntries ProjectFinancialEntry[]
   followUps  FollowUp[]
   noteRecords Note[]
   workspace  Workspace?
@@ -132,6 +134,7 @@ model Project {
   estimates     Estimate[]
   documents     Document[]
   quotes        Quote[]
+  financialEntries ProjectFinancialEntry[]
   followUps     FollowUp[]
   workspace     Workspace?
   activities    ProjectActivity[]
@@ -313,9 +316,57 @@ model Document {
   workspace  Workspace? @relation(fields: [workspaceId], references: [id])
   uploadedBy User?      @relation("UploadedBy", fields: [uploadedById], references: [id])
   scopeAnalysis ScopeAnalysis[]
+  financialEntries ProjectFinancialEntry[]
   @@index([contractorId, createdAt])
   @@index([projectId])
   @@index([workspaceId])
+}
+
+// =============================================================================
+// PROJECT FINANCIAL TRUTH LAYER
+// =============================================================================
+// ProjectFinancialEntry is Jobrolo's spreadsheet-like source of truth for money.
+// Documents are evidence; these ledger rows are the approved/candidate facts that
+// estimates, invoices, commissions, margin, job-cost cards, reports, and future
+// supplier/accounting integrations should pull from.
+
+model ProjectFinancialEntry {
+  id             String   @id @default(cuid())
+  contractorId   String
+  projectId      String
+  customerId     String?
+  documentId     String?
+  entryType      String   // contract_amount, supplement, change_order, customer_invoice, payment, material_cost, labor_cost, subcontractor_cost, permit_cost, commission, overhead, adjustment
+  direction      String   @default("cost") // revenue, cost, payment, commission, adjustment
+  category       String   @default("other") // roofing, gutters, materials, labor, sales_commission, deductible, overhead, etc.
+  description    String
+  vendorName     String?
+  sourceType     String?  // document, scope_analysis, generated_document, signature_request, manual, integration
+  sourceId       String?
+  quantity       Float?
+  unit           String?
+  unitAmount     Float?
+  amount         Float
+  status         String   @default("candidate") // candidate, approved, rejected, voided, paid, collected, estimated
+  confidence     Float    @default(1.0)
+  approvedAt     DateTime?
+  approvedById   String?
+  occurredAt     DateTime?
+  notes          String?
+  metadataJson   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  contractor     Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  customer       Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  document       Document?  @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  @@index([contractorId, projectId])
+  @@index([contractorId, customerId])
+  @@index([contractorId, documentId])
+  @@index([contractorId, entryType])
+  @@index([contractorId, direction])
+  @@index([contractorId, status])
+  @@index([contractorId, occurredAt])
 }
 
 model PriceSheet {

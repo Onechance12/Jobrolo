@@ -49,8 +49,46 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('price-list', 0.95, 'User is asking about material/supplier price list workflow.'))
   }
 
+  if (/(job\s*cost|project financial|financial summary|margin|gross profit|profit|cogs|cost to build|what did we make)/.test(text)) {
+    pushUnique(selections, select('job-cost', 0.94, 'Project financial truth / job cost workflow intent.'))
+    pushUnique(selections, select('project-context', 0.84, 'Job cost needs project context.'))
+  }
+
+  if (/(customer invoice|unpaid invoice|balance due|payment request|record payment|accounts receivable|collect payment)/.test(text)) {
+    pushUnique(selections, select('invoice', 0.92, 'Customer invoice/payment workflow intent.'))
+    pushUnique(selections, select('job-cost', 0.82, 'Invoices/payments roll up into project financial truth.'))
+  }
+
+  if (/(supplier invoice|material invoice|delivery ticket|material receipt|supplier receipt)/.test(text)) {
+    pushUnique(selections, select('supplier-invoice', 0.92, 'Supplier invoice/material cost workflow intent.'))
+    pushUnique(selections, select('job-cost', 0.84, 'Supplier invoices affect project job cost.'))
+  }
+
+  if (/(labor cost|sub cost|subcontractor cost|crew cost|installer pay|sub invoice|labor invoice)/.test(text)) {
+    pushUnique(selections, select('labor-cost', 0.92, 'Labor/subcontractor cost workflow intent.'))
+    pushUnique(selections, select('job-cost', 0.84, 'Labor costs affect project job cost.'))
+  }
+
+  if (/(commission|sales rep payout|rep pay|sales split|pay the rep)/.test(text)) {
+    pushUnique(selections, select('commission', 0.92, 'Sales commission workflow intent.'))
+    pushUnique(selections, select('job-cost', 0.84, 'Commission affects project financial truth.'))
+  }
+
+  if (/(material order|order status|delivery status|material drop|backorder|substitution)/.test(text)) {
+    pushUnique(selections, select('material-ordering', 0.9, 'Material order/delivery workflow intent.'))
+    pushUnique(selections, select('supplier', 0.78, 'Supplier context may be needed.'))
+  }
+
   if (/(scope breakdown|save scope|xactimate|symbility|carrier estimate|estimate document)/.test(text)) {
     pushUnique(selections, select('save-scope', 0.88, 'Scope/estimate persistence or review request.'))
+  }
+
+  if (/(insurance claim|supplement|deductible|rcv|acv|depreciation|recoverable depreciation|mortgage check|adjuster estimate|carrier estimate)/.test(text)) {
+    pushUnique(selections, select('insurance-claim', 0.9, 'Insurance claim/supplement workflow intent.'))
+  }
+
+  if (/(template|agreement|contract template|warranty template|terms template|reusable document|company document library)/.test(text)) {
+    pushUnique(selections, select('template-intake', 0.88, 'Reusable company template/document library intent.'))
   }
 
   if (/(company profile|company info|business info|research my company|website|license|legal footer)/.test(text)) {
@@ -59,6 +97,10 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
 
   if (/(logo|profile photo|avatar|brand asset|brand color)/.test(text)) {
     pushUnique(selections, select('brand-assets', 0.9, 'Brand/profile asset routing request.'))
+  }
+
+  if (/(my profile|profile photo|avatar|user icon|account photo|my role)/.test(text)) {
+    pushUnique(selections, select('user-profile', 0.9, 'User profile/avatar routing request.'))
   }
 
   if (/(saved database records|customer file|client file|job packet|show.*(files|photos)|what clients|saved clients)/.test(text)) {
@@ -106,6 +148,11 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
 
   if (/(send text|sms|email|notify|invite|copy link|share link|customer update|crew message)/.test(text)) {
     pushUnique(selections, select('communication-routing', 0.84, 'External/internal communication routing intent.'))
+  }
+
+  if (/(homeowner portal|share with homeowner|share with adjuster|share with realtor|referral partner|external share|public link)/.test(text)) {
+    pushUnique(selections, select('homeowner', 0.82, 'External homeowner/customer visibility intent.'))
+    pushUnique(selections, select('communication-routing', 0.84, 'External share communication routing intent.'))
   }
 
   if (/(role|permission|access|visibility|who can see|owner|admin|sub access|crew access|homeowner access)/.test(text)) {

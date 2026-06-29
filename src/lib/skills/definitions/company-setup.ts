@@ -19,6 +19,7 @@ export const companySetupSkills: JobroloSkill[] = [
       'Suggest chat-first prompts for missing fields instead of sending users to a form first.',
       'Do not block normal navigation after account creation; setup is a guided chat, not a lock.',
     ],
+    output: { cards: ['company-profile'] },
     failureHandling: ['If setup data is missing, name the missing field and offer the next prompt/action.'],
   },
   {
@@ -40,6 +41,7 @@ export const companySetupSkills: JobroloSkill[] = [
       'Use get_contractor_profile for saved company facts.',
       'When research finds suggestions, ask before saving unless the user explicitly requested an update.',
     ],
+    output: { cards: ['company-profile'] },
   },
   {
     id: 'brand-assets',
@@ -60,5 +62,27 @@ export const companySetupSkills: JobroloSkill[] = [
       'Ask before applying a candidate logo/profile image unless uploadPurpose explicitly says company_logo or user_avatar.',
       'Never attach logos or profile photos to a customer/project by default.',
     ],
+    output: { cards: ['company-profile', 'user-profile', 'document-file'] },
+  },
+  {
+    id: 'user-profile',
+    name: 'User Profile',
+    category: 'company_setup',
+    status: 'active',
+    risk: 'medium',
+    priority: 87,
+    purpose: 'Manage the logged-in user identity, avatar/profile photo, role hints, personal setup, and user-specific shortcut context without touching company/customer records.',
+    whenToUse: ['My profile', 'Profile photo', 'Avatar', 'User icon', 'My role', 'Account photo'],
+    whenNotToUse: ['Company logo', 'Customer photo evidence', 'Jobsite damage photos'],
+    triggers: { phrases: ['my profile', 'profile photo', 'avatar', 'user icon', 'my role'], uploadPurposes: ['user_avatar'] },
+    allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'supplement', 'office', 'crew', 'system'],
+    approvalRequiredFor: ['role or permission changes'],
+    decisionRules: [
+      'Profile photos belong to the user profile unless the user clearly says company logo or job photo.',
+      'User role/persona can tune shortcuts and guidance but must not bypass role permissions.',
+      'If a profile image is uploaded after a profile-photo discussion, ask to apply it instead of attaching it to the active customer/project.',
+      'If no profile-update tool is available in the current runtime, explain the missing workflow instead of claiming the profile was updated.',
+    ],
+    output: { cards: ['user-profile'] },
   },
 ]

@@ -16,5 +16,6 @@ export const homeownerSkills: JobroloSkill[] = [
       'Homeowners only see their own shared customer/project data.',
       'Never expose internal margin, private notes, supplier pricing strategy, or unrelated customers/jobs.',
     ],
+    output: { cards: ['external-share', 'shared-chat', 'roof-report'] },
   },
 ]

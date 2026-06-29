@@ -3,6 +3,7 @@ import type { JobroloSkill, SkillRoutingContext, SkillSelection } from './types'
 import { renderBrainInstructions } from '../brain'
 import { buildActiveJobroloContext, renderActiveJobroloContext } from '../jobrolo-context'
 import { renderJobroloNextPaths, suggestJobroloNextPaths } from '../next-paths'
+import { getSelectedSkillCardContracts } from './card-contracts'
 
 // Runtime note: `allowedTools` and `forbiddenTools` are compact prompt guidance today.
 // Deterministic guards still live in the upload classifier, agent loop, and tools.
@@ -55,6 +56,16 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
     if (skill.allowedTools?.length) lines.push(`  Prefer tools: ${skill.allowedTools.join(', ')}`)
     if (skill.forbiddenTools?.length) lines.push(`  Do not use: ${skill.forbiddenTools.join(', ')}`)
     if (skill.approvalRequiredFor?.length) lines.push(`  Approval required for: ${skill.approvalRequiredFor.join(', ')}`)
+    if (skill.output?.cards?.length) lines.push(`  Preferred card surfaces: ${skill.output.cards.join(', ')}`)
+  }
+
+  const cardContracts = getSelectedSkillCardContracts(selections)
+  if (cardContracts.length) {
+    const contractSummary = cardContracts
+      .slice(0, 6)
+      .map(contract => `${contract.skillId}->${contract.template.id} (${contract.template.glanceLabel})`)
+      .join('; ')
+    lines.push(`Selected skill card contracts: ${contractSummary}. Prefer returning card/cardType context when tools provide structured payloads; otherwise answer normally with concise prompt pills.`)
   }
 
   if (context?.uploadClassification) {

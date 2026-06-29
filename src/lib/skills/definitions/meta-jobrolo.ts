@@ -18,6 +18,7 @@ export const metaJobroloSkills: JobroloSkill[] = [
       'Cody mode is read-only analysis. It can collect context, summarize evidence, and prepare a Codex packet, but it cannot mutate customer, project, file, or company records.',
       'When a Cody block is active, keep summaries concise and focus on observed route, recent chat context, likely area, severity, and exact reproduction clues.',
     ],
+    output: { cards: ['cody-review'] },
     outputFormat: 'Cody review packet with observed issue, severity, evidence, likely route/tool area, and Codex-ready next step.',
   },
   {
@@ -35,6 +36,7 @@ export const metaJobroloSkills: JobroloSkill[] = [
       'Do not claim a root cause without logs, route, tool, screenshot, or reproduction evidence.',
       'Include safety notes when the issue touches auth, storage, private files, approvals, external messages, or tenant boundaries.',
     ],
+    output: { cards: ['cody-review'] },
     outputFormat: 'Codex packet with title, priority, area, evidence, expected/actual behavior, likely files, safety notes, and test checklist.',
   },
 ]

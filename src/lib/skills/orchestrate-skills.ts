@@ -22,7 +22,12 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'supplier-invoice': ['upload-classifier', 'project-context', 'approval'],
   'save-scope': ['document-type-routing', 'project-context', 'approval'],
   'upload-classifier': ['document-type-routing', 'project-context', 'approval'],
-  'production-coordinator': ['project-status', 'supplier-order-status', 'approval'],
+  'production-coordinator': ['project-status', 'material-ordering', 'job-cost', 'approval'],
+  'job-cost': ['project-context', 'supplier-invoice', 'approval'],
+  'invoice': ['project-context', 'job-cost', 'approval'],
+  'labor-cost': ['project-context', 'job-cost', 'approval'],
+  'commission': ['project-context', 'job-cost', 'approval'],
+  'material-ordering': ['supplier', 'project-context', 'approval'],
   'lead-intake': ['entity-resolver', 'appointment-scheduling', 'activity-timeline'],
   'appointment-scheduling': ['entity-resolver', 'project-context', 'communication-routing'],
   'photo-evidence': ['file-attachment', 'project-context', 'activity-timeline'],
@@ -46,7 +51,11 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   'project-status': 'Check saved project readiness before claiming a job is ready to build.',
   'role-permissions': 'Protect visibility and role boundaries before invites, sharing, or external access.',
   supplier: 'Keep supplier documents separate from customer/project files and company pricebook records.',
-  'supplier-order-status': 'Check material readiness before production-ready claims.',
+  'material-ordering': 'Check material order, delivery, and supplier readiness before production-ready claims.',
+  'job-cost': 'Use the project financial truth sheet for revenue, costs, payments, commissions, and margin.',
+  invoice: 'Separate customer invoices/payments from supplier invoices/job costs.',
+  'labor-cost': 'Treat labor/sub cost as internal job-cost truth with source evidence.',
+  commission: 'Calculate commission from saved rules and approved financial entries only.',
   'upload-classifier': 'Classify the upload before deciding where it belongs.',
   'brain-stem': 'Use situational brain signals for safer routing and tone without overriding saved database truth.',
 }
@@ -78,6 +87,11 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (upload) return 'upload-classifier'
 
   if (/(ready to build|build ready|ready for production|production ready)/.test(text)) return 'production-coordinator'
+  if (/(job\s*cost|project financial|margin|gross profit|profit|cost to build|what did we make)/.test(text)) return 'job-cost'
+  if (/(customer invoice|unpaid invoice|balance due|payment request|record payment|accounts receivable|collect payment)/.test(text)) return 'invoice'
+  if (/(labor cost|subcontractor cost|crew cost|installer pay|labor invoice|sub invoice)/.test(text)) return 'labor-cost'
+  if (/(commission|sales rep payout|rep pay|sales split)/.test(text)) return 'commission'
+  if (/(material order|order status|delivery status|material drop|backorder|substitution)/.test(text)) return 'material-ordering'
   if (/(price\s*(sheet|list)|material prices|supplier pricing|review rows|pending import)/.test(text)) return 'price-list'
 
   return selectedIds.find(id => !['command-center', 'intent-routing', 'failure-handling'].includes(id)) ?? selectedIds[0] ?? 'command-center'
