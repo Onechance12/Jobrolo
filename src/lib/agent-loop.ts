@@ -1480,7 +1480,15 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
       return await chatComplete(messages, { ...opts, purpose: 'tool_reasoning', contractorId: opts.contractorId, userId: opts.userId })
     } catch (err) {
       lastErr = err
-      const isRateLimit = err instanceof Error && /429|rate.?limit|too many requests/i.test(err.message)
+      const message = err instanceof Error ? err.message : String(err)
+      const isQuotaOrBilling = /insufficient_quota|quota|billing|budget/i.test(message)
+      if (isQuotaOrBilling) {
+        // Quota/billing failures are hard stops, not temporary rate limits.
+        // Retrying them just burns time, creates duplicate failure logs, and
+        // leaves the chat looking like it is still working.
+        throw err
+      }
+      const isRateLimit = /429|rate.?limit|too many requests/i.test(message)
       if (isRateLimit) {
         if (attempt >= MAX_RETRIES) throw err
         // Short exponential backoff for rate limits: 3s, then 6s. After that,
@@ -1678,7 +1686,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         const iteration: AgentIteration = { iteration: i, text: finalText, toolCalls: [], final: true }
         opts.onIteration?.(iteration)
         iterations.push(iteration)
-        console.warn(`[agent-loop] stopped after provider rate limit contractorId=${opts.contractorId}`)
+        const message = err instanceof Error ? err.message : String(err)
+        const reason = /insufficient_quota|quota|billing|budget/i.test(message) ? 'quota exhausted' : 'rate limit'
+        console.warn(`[agent-loop] stopped after provider ${reason} contractorId=${opts.contractorId}`)
         return {
           final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
           iterations,
