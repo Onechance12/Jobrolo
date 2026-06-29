@@ -106,6 +106,10 @@ export function assertSkillRegistryContracts() {
   const quoteContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Create a cash quote for this project from the saved scope.' })))
   assert(quoteContracts.some(contract => contract.template.id === 'cash-quote'), 'Cash quote workflow should carry the cash-quote card contract')
   assert(quoteContracts.some(contract => contract.template.id === 'estimate-proposal'), 'Cash quote workflow should carry the estimate-proposal card contract')
+  const quoteSkillIds = skillIdsFor('Create a cash quote for this project from the saved scope.')
+  assert(quoteSkillIds.includes('price-list'), `Cash quote should select price-list support, got ${quoteSkillIds.join(', ')}`)
+  const quotePlan = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a cash quote for this project from the saved scope.' }))
+  assert(quotePlan.supportingSkills.includes('job-cost'), `Cash quote orchestrator should consult job-cost, got ${quotePlan.supportingSkills.join(', ')}`)
 
   const jobCostContracts = getSelectedSkillCardContracts(selectSkills(buildSkillRoutingContext({ latestText: 'Show the job cost, gross profit, and margin for this project.' })))
   assert(jobCostContracts.some(contract => contract.template.id === 'job-cost'), 'Job cost workflow should carry the job-cost card contract')
@@ -136,6 +140,9 @@ export function assertSkillRegistryContracts() {
   assert(productionPlan.supportingSkills.includes('project-status'), 'Ready-to-build should consult project-status')
   assert(productionPlan.supportingSkills.includes('material-ordering'), 'Ready-to-build should consult material-ordering')
   assert(productionPlan.supportingSkills.includes('job-cost'), 'Ready-to-build should consult job-cost')
+  assert(productionPlan.recommendedAction.includes('financial/job-cost completeness'), 'Ready-to-build orchestration should mention financial/job-cost completeness')
+  const jobCostPlan = orchestrateSkills({ latestText: 'Show job cost, gross profit, margin, and balance due.', normalizedText: 'show job cost, gross profit, margin, and balance due.' })
+  assert(jobCostPlan.recommendedAction.includes('ProjectFinancialEntry'), 'Job-cost orchestration should name ProjectFinancialEntry as the money truth')
   const materialOrdering = getSkillById('material-ordering')
   assert(materialOrdering?.status === 'experimental', 'Material ordering should stay experimental until live supplier APIs exist')
 

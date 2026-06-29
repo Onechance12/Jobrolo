@@ -66,6 +66,10 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
       .map(contract => `${contract.skillId}->${contract.template.id} (${contract.template.glanceLabel})`)
       .join('; ')
     lines.push(`Selected skill card contracts: ${contractSummary}. Prefer returning card/cardType context when tools provide structured payloads; otherwise answer normally with concise prompt pills.`)
+    const hasFinancialContract = cardContracts.some(contract => contract.template.family === 'finance' || ['job-cost', 'invoice', 'labor-cost', 'commission', 'estimate-proposal', 'supplier-invoice', 'material-order'].includes(contract.template.id))
+    if (hasFinancialContract) {
+      lines.push('Financial truth rule: for money, margin, invoice, payment, labor, material, commission, and job-cost answers, use ProjectFinancialEntry/database rows as truth. Treat documents, OCR, photos, scopes, and chat as evidence or candidates until approved into financial entries. Clearly label candidate/estimated numbers and list missing inputs before presenting final profit or margin.')
+    }
   }
 
   if (context?.uploadClassification) {

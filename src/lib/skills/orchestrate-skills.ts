@@ -35,6 +35,7 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'communication-routing': ['role-permissions', 'approval'],
   'role-permissions': ['approval'],
   'integration-provider': ['failure-handling'],
+  'bid-quote': ['entity-resolver', 'price-list', 'job-cost'],
 }
 
 const SUPPORT_FINDINGS: Record<string, string> = {
@@ -58,6 +59,17 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   commission: 'Calculate commission from saved rules and approved financial entries only.',
   'upload-classifier': 'Classify the upload before deciding where it belongs.',
   'brain-stem': 'Use situational brain signals for safer routing and tone without overriding saved database truth.',
+}
+
+const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
+  'bid-quote': 'Resolve customer/project first, then draft the bid from saved scope, price-list context, labor assumptions, and margin gaps. Do not start inspection/report workflows unless the user changes lanes.',
+  commission: 'Read the project financial truth sheet first. Commission is internal-only and should stay estimated until the compensation rule, revenue basis, collections, and job-cost inputs are known.',
+  invoice: 'Use the project financial truth sheet before answering. Separate customer invoices/payments from supplier invoices/job costs, and require approval before creating or sending customer-facing payment records.',
+  'job-cost': 'Use get_project_financial_summary first. Treat ProjectFinancialEntry rows as the money truth and documents as evidence; show missing contract, cost, payment, or commission inputs before calling margin final.',
+  'labor-cost': 'Resolve the project and source evidence, then treat labor/subcontractor amounts as internal job-cost truth. Separate quoted, approved, invoiced, and paid states.',
+  'material-ordering': 'Use saved supplier/order/delivery evidence first. If supplier APIs are not configured, say so and offer a manual check instead of pretending live status.',
+  'production-coordinator': 'Check project status, material readiness, financial/job-cost completeness, and approvals before saying a job is ready to build.',
+  'supplier-invoice': 'Classify supplier invoices/delivery tickets as project-level cost or delivery evidence. Do not import them into company pricing unless the user explicitly confirms reusable price-list intent.',
 }
 
 function unique(values: Array<string | undefined | null>) {
@@ -108,7 +120,10 @@ function supportFor(primarySkill: string, selectedIds: string[], context: SkillR
   const configured = WORKFLOW_SUPPORTS[primarySkill] ?? []
   const intentSupports = context.requestIntent?.supportingSkills ?? []
   const selected = selectedIds.filter(id => id !== primarySkill && !['command-center', 'intent-routing', 'failure-handling'].includes(id))
-  return unique([...intentSupports, ...configured, ...selected]).filter(id => Boolean(getSkillById(id)) && id !== primarySkill)
+  const ordered = primarySkill === 'bid-quote'
+    ? [...configured, ...intentSupports, ...selected]
+    : [...intentSupports, ...configured, ...selected]
+  return unique(ordered).filter(id => Boolean(getSkillById(id)) && id !== primarySkill)
 }
 
 function buildConsult(skillId: string, role: 'primary' | 'supporting', confidence: number): SkillConsult {
@@ -132,8 +147,11 @@ function buildConsult(skillId: string, role: 'primary' | 'supporting', confidenc
 function summarize(primarySkill: string, supportingSkills: string[], context: SkillRoutingContext) {
   const upload = context.uploadClassification
   if (upload) return `${upload.documentType} routed as ${upload.storageScope}. Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
-  if (context.requestIntent?.id !== 'general') return `${context.requestIntent?.summary} Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
-  if (primarySkill === 'production-coordinator') return `Production readiness check. Primary skill: production-coordinator. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
+  const primaryRecommendation = PRIMARY_RECOMMENDATIONS[primarySkill]
+  if (context.requestIntent?.id !== 'general') {
+    return `${context.requestIntent?.summary} ${primaryRecommendation ?? `Primary skill: ${primarySkill}.`} Supporting review: ${supportingSkills.join(', ') || 'none'}.`
+  }
+  if (primaryRecommendation) return `${primaryRecommendation} Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   return `Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
 }
 

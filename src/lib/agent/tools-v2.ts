@@ -412,20 +412,24 @@ function summarizeFinancialEntries(entries: Array<{
   const approvedRevenue = sum(approved, entry => entry.direction === 'revenue')
   const approvedCosts = sum(approved, entry => entry.direction === 'cost')
   const approvedCommission = sum(approved, entry => entry.direction === 'commission')
+  const approvedAdjustments = sum(approved, entry => entry.direction === 'adjustment')
   const approvedPayments = sum(approved, entry => entry.direction === 'payment')
   const candidateRevenue = sum(candidate, entry => entry.direction === 'revenue')
   const candidateCosts = sum(candidate, entry => entry.direction === 'cost' || entry.direction === 'commission')
-  const grossProfit = money(approvedRevenue - approvedCosts - approvedCommission)
-  const marginPercent = approvedRevenue > 0 ? money((grossProfit / approvedRevenue) * 100) : null
-  const balanceDue = money(approvedRevenue - approvedPayments)
-  const buckets = new Map<string, { category: string; revenue: number; cost: number; commission: number; payment: number; count: number }>()
+  const candidateAdjustments = sum(candidate, entry => entry.direction === 'adjustment')
+  const adjustedRevenue = money(approvedRevenue + approvedAdjustments)
+  const grossProfit = money(adjustedRevenue - approvedCosts - approvedCommission)
+  const marginPercent = adjustedRevenue > 0 ? money((grossProfit / adjustedRevenue) * 100) : null
+  const balanceDue = money(adjustedRevenue - approvedPayments)
+  const buckets = new Map<string, { category: string; revenue: number; cost: number; commission: number; payment: number; adjustment: number; count: number }>()
 
   for (const entry of entries) {
     const key = entry.category || entry.entryType || 'other'
-    const bucket = buckets.get(key) ?? { category: key, revenue: 0, cost: 0, commission: 0, payment: 0, count: 0 }
+    const bucket = buckets.get(key) ?? { category: key, revenue: 0, cost: 0, commission: 0, payment: 0, adjustment: 0, count: 0 }
     if (entry.direction === 'revenue') bucket.revenue = money(bucket.revenue + entry.amount)
     else if (entry.direction === 'payment') bucket.payment = money(bucket.payment + entry.amount)
     else if (entry.direction === 'commission') bucket.commission = money(bucket.commission + entry.amount)
+    else if (entry.direction === 'adjustment') bucket.adjustment = money(bucket.adjustment + entry.amount)
     else bucket.cost = money(bucket.cost + entry.amount)
     bucket.count += 1
     buckets.set(key, bucket)
@@ -433,6 +437,8 @@ function summarizeFinancialEntries(entries: Array<{
 
   return {
     approvedRevenue,
+    approvedAdjustments,
+    adjustedRevenue,
     approvedCosts,
     approvedCommission,
     approvedPayments,
@@ -441,6 +447,7 @@ function summarizeFinancialEntries(entries: Array<{
     balanceDue,
     candidateRevenue,
     candidateCosts,
+    candidateAdjustments,
     entryCount: entries.length,
     candidateCount: candidate.length,
     approvedCount: approved.length,

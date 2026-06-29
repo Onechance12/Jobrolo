@@ -128,6 +128,8 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
   if (/(cash\s+quote|cash\s+bid|\bbid\b|proposal|create quote|create a quote)/.test(text)) {
     pushUnique(selections, select('bid-quote', 0.94, 'Bid/quote/proposal workflow intent.'))
     pushUnique(selections, select('entity-resolver', 0.88, 'Bid/quote needs customer/project context.'))
+    pushUnique(selections, select('price-list', 0.86, 'Bid/quote may need company material pricing context.'))
+    pushUnique(selections, select('job-cost', 0.86, 'Bid/quote needs margin and cost-truth awareness.'))
   }
 
   if (/(crew chat|sub chat|subcontractor|roofer|gutter crew|window crew)/.test(text)) {
