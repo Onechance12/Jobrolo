@@ -42,6 +42,38 @@ export interface VisionOptions {
   maxTokens?: number
 }
 
+function compactProviderErrorBody(body: string) {
+  if (!body) return { preview: '', errorType: null as string | null, errorCode: null as string | null, errorMessage: null as string | null }
+  try {
+    const parsed = JSON.parse(body)
+    const error = parsed?.error ?? parsed
+    const errorType = typeof error?.type === 'string' ? error.type : null
+    const errorCode = typeof error?.code === 'string' ? error.code : null
+    const errorMessage = typeof error?.message === 'string' ? error.message : null
+    return {
+      preview: JSON.stringify({ error: { type: errorType, code: errorCode, message: errorMessage } }).slice(0, 1000),
+      errorType,
+      errorCode,
+      errorMessage,
+    }
+  } catch {
+    return {
+      preview: body.replace(/\s+/g, ' ').slice(0, 1000),
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+    }
+  }
+}
+
+function providerRequestId(headers: Headers) {
+  return headers.get('x-request-id') || headers.get('openai-request-id') || headers.get('x-openai-request-id') || null
+}
+
+function providerRetryAfter(headers: Headers) {
+  return headers.get('retry-after') || headers.get('retry-after-ms') || null
+}
+
 async function imageInputFromLocalReference(imageRef: string, contractorId?: string | null): Promise<string | null> {
   if (!imageRef.startsWith('/')) return null
 
@@ -170,11 +202,30 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
       model,
       status: res.status,
       ok: res.ok,
+      requestId: providerRequestId(res.headers),
+      retryAfter: providerRetryAfter(res.headers),
     })
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
-      const error = `LLM API error ${res.status}: ${errText.slice(0, 200)}`
+      const compactError = compactProviderErrorBody(errText)
+      const requestId = providerRequestId(res.headers)
+      const retryAfter = providerRetryAfter(res.headers)
+      console.warn('[ai] openai-compatible error', {
+        provider: 'openai-compatible',
+        model,
+        status: res.status,
+        requestId,
+        retryAfter,
+        errorType: compactError.errorType,
+        errorCode: compactError.errorCode,
+        preview: compactError.preview,
+      })
+      const reason = compactError.errorCode || compactError.errorType || 'provider_error'
+      const message = compactError.errorMessage ? `: ${compactError.errorMessage}` : ''
+      const retryHint = retryAfter ? ` retryAfter=${retryAfter}` : ''
+      const requestHint = requestId ? ` requestId=${requestId}` : ''
+      const error = `LLM API error ${res.status} ${reason}${message}${retryHint}${requestHint}`
       await logAIUsage({
         contractorId: opts.contractorId,
         userId: opts.userId,

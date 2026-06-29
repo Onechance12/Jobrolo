@@ -1496,10 +1496,16 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
 function rateLimitFinalText(err: unknown, completedToolCalls: number) {
   const message = err instanceof Error ? err.message : String(err)
   if (/429|rate.?limit|too many requests/i.test(message)) {
+    const isQuotaOrBilling = /insufficient_quota|quota|billing|budget/i.test(message)
+    const retryAfter = message.match(/retryAfter=([^\s]+)/i)?.[1]
+    const limitReason = isQuotaOrBilling
+      ? 'the OpenAI/API quota, billing, or project budget is blocking requests'
+      : 'the OpenAI/API rate limit is temporarily blocking requests'
+    const retryHint = retryAfter ? ` The provider suggested retrying after ${retryAfter}.` : ''
     if (completedToolCalls > 0) {
-      return 'Jobrolo hit the AI provider rate limit before it could finish the final answer. Some earlier tool steps may have completed, so check the latest card/activity and try again in a moment.'
+      return `Jobrolo hit the AI provider limit before it could finish the final answer — ${limitReason}. Some earlier tool steps may have completed, so check the latest card/activity and try again in a moment.${retryHint}`
     }
-    return 'Jobrolo hit the AI provider rate limit, so I did not finish that request or update any records. Please try again in a moment. If this keeps happening, the OpenAI/API quota or rate limit needs to be increased.'
+    return `Jobrolo hit the AI provider limit before it could reason through the request — ${limitReason}. I did not finish that request or update any records.${retryHint}`
   }
   return null
 }
