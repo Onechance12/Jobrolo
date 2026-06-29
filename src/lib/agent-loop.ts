@@ -52,7 +52,7 @@ export interface AgentLoopResult {
   totalToolCalls: number
 }
 
-const MAX_RETRIES = 4
+const MAX_RETRIES = 2
 const TOOL_NAMES = new Set(getToolDefinitions().map(t => t.name))
 const EXECUTABLE_ACTION_TYPES = new Set(['cross_post', 'memory', 'task', 'task_update', 'note'])
 
@@ -1476,7 +1476,9 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
       lastErr = err
       const isRateLimit = err instanceof Error && /429|rate.?limit|too many requests/i.test(err.message)
       if (isRateLimit) {
-        // Exponential backoff for rate limits: 3s, 6s, 12s, 24s
+        if (attempt >= MAX_RETRIES) throw err
+        // Short exponential backoff for rate limits: 3s, then 6s. After that,
+        // return an honest final message so the UI does not look frozen.
         const backoff = Math.min(30000, 3000 * Math.pow(2, attempt))
         console.warn(`[agent-loop] rate limited, attempt ${attempt + 1}/${MAX_RETRIES + 1}, backing off ${backoff}ms`)
         await new Promise(r => setTimeout(r, backoff))
@@ -1489,6 +1491,17 @@ async function chatWithRetry(messages: ChatMessage[], opts: { temperature?: numb
     }
   }
   throw lastErr
+}
+
+function rateLimitFinalText(err: unknown, completedToolCalls: number) {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/429|rate.?limit|too many requests/i.test(message)) {
+    if (completedToolCalls > 0) {
+      return 'Jobrolo hit the AI provider rate limit before it could finish the final answer. Some earlier tool steps may have completed, so check the latest card/activity and try again in a moment.'
+    }
+    return 'Jobrolo hit the AI provider rate limit, so I did not finish that request or update any records. Please try again in a moment. If this keeps happening, the OpenAI/API quota or rate limit needs to be increased.'
+  }
+  return null
 }
 
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
@@ -1605,7 +1618,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         totalToolCalls,
       }
     }
-    const raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
+    let raw: string
+    try {
+      raw = await chatWithRetry(messages, { temperature: 0.3, maxTokens: 1500, contractorId: opts.contractorId, userId: opts.userId })
+    } catch (err) {
+      const finalText = rateLimitFinalText(err, totalToolCalls)
+      if (finalText) {
+        const iteration: AgentIteration = { iteration: i, text: finalText, toolCalls: [], final: true }
+        opts.onIteration?.(iteration)
+        iterations.push(iteration)
+        console.warn(`[agent-loop] stopped after provider rate limit contractorId=${opts.contractorId}`)
+        return {
+          final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+          iterations,
+          totalToolCalls,
+        }
+      }
+      throw err
+    }
     const parsed = parseAIResponse(raw)
     if (codyBlockAtStart.active && !codyBlockAtStart.closing && looksLikeCodyInventedRuntimeAccess(parsed.text)) {
       lastBlockedReason = 'Cody mode response claimed live data/tool access.'

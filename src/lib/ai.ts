@@ -145,6 +145,7 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
   })
 
   let data: any = null
+  let failureLogged = false
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -186,12 +187,13 @@ async function openaiCompatibleChatComplete(messages: ChatMessage[], opts: ChatO
         success: false,
         error,
       })
+      failureLogged = true
       throw new Error(error)
     }
 
     data = await res.json()
   } catch (err) {
-    if (!data) {
+    if (!data && !failureLogged) {
       await logAIUsage({
         contractorId: opts.contractorId,
         userId: opts.userId,
