@@ -753,6 +753,9 @@ function ScopeBreakdownCard({ data }: { data: any }) {
   return (
     <JobroloCard
       tone="emerald"
+      templateId="scope-breakdown"
+      family="scope"
+      speakableSummary="Saved scope breakdown with financial totals, trade summary, line items, and editable next-step prompts."
       title="Scope breakdown"
       subtitle={title}
       badge={`${lineItems.length} items`}
@@ -1035,6 +1038,9 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
   return (
     <JobroloCard
       tone="blue"
+      templateId="company-profile"
+      family="company"
+      speakableSummary="Saved company profile with brand, contact, document readiness, and setup prompts."
       title={name}
       subtitle="Company profile for estimates, invoices, reports, contracts, and signatures"
       badge={data?.status === 'updated' ? 'updated' : 'saved'}

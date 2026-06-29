@@ -78,6 +78,7 @@ export type JobroloPromptPill = {
   label: string
   prompt: string
   tone?: JobroloCardTone
+  description?: string
   disabled?: boolean
 }
 
@@ -93,6 +94,9 @@ export function JobroloCard({
   badge,
   icon,
   hero,
+  templateId,
+  family,
+  speakableSummary,
   children,
   footer,
   className,
@@ -103,13 +107,23 @@ export function JobroloCard({
   badge?: ReactNode
   icon?: ReactNode
   hero?: ReactNode
+  templateId?: string
+  family?: string
+  speakableSummary?: string
   children: ReactNode
   footer?: ReactNode
   className?: string
 }) {
   const styles = toneStyles[tone]
+  const label = typeof title === 'string' ? title : speakableSummary
   return (
-    <Card className={cn('mt-2 w-full overflow-hidden shadow-sm sm:max-w-xl', styles.card, className)}>
+    <Card
+      aria-label={label}
+      data-jobrolo-card={templateId || family || 'card'}
+      data-jobrolo-card-family={family}
+      data-jobrolo-speakable={speakableSummary}
+      className={cn('mt-2 w-full overflow-hidden shadow-sm sm:max-w-xl', styles.card, className)}
+    >
       <CardHeader className={cn('border-b p-3 sm:p-4', styles.header)}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -193,9 +207,13 @@ export function JobroloPromptPills({ pills, tone = 'blue', className }: { pills:
             key={`${pill.label}-${pill.prompt}`}
             type="button"
             disabled={pill.disabled}
+            title={pill.description || pill.prompt}
+            aria-label={`${pill.label}: ${pill.description || pill.prompt}`}
+            data-jobrolo-prompt-pill={pill.label}
+            data-jobrolo-prompt={pill.prompt}
             onClick={() => insertJobroloCardPrompt(pill.prompt)}
             className={cn(
-              'rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-[0_0_18px_-12px_currentColor] transition hover:shadow-[0_0_24px_-10px_currentColor] disabled:pointer-events-none disabled:opacity-50',
+              'rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-[0_0_18px_-12px_currentColor] transition hover:shadow-[0_0_24px_-10px_currentColor] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
               toneStyles[pillTone].pill,
             )}
           >
@@ -213,7 +231,15 @@ export function JobroloCardFooterActions({ children }: { children: ReactNode }) 
 
 export function JobroloPromptButton({ label, prompt, tone = 'blue', variant = 'outline' }: { label: ReactNode; prompt: string; tone?: JobroloCardTone; variant?: 'default' | 'outline' | 'secondary' | 'ghost' }) {
   return (
-    <Button size="sm" variant={variant} className={cn('rounded-full', variant === 'outline' && toneStyles[tone].pill)} onClick={() => insertJobroloCardPrompt(prompt)}>
+    <Button
+      size="sm"
+      variant={variant}
+      title={prompt}
+      aria-label={typeof label === 'string' ? `${label}: ${prompt}` : prompt}
+      data-jobrolo-prompt={prompt}
+      className={cn('rounded-full', variant === 'outline' && toneStyles[tone].pill)}
+      onClick={() => insertJobroloCardPrompt(prompt)}
+    >
       {label}
     </Button>
   )
