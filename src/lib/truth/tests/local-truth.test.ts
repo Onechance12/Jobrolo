@@ -78,6 +78,60 @@ export function assertLocalTruthContracts() {
   assert(priceText.includes('ABC Supply'), 'Price sheet formatter should include supplier when present')
   assert(priceText.includes('$123.45'), 'Price sheet formatter should include row prices')
 
+  const customerFileText = formatLocalTruthFinalText({ name: 'get_customer_file', args: { query: 'Timothy Disen' } }, {
+    success: true,
+    data: {
+      customer: { name: 'Timothy Disen', customerNumber: 'C-VHUHGG', phone: '(214) 263-6363', address: '4524 Lakecrest Dr' },
+      projects: [{ title: 'Job #783289 — Roof Repair Project', customerProjectNumber: 'C-VHUHGG-1', status: 'initial', address: '4524 Lakecrest Dr' }],
+      photos: [{ id: 'photo_1' }],
+      documents: [{ id: 'doc_1' }, { id: 'doc_2' }],
+      notes: [{ id: 'note_1' }],
+      tasks: [],
+      counts: { documents: 2, photos: 1, notes: 1, tasks: 0 },
+      companyPricingCandidates: [{ id: 'price_1' }],
+      recentUnlinkedDocuments: [{ id: 'unlinked_1' }],
+    },
+  })
+  assert(customerFileText.includes('Timothy Disen (C-VHUHGG)'), 'Customer file formatter should include customer number')
+  assert(customerFileText.includes('C-VHUHGG-1'), 'Customer file formatter should include customer-project number')
+  assert(customerFileText.includes('Company pricing candidates: 1'), 'Customer file formatter should flag company pricing candidates')
+  assert(customerFileText.includes('Recent unlinked uploads: 1'), 'Customer file formatter should surface unlinked upload count')
+
+  const projectPacketText = formatLocalTruthFinalText({ name: 'get_project_document_packet', args: { projectId: 'project_123' } }, {
+    success: true,
+    data: {
+      project: {
+        title: 'Job #783289 — Roof Repair Project',
+        projectNumber: 'J-783289',
+        customerProjectNumber: 'C-VHUHGG-1',
+        status: 'initial',
+        address: '4524 Lakecrest Dr',
+        customer: { name: 'Timothy Disen', customerNumber: 'C-VHUHGG' },
+      },
+      documentGroups: {
+        jobDocuments: [{ originalName: 'scope.pdf', fileType: 'estimate', aiSummary: 'Roof repair scope.' }],
+      },
+      roofReports: [{ title: 'Roof Damage Report', status: 'draft' }],
+      counts: {
+        documents: 3,
+        photos: 2,
+        jobDocuments: 1,
+        priceSheets: 1,
+        scopeAnalyses: 1,
+        roofReports: 1,
+        signatureRequests: 1,
+        pendingSignatures: 1,
+        generatedDocuments: 1,
+        ocrReviewRequired: 1,
+        ocrReviewRecommended: 0,
+      },
+    },
+  })
+  assert(projectPacketText.includes('C-VHUHGG-1'), 'Project packet formatter should prefer customer-project number')
+  assert(projectPacketText.includes('2 photos · 1 job files'), 'Project packet formatter should summarize section counts')
+  assert(projectPacketText.includes('Needs review: 1 required'), 'Project packet formatter should include OCR review counts')
+  assert(projectPacketText.includes('price sheets should be reviewed/imported into company pricing'), 'Project packet formatter should protect price sheet routing')
+
   return true
 }
 

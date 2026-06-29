@@ -38,6 +38,45 @@ function safeJson<T = unknown>(value: string | null | undefined, fallback: T): T
   try { return JSON.parse(value) as T } catch { return fallback }
 }
 
+function shortRecordNumber(prefix: string, id?: string | null) {
+  const clean = (id ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase()
+  return `${prefix}-${clean.slice(-6) || 'PENDING'}`
+}
+
+function customerNumber(id?: string | null) {
+  return shortRecordNumber('C', id)
+}
+
+function projectNumber(project: { id?: string | null; title?: string | null } | string | null | undefined) {
+  if (project && typeof project === 'object') {
+    const match = (project.title ?? '').match(/\bJob\s*#?\s*(\d{4,})\b/i)
+    if (match?.[1]) return `J-${match[1]}`
+    return shortRecordNumber('P', project.id)
+  }
+  return shortRecordNumber('P', project)
+}
+
+function isProfileOrBrandAsset(doc: { fileType: string | null; aiCategory: string | null }) {
+  const type = `${doc.fileType ?? ''} ${doc.aiCategory ?? ''}`.toLowerCase()
+  return /\b(user[_ -]?avatar|profile[_ -]?photo|company[_ -]?logo|logo|brand[_ -]?asset)\b/.test(type)
+}
+
+function isPhotoDocument(doc: { fileType: string | null; mimeType: string | null }) {
+  return doc.fileType === 'photo' || doc.mimeType?.startsWith('image/')
+}
+
+function isPriceSheetDocument(doc: { fileType: string | null; aiCategory: string | null; originalName: string; aiSummary?: string | null }) {
+  const trustedTypeText = `${doc.fileType ?? ''} ${doc.aiCategory ?? ''}`.toLowerCase()
+  if (/\b(price[_ -]?sheet|price[_ -]?list|company[_ -]?pricing|material[_ -]?pricing|supplier[_ -]?pricing)\b/.test(trustedTypeText)) return true
+
+  const summaryText = (doc.aiSummary ?? '').toLowerCase()
+  if (/\b(price\s*(?:sheet|list)|company pricing|material pricing|supplier pricing)\b/.test(summaryText)) return true
+
+  // Filename is intentionally only a last-resort hint. Contractor PDFs are often renamed incorrectly.
+  if (trustedTypeText.trim() || summaryText.trim()) return false
+  return /\b(price[_ -]?sheet|price[_ -]?list)\b/i.test(doc.originalName)
+}
+
 function ocrReviewStatus(doc: {
   extractionConfidence: number | null
   conflictFlags: string | null
@@ -180,7 +219,7 @@ export async function getProjectDocumentPacket(projectId: string, contractorId: 
   })
   if (!project) return null
 
-  const [contractorProfile, documents, documentLinks, roofReports, generatedDocuments, signatureRequests, scopeAnalyses] = await Promise.all([
+  const [contractorProfile, documents, documentLinks, roofReports, generatedDocuments, signatureRequests, scopeAnalyses, customerProjects] = await Promise.all([
     getOrCreateContractorProfile(contractorId),
     db.document.findMany({
       where: { contractorId, projectId },
@@ -216,6 +255,14 @@ export async function getProjectDocumentPacket(projectId: string, contractorId: 
       orderBy: { updatedAt: 'desc' },
       take: 100,
     }),
+    project.customerId
+      ? db.project.findMany({
+          where: { contractorId, customerId: project.customerId },
+          select: { id: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+          take: 250,
+        })
+      : Promise.resolve([]),
   ])
 
   const normalizedDocuments = documents.map(doc => {
@@ -246,6 +293,16 @@ export async function getProjectDocumentPacket(projectId: string, contractorId: 
     }
   })
 
+  const projectOrdinal = Math.max(customerProjects.findIndex(p => p.id === project.id) + 1, 1)
+  const savedCustomerNumber = project.customer ? customerNumber(project.customer.id) : null
+  const savedProjectNumber = projectNumber(project)
+  const customerProjectNumber = savedCustomerNumber ? `${savedCustomerNumber}-${projectOrdinal}` : savedProjectNumber
+  const photoDocuments = normalizedDocuments.filter(doc => isPhotoDocument(doc) && !isProfileOrBrandAsset(doc))
+  const priceSheetDocuments = normalizedDocuments.filter(isPriceSheetDocument)
+  const jobDocuments = normalizedDocuments.filter(doc => !isPhotoDocument(doc) && !isPriceSheetDocument(doc) && !isProfileOrBrandAsset(doc))
+  const needsReviewDocuments = normalizedDocuments.filter(doc => doc.ocr.reviewStatus === 'review_required' || doc.ocr.reviewStatus === 'review_recommended')
+  const pendingSignatures = signatureRequests.filter(request => !['signed', 'voided', 'expired', 'declined'].includes(request.status))
+
   const groupedLinks = documentLinks.reduce<Record<string, typeof documentLinks>>((acc, link) => {
     const key = `${link.entityType}:${link.entityId ?? 'project'}`
     acc[key] ??= []
@@ -262,9 +319,22 @@ export async function getProjectDocumentPacket(projectId: string, contractorId: 
       priority: project.priority,
       address: project.address,
       value: project.value,
-      customer: project.customer,
+      projectNumber: savedProjectNumber,
+      customerProjectNumber,
+      customerProjectOrdinal: projectOrdinal,
+      customer: project.customer ? {
+        ...project.customer,
+        customerNumber: savedCustomerNumber,
+        clientNumber: savedCustomerNumber,
+      } : null,
     },
     documents: normalizedDocuments,
+    documentGroups: {
+      photos: photoDocuments,
+      jobDocuments,
+      priceSheets: priceSheetDocuments,
+      needsReview: needsReviewDocuments,
+    },
     documentLinks,
     linksByEntity: groupedLinks,
     roofReports,
@@ -277,9 +347,15 @@ export async function getProjectDocumentPacket(projectId: string, contractorId: 
       roofReports: roofReports.length,
       generatedDocuments: generatedDocuments.length,
       signatureRequests: signatureRequests.length,
+      pendingSignatures: pendingSignatures.length,
       scopeAnalyses: scopeAnalyses.length,
       ocrReviewRequired: normalizedDocuments.filter(d => d.ocr.reviewStatus === 'review_required').length,
       ocrReviewRecommended: normalizedDocuments.filter(d => d.ocr.reviewStatus === 'review_recommended').length,
+      photos: photoDocuments.length,
+      jobDocuments: jobDocuments.length,
+      priceSheets: priceSheetDocuments.length,
+      needsReview: needsReviewDocuments.length,
+      customerProjects: customerProjects.length,
     },
   }
 }

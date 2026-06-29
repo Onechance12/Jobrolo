@@ -35,6 +35,11 @@ function arrayField(record: Record<string, unknown>, key: string) {
   return Array.isArray(value) ? value : []
 }
 
+function objectField(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
 function compactLine(text: string, max = 120) {
   const clean = text.replace(/\s+/g, ' ').trim()
   return clean.length > max ? `${clean.slice(0, max - 1).trim()}…` : clean
@@ -116,6 +121,112 @@ function formatLocalPriceSheetReview(data: Record<string, unknown>) {
   return [...header, ...rowLines].join('\n')
 }
 
+function formatLocalCustomerFile(data: Record<string, unknown>) {
+  const customer = objectField(data, 'customer')
+  if (!customer) return 'Loaded the saved customer file from Jobrolo records.'
+
+  const name = stringField(customer, 'name') ?? 'Unnamed customer'
+  const customerNumber = stringField(customer, 'customerNumber') ?? stringField(customer, 'clientNumber')
+  const phone = stringField(customer, 'phone')
+  const email = stringField(customer, 'email')
+  const address = stringField(customer, 'address')
+  const projects = arrayField(data, 'projects').filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+  const counts = objectField(data, 'counts') ?? {}
+  const documents = numberField(counts, 'documents') ?? arrayField(data, 'documents').length
+  const photos = numberField(counts, 'photos') ?? arrayField(data, 'photos').length
+  const notes = numberField(counts, 'notes') ?? arrayField(data, 'notes').length
+  const tasks = numberField(counts, 'tasks') ?? arrayField(data, 'tasks').length
+  const pricingCandidates = arrayField(data, 'companyPricingCandidates').length
+  const recentUnlinkedDocs = arrayField(data, 'recentUnlinkedDocuments').length
+
+  const lines = [
+    `Loaded saved customer file from Jobrolo records: ${customerNumber ? `${name} (${customerNumber})` : name}.`,
+    compactLine([phone, email, address].filter(Boolean).join(' · '), 180),
+    `Projects: ${projects.length} · Photos: ${photos} · Files: ${documents} · Notes: ${notes} · Tasks: ${tasks}`,
+  ].filter(Boolean)
+
+  if (projects.length) {
+    lines.push('Projects:')
+    for (const project of projects.slice(0, 4)) {
+      const title = stringField(project, 'title') ?? 'Untitled project'
+      const projectNumber = stringField(project, 'customerProjectNumber') ?? stringField(project, 'projectNumber')
+      const status = stringField(project, 'status')
+      const projectAddress = stringField(project, 'address')
+      lines.push(`- ${compactLine([projectNumber, title, status, projectAddress].filter(Boolean).join(' · '), 190)}`)
+    }
+  }
+
+  if (pricingCandidates) {
+    lines.push(`Company pricing candidates: ${pricingCandidates}. Price sheets belong in company pricing unless you explicitly attach them to a job.`)
+  }
+  if (recentUnlinkedDocs) {
+    lines.push(`Recent unlinked uploads: ${recentUnlinkedDocs}. Ask me to attach, review, create a job, or save a scope when you know where they belong.`)
+  }
+  return lines.join('\n')
+}
+
+function formatLocalProjectPacket(data: Record<string, unknown>) {
+  const project = objectField(data, 'project')
+  if (!project) return 'Loaded the job document packet from saved Jobrolo records.'
+
+  const customer = objectField(project, 'customer')
+  const title = stringField(project, 'title') ?? 'Untitled project'
+  const projectNumber = stringField(project, 'customerProjectNumber') ?? stringField(project, 'projectNumber')
+  const status = stringField(project, 'status')
+  const address = stringField(project, 'address')
+  const customerName = customer ? stringField(customer, 'name') : null
+  const customerNumber = customer ? stringField(customer, 'customerNumber') ?? stringField(customer, 'clientNumber') : null
+  const counts = objectField(data, 'counts') ?? {}
+  const documents = numberField(counts, 'documents') ?? arrayField(data, 'documents').length
+  const photos = numberField(counts, 'photos')
+  const jobDocuments = numberField(counts, 'jobDocuments')
+  const priceSheets = numberField(counts, 'priceSheets')
+  const roofReports = numberField(counts, 'roofReports')
+  const generatedDocuments = numberField(counts, 'generatedDocuments')
+  const signatureRequests = numberField(counts, 'signatureRequests')
+  const pendingSignatures = numberField(counts, 'pendingSignatures')
+  const scopeAnalyses = numberField(counts, 'scopeAnalyses')
+  const ocrRequired = numberField(counts, 'ocrReviewRequired')
+  const ocrRecommended = numberField(counts, 'ocrReviewRecommended')
+  const groups = objectField(data, 'documentGroups') ?? {}
+  const sampleDocs = arrayField(groups, 'jobDocuments')
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    .slice(0, 3)
+  const sampleReports = arrayField(data, 'roofReports')
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    .slice(0, 2)
+
+  const lines = [
+    `Loaded job packet from saved Jobrolo records: ${projectNumber ? `${projectNumber} · ` : ''}${title}.`,
+    compactLine([customerName ? `Customer: ${customerNumber ? `${customerName} (${customerNumber})` : customerName}` : null, status ? `Status: ${status}` : null, address].filter(Boolean).join(' · '), 190),
+    `Contents: ${photos ?? 0} photos · ${jobDocuments ?? documents} job files · ${priceSheets ?? 0} price sheets · ${scopeAnalyses ?? 0} scopes · ${roofReports ?? 0} reports · ${signatureRequests ?? 0} signature requests${pendingSignatures ? ` (${pendingSignatures} pending)` : ''}`,
+  ].filter(Boolean)
+
+  if ((ocrRequired ?? 0) || (ocrRecommended ?? 0)) {
+    lines.push(`Needs review: ${ocrRequired ?? 0} required OCR/doc review, ${ocrRecommended ?? 0} recommended.`)
+  }
+  if (sampleDocs.length) {
+    lines.push('Recent job files:')
+    for (const doc of sampleDocs) {
+      const name = stringField(doc, 'originalName') ?? stringField(doc, 'filename') ?? 'Unnamed file'
+      const type = stringField(doc, 'fileType') ?? stringField(doc, 'aiCategory')
+      const summary = stringField(doc, 'aiSummary')
+      lines.push(`- ${compactLine([name, type, summary].filter(Boolean).join(' · '), 190)}`)
+    }
+  }
+  if (sampleReports.length) {
+    lines.push('Reports:')
+    for (const report of sampleReports) {
+      const reportTitle = stringField(report, 'title') ?? 'Untitled report'
+      const reportStatus = stringField(report, 'status')
+      lines.push(`- ${compactLine([reportTitle, reportStatus].filter(Boolean).join(' · '), 160)}`)
+    }
+  }
+  if ((generatedDocuments ?? 0) > 0) lines.push(`Generated documents saved: ${generatedDocuments}.`)
+  if ((priceSheets ?? 0) > 0) lines.push('Note: price sheets should be reviewed/imported into company pricing unless this file is truly job-specific.')
+  return lines.join('\n')
+}
+
 export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionResultLike) {
   if (!result.success) {
     return `I tried to load that from saved Jobrolo records, but it failed. ${result.error ? `Error: ${result.error}` : 'Please try again.'}`
@@ -125,13 +236,13 @@ export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionR
   if (call.name === 'list_documents' && data) return formatLocalDocumentList(data)
   if (call.name === 'get_recent_uploads' && data) return formatLocalRecentUploads(data)
   if (call.name === 'review_price_sheet_items' && data) return formatLocalPriceSheetReview(data)
+  if (call.name === 'get_customer_file' && data) return formatLocalCustomerFile(data)
+  if (call.name === 'get_project_document_packet' && data) return formatLocalProjectPacket(data)
   const message = typeof data?.message === 'string' ? data.message : null
   if (message) return message
   if (call.name === 'get_contractor_profile') return 'Loaded your saved company profile.'
   if (call.name === 'get_copilot_inbox') return 'Loaded Action Needed from saved Jobrolo records.'
   if (call.name === 'get_company_kpis') return 'Loaded company KPIs from saved Jobrolo records.'
   if (call.name === 'get_integration_readiness') return 'Loaded integration readiness from Jobrolo configuration.'
-  if (call.name === 'get_customer_file') return 'Loaded the saved customer file from Jobrolo records.'
-  if (call.name === 'get_project_document_packet') return 'Loaded the job document packet from saved Jobrolo records.'
   return 'Loaded that from saved Jobrolo records.'
 }
