@@ -2,6 +2,26 @@ import type { JobroloSkill } from '../types'
 
 export const supplierSkills: JobroloSkill[] = [
   {
+    id: 'integration-provider',
+    name: 'Integration Provider',
+    category: 'suppliers',
+    status: 'active',
+    risk: 'external',
+    priority: 72,
+    purpose: 'Check whether outside providers like supplier APIs, Twilio, Google, OpenAI web search, maps, analytics, or storage are configured before promising live external actions.',
+    whenToUse: ['Connect ABC', 'SRS API', 'QXO', 'Home Depot', 'Lowe’s', 'Twilio', 'Google reviews', 'web search not working', 'provider missing'],
+    allowedRoles: ['owner', 'admin', 'system'],
+    allowedTools: ['get_integration_status', 'consult_orchestrator'],
+    approvalRequiredFor: ['external provider actions', 'OAuth/API connection changes'],
+    decisionRules: [
+      'Do not claim live API access unless the provider is configured and healthy.',
+      'When an integration is missing, explain the missing provider/API and offer the safest manual fallback.',
+      'Provider-specific APIs should go through the integration registry/provider layer, not one-off tools.',
+      'Usage-heavy research/search should identify mode/cost risk when possible.',
+    ],
+    outputFormat: 'Integration readiness card with configured/missing providers, safe fallback, and connect-next prompts.',
+  },
+  {
     id: 'price-list',
     name: 'Price List',
     category: 'suppliers',

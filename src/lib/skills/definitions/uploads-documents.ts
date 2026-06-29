@@ -2,6 +2,27 @@ import type { JobroloSkill } from '../types'
 
 export const uploadsDocumentsSkills: JobroloSkill[] = [
   {
+    id: 'photo-evidence',
+    name: 'Photo Evidence',
+    category: 'uploads_documents',
+    status: 'active',
+    risk: 'medium',
+    priority: 97,
+    purpose: 'Handle photos as tagged jobsite evidence with section, GPS, damage type, report usage, and customer/project context instead of generic file blobs.',
+    whenToUse: ['Inspection photos', 'Roof photos', 'Front elevation', 'Damage photo', 'Soft metals', 'Window screen damage', 'Add photos to report'],
+    allowedRoles: ['owner', 'admin', 'sales', 'production', 'project_manager', 'office', 'crew', 'system'],
+    optionalContext: ['photo section', 'GPS/location', 'customer/project', 'reportId', 'damage type', 'before/after status'],
+    allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'update_roof_report_photo', 'consult_orchestrator'],
+    approvalRequiredFor: ['external sharing', 'deleting photos', 'adding photos to customer-facing reports when ambiguous'],
+    decisionRules: [
+      'If a user selected an inspection/photo section, preserve that section and do not ask again.',
+      'Use GPS/location context when present, but ask before converting a photo into a customer/job.',
+      'Photos can belong to job evidence, roof reports, field observations, or company/user assets; classify before attaching.',
+      'When the user asks to show photos, group by exterior, roof, damage, interior, documents, and other instead of dumping raw text.',
+    ],
+    outputFormat: 'Photo evidence card with grouped thumbnails, section filters, edit/delete prompt actions, and attach/report actions.',
+  },
+  {
     id: 'upload-classifier',
     name: 'Upload Classifier',
     category: 'uploads_documents',

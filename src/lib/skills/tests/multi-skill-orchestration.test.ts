@@ -76,6 +76,35 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(fieldObservation.blockedTools.includes('create_customer'), 'Field observation should not create customer records before confirmation')
   assert(fieldObservation.recommendedAction.includes('Field observation lane'), 'Field observation orchestration should explain the selected lane')
 
+  const lead = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a lead for Natalie Pearson at 486 North Charles St. Phone 777-661-0334.' }))
+  assert(lead.primarySkill === 'lead-intake', `Lead primary should be lead-intake, got ${lead.primarySkill}`)
+  assert(lead.supportingSkills.includes('appointment-scheduling'), 'Lead intake should consult scheduling for next-step context')
+  assert(lead.supportingSkills.includes('activity-timeline'), 'Lead intake should consult timeline/activity context')
+
+  const appointment = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' }))
+  assert(appointment.primarySkill === 'appointment-scheduling', `Appointment primary should be appointment-scheduling, got ${appointment.primarySkill}`)
+  assert(appointment.blockedTools.includes('start_field_inspection_lead'), 'Appointment scheduling should block accidental active inspection creation')
+  assert(appointment.supportingSkills.includes('communication-routing'), 'Appointment scheduling should consult communication-routing for invites/notifications')
+
+  const photoEvidence = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Show photos for Timothy grouped by roof photos and damage photos.' }))
+  assert(photoEvidence.primarySkill === 'photo-evidence', `Photo primary should be photo-evidence, got ${photoEvidence.primarySkill}`)
+  assert(photoEvidence.supportingSkills.includes('project-context'), 'Photo evidence should consult project-context')
+  assert(photoEvidence.supportingSkills.includes('activity-timeline'), 'Photo evidence should preserve activity/timeline context')
+
+  const roofReport = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a roof report for Timothy and let me pick the photos.' }))
+  assert(roofReport.primarySkill === 'roof-report', `Roof report primary should be roof-report, got ${roofReport.primarySkill}`)
+  assert(roofReport.supportingSkills.includes('photo-evidence'), 'Roof report should consult photo-evidence')
+  assert(roofReport.supportingSkills.includes('approval'), 'Roof report should consult approval before final/share')
+
+  const integration = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Is the ABC Supply API connected and ready?' }))
+  assert(integration.primarySkill === 'integration-provider', `Integration primary should be integration-provider, got ${integration.primarySkill}`)
+  assert(integration.supportingSkills.includes('failure-handling'), 'Integration provider should consult failure-handling for missing providers/fallbacks')
+
+  const permissions = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' }))
+  assert(permissions.primarySkill === 'role-permissions', `Permissions primary should be role-permissions, got ${permissions.primarySkill}`)
+  assert(permissions.supportingSkills.includes('communication-routing'), 'Permissions should consult communication-routing for shared-chat visibility')
+  assert(permissions.supportingSkills.includes('approval'), 'Permissions should consult approval for access changes')
+
   const capped = orchestrateSkills(priceSheetContext, { highComplexity: false, supportLimit: 2 })
   assert(capped.supportingSkills.length <= 2, 'Supporting skills should be capped unless high complexity is requested')
   const highComplexity = orchestrateSkills(priceSheetContext, { highComplexity: true })

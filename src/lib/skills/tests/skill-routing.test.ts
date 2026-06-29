@@ -30,6 +30,13 @@ export const skillRoutingTestCases = [
   'show price list selects price-list behavior',
   'cash quote requests stay in bid/quote lane',
   'field observations stay in field evidence lane',
+  'lead intake routes into lead lane',
+  'appointment scheduling does not start field inspection',
+  'photo evidence routes into photo lane',
+  'roof reports route into report lane',
+  'activity timeline routes into timeline lane',
+  'integration provider requests route into provider lane',
+  'role permission requests route into permission lane',
   'Cody activation stays in read-only QA lane',
 ]
 
@@ -153,6 +160,44 @@ export function assertSkillRoutingContracts() {
   const observationSkills = selectSkills(observationContext).map((selection) => selection.skill.id)
   assert(observationSkills.includes('field-copilot'), `Field observation should select field-copilot, got ${observationSkills.join(', ')}`)
   assert(!observationSkills.includes('customer-creation'), 'Field observation should not jump into customer creation')
+
+  const leadContext = buildSkillRoutingContext({ latestText: 'Create a lead for Natalie Pearson at 486 North Charles St. Phone 777-661-0334.' })
+  assert(leadContext.requestIntent?.id === 'lead_intake', `Lead creation should resolve to lead_intake intent, got ${leadContext.requestIntent?.id}`)
+  const leadSkills = selectSkills(leadContext).map((selection) => selection.skill.id)
+  assert(leadSkills.includes('lead-intake'), `Lead creation should select lead-intake, got ${leadSkills.join(', ')}`)
+  assert(!leadSkills.includes('roof-report'), 'Lead intake should not drift into roof report workflow')
+
+  const appointmentContext = buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' })
+  assert(appointmentContext.requestIntent?.id === 'appointment_scheduling', `Future inspection should resolve to appointment_scheduling intent, got ${appointmentContext.requestIntent?.id}`)
+  assert(Boolean(appointmentContext.requestIntent?.blockedTools?.includes('start_field_inspection_lead')), 'Appointment scheduling should block active inspection lead creation')
+  const appointmentSkills = selectSkills(appointmentContext).map((selection) => selection.skill.id)
+  assert(appointmentSkills.includes('appointment-scheduling'), `Appointment scheduling should select appointment-scheduling, got ${appointmentSkills.join(', ')}`)
+
+  const photoContext = buildSkillRoutingContext({ latestText: 'Show photos for Timothy grouped by roof photos and damage photos.' })
+  assert(photoContext.requestIntent?.id === 'photo_evidence', `Photo request should resolve to photo_evidence intent, got ${photoContext.requestIntent?.id}`)
+  const photoSkills = selectSkills(photoContext).map((selection) => selection.skill.id)
+  assert(photoSkills.includes('photo-evidence'), `Photo request should select photo-evidence, got ${photoSkills.join(', ')}`)
+
+  const reportContext = buildSkillRoutingContext({ latestText: 'Create a roof report for Timothy and let me pick the photos.' })
+  assert(reportContext.requestIntent?.id === 'roof_report', `Roof report should resolve to roof_report intent, got ${reportContext.requestIntent?.id}`)
+  const reportSkills = selectSkills(reportContext).map((selection) => selection.skill.id)
+  assert(reportSkills.includes('roof-report'), `Roof report should select roof-report, got ${reportSkills.join(', ')}`)
+  assert(reportSkills.includes('photo-evidence'), 'Roof report should consult photo-evidence')
+
+  const timelineContext = buildSkillRoutingContext({ latestText: 'What happened last time at this job? Show the activity log.' })
+  assert(timelineContext.requestIntent?.id === 'activity_timeline', `Activity request should resolve to activity_timeline intent, got ${timelineContext.requestIntent?.id}`)
+  const timelineSkills = selectSkills(timelineContext).map((selection) => selection.skill.id)
+  assert(timelineSkills.includes('activity-timeline'), `Timeline request should select activity-timeline, got ${timelineSkills.join(', ')}`)
+
+  const integrationContext = buildSkillRoutingContext({ latestText: 'Is the ABC Supply API connected and ready?' })
+  assert(integrationContext.requestIntent?.id === 'integration_provider', `Integration request should resolve to integration_provider intent, got ${integrationContext.requestIntent?.id}`)
+  const integrationSkills = selectSkills(integrationContext).map((selection) => selection.skill.id)
+  assert(integrationSkills.includes('integration-provider'), `Integration request should select integration-provider, got ${integrationSkills.join(', ')}`)
+
+  const permissionContext = buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' })
+  assert(permissionContext.requestIntent?.id === 'role_permissions', `Permission request should resolve to role_permissions intent, got ${permissionContext.requestIntent?.id}`)
+  const permissionSkills = selectSkills(permissionContext).map((selection) => selection.skill.id)
+  assert(permissionSkills.includes('role-permissions'), `Permission request should select role-permissions, got ${permissionSkills.join(', ')}`)
 
   const codyContext = buildSkillRoutingContext({ latestText: 'Cody Cody Cody this button says approved but nothing happens.' })
   assert(codyContext.requestIntent?.id === 'cody_review', `Cody activation should resolve to cody_review intent, got ${codyContext.requestIntent?.id}`)

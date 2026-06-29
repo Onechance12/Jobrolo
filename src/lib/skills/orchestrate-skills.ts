@@ -23,13 +23,28 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'save-scope': ['document-type-routing', 'project-context', 'approval'],
   'upload-classifier': ['document-type-routing', 'project-context', 'approval'],
   'production-coordinator': ['project-status', 'supplier-order-status', 'approval'],
+  'lead-intake': ['entity-resolver', 'appointment-scheduling', 'activity-timeline'],
+  'appointment-scheduling': ['entity-resolver', 'project-context', 'communication-routing'],
+  'photo-evidence': ['file-attachment', 'project-context', 'activity-timeline'],
+  'roof-report': ['photo-evidence', 'project-context', 'approval'],
+  'communication-routing': ['role-permissions', 'approval'],
+  'role-permissions': ['approval'],
+  'integration-provider': ['failure-handling'],
 }
 
 const SUPPORT_FINDINGS: Record<string, string> = {
+  'activity-timeline': 'Use saved activity/history to separate completed, pending, failed, and recommended next actions.',
   approval: 'Risky or record-changing work must go through the trusted approval/tool layer.',
+  'appointment-scheduling': 'Separate future calendar scheduling from active field inspections.',
+  'communication-routing': 'Treat chat creation, copyable links, invites, and SMS/email sends as separate actions.',
   'document-type-routing': 'Route documents from user intent, visible extracted content, structure, and context — not filenames alone.',
+  'entity-resolver': 'Resolve the customer, project, lead, or property before record-changing actions.',
+  'file-attachment': 'Attach files/photos using real IDs and the correct company/customer/project/report context.',
+  'integration-provider': 'Check provider readiness before claiming live outside-world access.',
+  'photo-evidence': 'Preserve photo section, GPS, damage type, and report usage context.',
   'project-context': 'Confirm the customer/project before attaching, saving, or updating records.',
   'project-status': 'Check saved project readiness before claiming a job is ready to build.',
+  'role-permissions': 'Protect visibility and role boundaries before invites, sharing, or external access.',
   supplier: 'Keep supplier documents separate from customer/project files and company pricebook records.',
   'supplier-order-status': 'Check material readiness before production-ready claims.',
   'upload-classifier': 'Classify the upload before deciding where it belongs.',
@@ -125,8 +140,14 @@ export function orchestrateSkills(
     ...supportingSkills.map(skillId => buildConsult(skillId, 'supporting', selections.find(selection => selection.skill.id === skillId)?.confidence ?? 0.72)),
   ]
 
-  const allowedTools = unique(allSkillIds.flatMap(skillId => getSkillById(skillId)?.allowedTools ?? []))
-  const blockedTools = unique(allSkillIds.flatMap(skillId => getSkillById(skillId)?.forbiddenTools ?? []))
+  const allowedTools = unique([
+    ...(context.requestIntent?.allowedTools ?? []),
+    ...allSkillIds.flatMap(skillId => getSkillById(skillId)?.allowedTools ?? []),
+  ])
+  const blockedTools = unique([
+    ...(context.requestIntent?.blockedTools ?? []),
+    ...allSkillIds.flatMap(skillId => getSkillById(skillId)?.forbiddenTools ?? []),
+  ])
   const requiredContext = unique(consults.flatMap(consult => consult.requiredContext ?? []))
   const approvalNeeded = consults.some(consult => consult.approvalNeeded) || RISK_RANK[riskLevel] >= RISK_RANK.high
   const summary = summarize(primarySkill, supportingSkills, context)

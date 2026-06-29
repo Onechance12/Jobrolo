@@ -68,6 +68,14 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('customer-creation', 0.86, 'Customer creation intent.'))
   }
 
+  if (/(new lead|create lead|lead came in|door knock|d2d|referral|potential customer|leak call|online lead)/.test(text)) {
+    pushUnique(selections, select('lead-intake', 0.9, 'Lead/opportunity intake intent.'))
+  }
+
+  if (/(schedule|calendar|appointment|book|reschedule|follow[- ]?up|adjuster meeting|site visit)/.test(text)) {
+    pushUnique(selections, select('appointment-scheduling', 0.88, 'Calendar/appointment workflow intent.'))
+  }
+
   if (/(create project|create job|new project|job number|project number)/.test(text)) {
     pushUnique(selections, select('project-creation', 0.86, 'Project creation intent.'))
   }
@@ -79,6 +87,30 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
 
   if (/(crew chat|sub chat|subcontractor|roofer|gutter crew|window crew)/.test(text)) {
     pushUnique(selections, select('crew-subcontractor', 0.86, 'Crew/subcontractor shared chat intent.'))
+  }
+
+  if (/(photo|photos|front elevation|roof photos|damage photo|thumbnail|caption)/.test(text)) {
+    pushUnique(selections, select('photo-evidence', 0.86, 'Photo/evidence display, tagging, or report attachment intent.'))
+  }
+
+  if (/(roof report|property report|damage report|preview report|finalize report|share report|photo documentation)/.test(text)) {
+    pushUnique(selections, select('roof-report', 0.9, 'Roof/property report workflow intent.'))
+  }
+
+  if (/(timeline|activity log|history|what happened|recent updates|what changed|audit trail)/.test(text)) {
+    pushUnique(selections, select('activity-timeline', 0.84, 'Activity/timeline review intent.'))
+  }
+
+  if (/(send text|sms|email|notify|invite|copy link|share link|customer update|crew message)/.test(text)) {
+    pushUnique(selections, select('communication-routing', 0.84, 'External/internal communication routing intent.'))
+  }
+
+  if (/(role|permission|access|visibility|who can see|owner|admin|sub access|crew access|homeowner access)/.test(text)) {
+    pushUnique(selections, select('role-permissions', 0.84, 'Role/permission boundary intent.'))
+  }
+
+  if (/(integration|api|connect|abc supply|srs|qxo|home depot|lowe'?s|twilio|google analytics|web search|maps api)/.test(text)) {
+    pushUnique(selections, select('integration-provider', 0.82, 'Outside provider/integration readiness intent.'))
   }
 
   if (/(approved|approve|approval|reject|delete|remove|archive)/.test(text)) {

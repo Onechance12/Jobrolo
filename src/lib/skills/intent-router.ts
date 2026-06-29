@@ -91,6 +91,50 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(new lead|create a lead|create lead|lead came in|phone call|called about|text came in|door knock|d2d|referral|met .* at|potential customer|leak call|online lead)\b/.test(text)) {
+    return buildIntent({
+      id: 'lead_intake',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'lead-intake',
+      supportingSkills: ['entity-resolver', 'appointment-scheduling', 'activity-timeline'],
+      workflowName: 'Lead intake',
+      sticky: true,
+      allowedTools: ['start_field_inspection_lead', 'create_customer', 'create_project_for_customer', 'consult_orchestrator'],
+      blockedTools: ['create_roof_report', 'import_price_sheet_items'],
+      requiredContext: ['lead source/contact/address/next step when available'],
+      nextStep: 'call_tool',
+      summary: 'Lead intake lane: capture an opportunity first, then schedule/convert only after context is clear.',
+      laneRules: [
+        'Save known lead details without forcing every AccuLynx-style field up front.',
+        'Ask one useful next question for missing contact, address, source, urgency, or next step.',
+        'Do not convert into a customer/job unless explicitly requested or confirmed.',
+      ],
+    })
+  }
+
+  if (/\b(schedule|calendar|appointment|book|reschedule|follow[- ]?up|adjuster meeting|site visit|inspection time|what.*calendar|what.*scheduled)\b/.test(text)) {
+    return buildIntent({
+      id: 'appointment_scheduling',
+      mode: 'workflow',
+      confidence: 0.88,
+      primarySkill: 'appointment-scheduling',
+      supportingSkills: ['entity-resolver', 'project-context', 'communication-routing'],
+      workflowName: 'Appointment scheduling',
+      sticky: false,
+      allowedTools: ['list_appointments', 'create_appointment', 'update_appointment', 'consult_orchestrator'],
+      blockedTools: ['start_field_inspection_lead'],
+      requiredContext: ['date/time/person/project or request to view calendar'],
+      nextStep: 'call_tool',
+      summary: 'Appointment lane: schedule or review calendar items without confusing future appointments with active field inspections.',
+      laneRules: [
+        'If creating an appointment, resolve date/time and customer/project/lead.',
+        'If showing schedule, use saved appointments/calendar records.',
+        'External calendar invites or notifications require explicit approval.',
+      ],
+    })
+  }
+
   if (/\b(start|landed|walking up|inspection|inspect|photo workflow)\b/.test(text) && /\b(inspection|where i am|current location|at this house|here)\b/.test(text)) {
     return buildIntent({
       id: 'field_inspection',
@@ -108,6 +152,49 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         'Start as a field inspection lead until property/customer/project is confirmed.',
         'Use browser GPS/location context when present.',
         'Do not require homeowner phone/name before starting the inspection lead.',
+      ],
+    })
+  }
+
+  if (/\b(roof report|property report|damage report|report builder|preview report|finalize report|share report|report pdf|photo documentation)\b/.test(text)) {
+    return buildIntent({
+      id: 'roof_report',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'roof-report',
+      supportingSkills: ['photo-evidence', 'project-context', 'approval', 'communication-routing'],
+      workflowName: 'Roof/property report',
+      sticky: true,
+      allowedTools: ['create_roof_report', 'get_project_document_packet', 'update_roof_report_photo', 'finalize_roof_report', 'consult_orchestrator'],
+      blockedTools: ['import_price_sheet_items'],
+      requiredContext: ['customer/project or existing report draft'],
+      nextStep: 'call_tool',
+      summary: 'Roof report lane: select photos, conditions, recommendations, and recipient before finalizing or sharing.',
+      laneRules: [
+        'Reports should be completed through chat/cards first; builder pages are support surfaces.',
+        'Do not finalize/share until required sections/photos are ready and approved.',
+        'Recipient type controls visibility and wording.',
+      ],
+    })
+  }
+
+  if (/\b(photo|photos|picture|image|thumbnail|front elevation|all elevations|roof photos|damage photo|interior photo|attic photo|detached|add .*report|remove .*photo|caption)\b/.test(text)) {
+    return buildIntent({
+      id: 'photo_evidence',
+      mode: 'workflow',
+      confidence: 0.86,
+      primarySkill: 'photo-evidence',
+      supportingSkills: ['file-attachment', 'project-context', 'activity-timeline'],
+      workflowName: 'Photo evidence',
+      sticky: false,
+      allowedTools: ['link_document_to_project', 'record_field_observation_at_location', 'update_roof_report_photo', 'consult_orchestrator'],
+      blockedTools: ['import_price_sheet_items'],
+      nextStep: 'call_tool',
+      summary: 'Photo evidence lane: group/tag photos as jobsite evidence instead of dumping generic file text.',
+      laneRules: [
+        'Preserve selected inspection/photo section context when present.',
+        'Group photo displays by exterior, roof, damage, interior, documents, and other.',
+        'Ask before deleting or externally sharing photos.',
       ],
     })
   }
@@ -133,6 +220,26 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(timeline|activity log|history|what happened|last time|recent updates|what changed|audit trail|log this|record this)\b/.test(text)) {
+    return buildIntent({
+      id: 'activity_timeline',
+      mode: 'workflow',
+      confidence: 0.84,
+      primarySkill: 'activity-timeline',
+      supportingSkills: ['project-context', 'entity-resolver'],
+      workflowName: 'Activity timeline',
+      sticky: false,
+      allowedTools: ['get_customer_file', 'get_project_document_packet', 'consult_orchestrator'],
+      nextStep: 'call_tool',
+      summary: 'Activity timeline lane: explain saved history, recent changes, failed attempts, and next actions from real records.',
+      laneRules: [
+        'Separate completed events, pending approvals, failures, and recommendations.',
+        'Use saved activity/project/customer records when available.',
+        'Do not treat timeline review as permission to mutate records.',
+      ],
+    })
+  }
+
   if (/\b(company health|company intelligence|business health|how are our leads|how are my leads|growth|grow|revenue|marketing kpis?|public research)\b/.test(text)) {
     return buildIntent({
       id: 'company_intelligence',
@@ -154,6 +261,26 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(api|integration|connect|provider|abc supply|srs|qxo|home depot|lowe'?s|twilio|google business|google analytics|openai web search|web search|maps api|provider missing)\b/.test(text)) {
+    return buildIntent({
+      id: 'integration_provider',
+      mode: 'workflow',
+      confidence: 0.82,
+      primarySkill: 'integration-provider',
+      supportingSkills: ['failure-handling'],
+      workflowName: 'Integration provider',
+      sticky: false,
+      allowedTools: ['get_integration_status', 'consult_orchestrator'],
+      nextStep: 'call_tool',
+      summary: 'Integration lane: check provider readiness before promising live outside-world actions.',
+      laneRules: [
+        'Do not claim live provider access unless configured and healthy.',
+        'If missing, name the missing provider/API and offer a manual fallback.',
+        'External provider actions require approval and should go through the integration layer.',
+      ],
+    })
+  }
+
   if (/\b(company profile|company info|business info|license|legal footer|logo|brand|website|phone|email)\b/.test(text)) {
     return buildIntent({
       id: 'company_profile',
@@ -170,6 +297,27 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         'Company profile is not a customer file.',
         'Show missing fields with chat prompt pills where possible.',
         'Ask before applying researched or uploaded changes.',
+      ],
+    })
+  }
+
+  if (/\b(role|permission|access|who can see|visibility|owner|admin|employee|sales rep|project manager|homeowner access|crew access|sub access|delete chats?)\b/.test(text)) {
+    return buildIntent({
+      id: 'role_permissions',
+      mode: 'workflow',
+      confidence: 0.82,
+      primarySkill: 'role-permissions',
+      supportingSkills: ['communication-routing', 'approval'],
+      workflowName: 'Role permissions',
+      sticky: false,
+      allowedTools: ['get_workspace_members', 'update_workspace_member_role', 'consult_orchestrator'],
+      blockedTools: ['delete_customer', 'delete_project'],
+      nextStep: 'ask_clarification',
+      summary: 'Role/permission lane: protect visibility boundaries before adding users, sharing data, or changing access.',
+      laneRules: [
+        'Resolve user role, company/workspace, and scope before changing access.',
+        'Customers, partners, crews, and subs only see explicitly shared content.',
+        'Permission changes require owner/admin authority and approval.',
       ],
     })
   }
@@ -200,7 +348,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       mode: 'workflow',
       confidence: 0.8,
       primarySkill: 'crew-subcontractor',
-      supportingSkills: ['approval'],
+      supportingSkills: ['communication-routing', 'role-permissions', 'approval'],
       workflowName: 'Chat invite',
       sticky: false,
       allowedTools: ['create_project_chat', 'invite_user_to_chat'],
