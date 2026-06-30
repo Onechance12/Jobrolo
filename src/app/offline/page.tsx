@@ -5,7 +5,7 @@ export default function OfflinePage() {
     <main className="min-h-dvh bg-slate-950 text-white">
       <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center px-6 py-10">
         <div className="mb-6 flex items-center gap-3">
-          <Image src="/logo.png" alt="Jobrolo" width={52} height={52} className="rounded-2xl shadow-[0_0_30px_rgba(37,99,235,0.45)]" priority />
+          <Image src="/logo-512.png" alt="Jobrolo" width={52} height={52} className="rounded-2xl shadow-[0_0_30px_rgba(37,99,235,0.45)]" priority />
           <div>
             <p className="text-lg font-semibold leading-tight">Jobrolo</p>
             <p className="text-sm text-slate-400">Offline mode</p>

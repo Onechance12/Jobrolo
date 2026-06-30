@@ -589,7 +589,7 @@ export default function Page() {
         </div>
       ) : (
         <div className="hidden lg:flex h-full w-14 flex-shrink-0 flex-col items-center gap-2 border-r border-border bg-sidebar px-2 py-3">
-          <img src="/logo.png" alt="Jobrolo" className="h-9 w-9 rounded-lg object-cover" />
+          <img src="/logo-512.png" alt="Jobrolo" className="h-9 w-9 rounded-lg object-cover" />
           <button
             onClick={() => setDesktopSidebarCollapsed(false)}
             className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-sidebar-accent/40 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
@@ -674,7 +674,7 @@ export default function Page() {
               ) : (
                 <>
                   <div className="relative">
-                    <img src="/logo.png" alt="Jobrolo" className="w-9 h-9 rounded-lg object-cover" />
+                    <img src="/logo-512.png" alt="Jobrolo" className="w-9 h-9 rounded-lg object-cover" />
                     {isAIWorking && (
                       <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-background animate-pulse" />
                     )}
@@ -865,7 +865,7 @@ export default function Page() {
               ) : (
                 <>
                   <div className="w-14 h-14 rounded-2xl glow-blue overflow-hidden mb-3">
-                    <img src="/logo.png" alt="Jobrolo" className="w-full h-full object-cover" />
+                    <img src="/logo-512.png" alt="Jobrolo" className="w-full h-full object-cover" />
                   </div>
                   <h3 className="font-semibold text-foreground mb-1">
                     {companySetup.missing.length ? `Let’s finish setting up ${companySetup.companyName || 'Jobrolo'}` : 'How can I help today?'}

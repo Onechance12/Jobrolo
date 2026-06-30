@@ -276,7 +276,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate, onCollapse }: Props) {
       <div className="flex-shrink-0 border-b border-border p-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Jobrolo" className="w-8 h-8 rounded-lg object-cover" />
+            <img src="/logo-512.png" alt="Jobrolo" className="w-8 h-8 rounded-lg object-cover" />
             <div>
               <div className="font-semibold text-sidebar-foreground text-sm tracking-tight">Jobrolo</div>
               <div className="text-[10px] leading-tight text-muted-foreground">Command Center</div>

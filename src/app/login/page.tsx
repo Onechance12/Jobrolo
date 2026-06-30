@@ -40,7 +40,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <img src="/logo.png" alt="Jobrolo" className="w-12 h-12 rounded-xl object-cover mb-3" />
+          <img src="/logo-512.png" alt="Jobrolo" className="w-12 h-12 rounded-xl object-cover mb-3" />
           <h1 className="text-2xl font-bold text-slate-900">Welcome back</h1>
           <p className="text-sm text-slate-500 mt-1">Log in to your Jobrolo workspace.</p>
         </div>

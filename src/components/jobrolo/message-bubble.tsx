@@ -14,7 +14,7 @@ interface Props { message: ClientMessage; isStreaming?: boolean; onSpeak?: (text
 function JobroloAvatar({ className }: { className?: string }) {
   return (
     <div className={cn('flex-shrink-0 w-8 h-8 overflow-hidden rounded-full bg-slate-950 shadow-[0_0_18px_rgba(37,99,235,0.45)] ring-1 ring-blue-400/30', className)}>
-      <img src="/logo.png" alt="Jobrolo" className="h-full w-full object-cover" />
+      <img src="/logo-512.png" alt="Jobrolo" className="h-full w-full object-cover" />
     </div>
   )
 }

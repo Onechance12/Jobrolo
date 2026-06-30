@@ -14,7 +14,7 @@ function JobroloChatIcon({ size = 'md' }: { size?: 'sm' | 'md' }) {
   const dim = size === 'sm' ? 'h-8 w-8' : 'h-10 w-10'
   return (
     <div className={`mt-1 flex ${dim} shrink-0 overflow-hidden rounded-full bg-slate-950 shadow-[0_0_18px_rgba(37,99,235,0.45)] ring-1 ring-blue-400/30`}>
-      <img src="/logo.png" alt="Jobrolo" className="h-full w-full object-cover" />
+      <img src="/logo-512.png" alt="Jobrolo" className="h-full w-full object-cover" />
     </div>
   )
 }
@@ -498,7 +498,7 @@ export default function SignupPage() {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <img src="/logo.png" alt="Jobrolo" className="h-10 w-10 rounded-xl object-cover shadow-[0_0_24px_rgba(37,99,235,0.45)]" />
+            <img src="/logo-512.png" alt="Jobrolo" className="h-10 w-10 rounded-xl object-cover shadow-[0_0_24px_rgba(37,99,235,0.45)]" />
             <div>
               <div className="text-sm font-semibold text-white">Jobrolo</div>
               <div className="text-xs text-slate-400">Account entry</div>

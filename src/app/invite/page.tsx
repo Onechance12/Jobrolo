@@ -90,7 +90,7 @@ export default function InvitePage() {
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md items-center">
         <div className="w-full">
           <div className="mb-6 text-center">
-            <img src="/logo.png" alt="Jobrolo" className="mx-auto mb-4 h-14 w-14 rounded-2xl object-cover shadow-lg shadow-blue-500/20" />
+            <img src="/logo-512.png" alt="Jobrolo" className="mx-auto mb-4 h-14 w-14 rounded-2xl object-cover shadow-lg shadow-blue-500/20" />
             <p className="text-xs uppercase tracking-[0.35em] text-blue-300">Jobrolo invite</p>
             <h1 className="mt-2 text-3xl font-bold">{loading ? 'Loading invite…' : roleCopy.title}</h1>
             {invite ? <p className="mt-2 text-sm text-slate-300">{invite.contractor?.company || invite.contractor?.name} invited you to Jobrolo.</p> : null}
