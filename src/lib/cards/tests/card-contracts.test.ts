@@ -50,6 +50,15 @@ export function assertCardContracts() {
   const shortcutTemplate = findJobroloCardTemplate('command_shortcuts')
   assert(Boolean(shortcutTemplate?.displayRules.some(rule => /insert prompts/i.test(rule))), 'Shortcut card should explain shortcuts insert prompts')
 
+  const photoTemplate = findJobroloCardTemplate('inspection_photo_set')
+  assert(photoTemplate?.id === 'photo-evidence', `Inspection photo sets should use photo evidence card contract, got ${photoTemplate?.id}`)
+  assert(Boolean(photoTemplate?.displayRules.some(rule => /thumbnails/i.test(rule))), 'Photo evidence card should require thumbnails before long text')
+  assert(Boolean(photoTemplate?.displayRules.some(rule => /remove blurry|remove.*photos/i.test(rule))), 'Photo evidence card should support removing bad photos before finalizing')
+
+  const fieldTemplate = findJobroloCardTemplate('field_inspection_lead')
+  assert(fieldTemplate?.id === 'field-inspection', `Field inspection cards should resolve to field-inspection, got ${fieldTemplate?.id}`)
+  assert(Boolean(fieldTemplate?.displayRules.some(rule => /remain active/i.test(rule) && /thumbnails/i.test(rule))), 'Field inspection card should keep photo workflow active with thumbnails')
+
   const companyPhoneTemplate = findJobroloCardTemplate('company_phone_numbers')
   assert(companyPhoneTemplate?.id === 'company-phone-numbers', `Company phone cards should resolve to company-phone-numbers, got ${companyPhoneTemplate?.id}`)
   assert(Boolean(companyPhoneTemplate?.primaryPromptPills.some(pill => /Jobrolo number/i.test(pill.label))), 'Company phone card should expose Jobrolo-number setup prompts')

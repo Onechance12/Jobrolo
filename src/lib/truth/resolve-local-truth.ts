@@ -59,6 +59,28 @@ function isActionCenterReadRequest(text: string) {
   )
 }
 
+function isCompanyKpiReadRequest(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  const asksToRead = /\b(show|pull|view|display|check|how|how many|what(?:'s| is)|where are we|give me|tell me)\b/.test(lower)
+  const companySubject = /\b(company|business|jobrolo|sales|leads?|customers?|clients?|projects?|jobs?|appointments?|actions?|review items?|usage|costs?|kpis?|health|performance|pipeline|this week|last week|last 7|last 30)\b/.test(lower)
+  const metricSubject = /\b(kpis?|health|performance|pipeline|leads?|customers?|clients?|projects?|jobs?|appointments?|pending actions?|review items?|failed work|usage|web search|ai calls?|costs?|this week|last week|last 7|last 30)\b/.test(lower)
+  if (!asksToRead || !companySubject || !metricSubject) return false
+  if (/\b(this|current|active|the)\s+(job|project)\b/.test(lower)) return false
+  if (/\b(customer file|client file|project file|job file|price sheet|price list|company profile|company setup|documents?|photos?|uploads?)\b/.test(lower)) return false
+  return true
+}
+
+function periodDaysFromText(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  const explicit = lower.match(/\blast\s+(\d{1,2})\s+days?\b/)?.[1] ?? lower.match(/\b(\d{1,2})\s+day\b/)?.[1]
+  if (explicit) return Math.max(1, Math.min(90, Number(explicit)))
+  if (/\bthis month|last 30|30 days?\b/.test(lower)) return 30
+  if (/\blast 14|two weeks|2 weeks|14 days?\b/.test(lower)) return 14
+  if (/\btoday\b/.test(lower)) return 1
+  return 7
+}
+
 function customerFileQueryFromText(text: string) {
   const clean = plainTruthText(text).replace(/\s+/g, ' ').trim()
   const lower = clean.toLowerCase()
@@ -224,6 +246,15 @@ export function resolveLocalTruthRoute(text: string, context: LocalTruthContext 
       reason: 'User asked for customer-specific follow-up/tasks/notes/projects/chats from saved records.',
       confidence: 0.81,
       toolCall: { name: 'get_customer_file', args: { query: customerContextQuery } },
+    }
+  }
+
+  if (isCompanyKpiReadRequest(userText)) {
+    return {
+      id: 'company-kpis',
+      reason: 'User asked for company KPIs, lead/project pipeline, operations, or usage from saved Jobrolo records.',
+      confidence: 0.86,
+      toolCall: { name: 'get_company_kpis', args: { periodDays: periodDaysFromText(userText) } },
     }
   }
 

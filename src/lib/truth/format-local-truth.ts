@@ -283,6 +283,62 @@ function formatLocalProjectFinancialSummary(data: Record<string, unknown>) {
   return lines.join('\n')
 }
 
+function nestedObject(record: Record<string, unknown>, path: string) {
+  return path.split('.').reduce<unknown>((current, key) => {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return null
+    return (current as Record<string, unknown>)[key]
+  }, record) as Record<string, unknown> | null
+}
+
+function numberPath(record: Record<string, unknown>, path: string) {
+  const parentPath = path.split('.').slice(0, -1).join('.')
+  const key = path.split('.').at(-1)
+  const parent = parentPath ? nestedObject(record, parentPath) : record
+  if (!parent || !key) return null
+  return numberField(parent, key)
+}
+
+function formatLocalCompanyKpis(data: Record<string, unknown>) {
+  const kpis = objectField(data, 'kpis') ?? data
+  const periodDays = numberField(kpis, 'periodDays') ?? 7
+  const leadsThisPeriod = numberPath(kpis, 'leads.thisPeriod') ?? 0
+  const previousLeads = numberPath(kpis, 'leads.previousPeriod') ?? 0
+  const totalLeads = numberPath(kpis, 'leads.total') ?? 0
+  const newLeads = numberPath(kpis, 'leads.new') ?? 0
+  const inspectionSet = numberPath(kpis, 'leads.inspectionSet') ?? 0
+  const converted = numberPath(kpis, 'leads.converted') ?? 0
+  const customersTotal = numberPath(kpis, 'customers.total') ?? 0
+  const customersAdded = numberPath(kpis, 'customers.addedThisPeriod') ?? 0
+  const projectsTotal = numberPath(kpis, 'projects.total') ?? 0
+  const projectsActive = numberPath(kpis, 'projects.active') ?? 0
+  const projectsAdded = numberPath(kpis, 'projects.addedThisPeriod') ?? 0
+  const upcomingAppointments = numberPath(kpis, 'appointments.upcoming14Days') ?? 0
+  const upcomingInspections = numberPath(kpis, 'appointments.inspectionsUpcoming14Days') ?? 0
+  const docsThisPeriod = numberPath(kpis, 'files.documentsThisPeriod') ?? 0
+  const photosThisPeriod = numberPath(kpis, 'files.photosThisPeriod') ?? 0
+  const priceSheets = numberPath(kpis, 'files.priceSheets') ?? 0
+  const pendingPriceSheets = numberPath(kpis, 'files.priceSheetsPendingReview') ?? 0
+  const pendingActions = numberPath(kpis, 'operations.pendingActions') ?? 0
+  const activeInsights = numberPath(kpis, 'operations.activeInsights') ?? 0
+  const failedOrReview = numberPath(kpis, 'operations.failedOrReviewItems') ?? 0
+  const aiCalls = numberPath(kpis, 'usage.aiCallsThisMonth') ?? 0
+  const webSearchCalls = numberPath(kpis, 'usage.webSearchCallsThisMonth') ?? 0
+  const estimatedCost = numberPath(kpis, 'usage.estimatedCostThisMonth')
+  const leadDelta = leadsThisPeriod - previousLeads
+  const leadDeltaText = leadDelta === 0 ? 'flat vs previous period' : `${leadDelta > 0 ? '+' : ''}${leadDelta} vs previous period`
+
+  return [
+    `Loaded company KPIs from saved Jobrolo records for the last ${periodDays} day(s).`,
+    `Leads: ${leadsThisPeriod} this period (${leadDeltaText}) · ${totalLeads} total · ${newLeads} new · ${inspectionSet} inspection/follow-up · ${converted} converted.`,
+    `Customers/projects: ${customersTotal} customers (${customersAdded} new) · ${projectsActive} active projects · ${projectsTotal} total projects (${projectsAdded} new).`,
+    `Schedule: ${upcomingAppointments} upcoming appointment${upcomingAppointments === 1 ? '' : 's'} in 14 days · ${upcomingInspections} inspection${upcomingInspections === 1 ? '' : 's'}.`,
+    `Files: ${docsThisPeriod} uploaded files and ${photosThisPeriod} photos this period · ${priceSheets} price sheet${priceSheets === 1 ? '' : 's'}${pendingPriceSheets ? ` (${pendingPriceSheets} pending review)` : ''}.`,
+    `Operations: ${pendingActions} pending action${pendingActions === 1 ? '' : 's'} · ${activeInsights} active insight${activeInsights === 1 ? '' : 's'} · ${failedOrReview} failed/review item${failedOrReview === 1 ? '' : 's'}.`,
+    `AI usage this month: ${aiCalls} calls · ${webSearchCalls} web searches${estimatedCost == null ? '' : ` · estimated ${moneyText(estimatedCost)}`}.`,
+    'Source rule: these are saved Jobrolo database counts, not chat memory or public research.',
+  ].join('\n')
+}
+
 export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionResultLike) {
   if (!result.success) {
     return `I tried to load that from saved Jobrolo records, but it failed. ${result.error ? `Error: ${result.error}` : 'Please try again.'}`
@@ -295,11 +351,11 @@ export function formatLocalTruthFinalText(call: ToolCall, result: ToolExecutionR
   if (call.name === 'get_customer_file' && data) return formatLocalCustomerFile(data)
   if (call.name === 'get_project_document_packet' && data) return formatLocalProjectPacket(data)
   if (call.name === 'get_project_financial_summary' && data) return formatLocalProjectFinancialSummary(data)
+  if (call.name === 'get_company_kpis' && data) return formatLocalCompanyKpis(data)
   const message = typeof data?.message === 'string' ? data.message : null
   if (message) return message
   if (call.name === 'get_contractor_profile') return 'Loaded your saved company profile.'
   if (call.name === 'get_copilot_inbox') return 'Loaded Action Needed from saved Jobrolo records.'
-  if (call.name === 'get_company_kpis') return 'Loaded company KPIs from saved Jobrolo records.'
   if (call.name === 'get_integration_readiness') return 'Loaded integration readiness from Jobrolo configuration.'
   return 'Loaded that from saved Jobrolo records.'
 }

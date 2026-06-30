@@ -11,7 +11,12 @@ export function assertLocalTruthContracts() {
   assert(savedCustomers.args.limit === 25, 'Saved client list should use a safe bounded limit')
 
   const countQuestion = buildLocalTruthToolCall('How many clients did we get this week?')
-  assert(!countQuestion, 'KPI/count questions should not route to local customer list')
+  assert(countQuestion?.name === 'get_company_kpis', `KPI/count questions should route to company KPIs, got ${countQuestion?.name}`)
+  assert(countQuestion.args.periodDays === 7, 'This-week KPI questions should use a 7-day default')
+
+  const companyHealth = buildLocalTruthToolCall('Show company health, leads, projects, and AI usage for the last 30 days.')
+  assert(companyHealth?.name === 'get_company_kpis', `Company health should route to company KPIs, got ${companyHealth?.name}`)
+  assert(companyHealth.args.periodDays === 30, 'Explicit 30-day KPI questions should pass periodDays=30')
 
   const createCustomer = buildLocalTruthToolCall('Create a customer named Natalie Pearson')
   assert(!createCustomer, 'Mutation-looking customer requests should not route through local truth')
@@ -185,6 +190,26 @@ export function assertLocalTruthContracts() {
   assert(financialText.includes('Gross profit: $5000.00'), 'Financial formatter should include gross profit')
   assert(financialText.includes('Margin: 50.00%'), 'Financial formatter should include margin percent')
   assert(financialText.includes('ProjectFinancialEntry ledger rows are the money truth'), 'Financial formatter should explain money truth source')
+
+  const kpiText = formatLocalTruthFinalText({ name: 'get_company_kpis', args: { periodDays: 7 } }, {
+    success: true,
+    data: {
+      kpis: {
+        periodDays: 7,
+        leads: { total: 12, thisPeriod: 4, previousPeriod: 2, new: 3, inspectionSet: 2, converted: 1 },
+        customers: { total: 8, addedThisPeriod: 2 },
+        projects: { total: 6, active: 5, addedThisPeriod: 1 },
+        appointments: { upcoming14Days: 3, inspectionsUpcoming14Days: 2 },
+        files: { documentsThisPeriod: 9, photosThisPeriod: 5, estimates: 2, priceSheets: 1, priceSheetsPendingReview: 1 },
+        operations: { pendingActions: 2, activeInsights: 1, failedOrReviewItems: 3 },
+        usage: { aiCallsThisMonth: 42, webSearchCallsThisMonth: 4, estimatedCostThisMonth: 1.23 },
+      },
+    },
+  })
+  assert(kpiText.includes('Loaded company KPIs from saved Jobrolo records'), 'KPI formatter should identify saved DB records')
+  assert(kpiText.includes('Leads: 4 this period (+2 vs previous period)'), 'KPI formatter should include lead delta')
+  assert(kpiText.includes('AI usage this month: 42 calls · 4 web searches · estimated $1.23'), 'KPI formatter should include usage/cost')
+  assert(kpiText.includes('not chat memory or public research'), 'KPI formatter should clarify source')
 
   return true
 }

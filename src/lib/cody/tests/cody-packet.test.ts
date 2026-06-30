@@ -14,6 +14,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 export function assertCodyPacketContracts() {
   assert(inferCodyArea('Cody Cody Cody PDF upload says saved but never attaches to project') === 'uploads/files', 'upload notes should classify as uploads/files')
+  assert(inferCodyArea('Cody Cody Cody inspection photo tray loses thumbnails after I take roof photos') === 'field', 'inspection photo tray notes should classify as field workflow')
   assert(inferCodyArea('Cody Cody Cody the onboarding screen locks me in setup mode') === 'onboarding/auth', 'onboarding notes should classify as onboarding/auth')
   assert(inferCodyArea('Cody Cody Cody approval button does nothing in Action Needed') === 'notifications', 'approval/notification notes should classify as notifications')
   assert(inferCodyArea('company card setup gaps should prompt me to upload agreements and research BBB') === 'company profile', 'company setup/research notes should classify as company profile')
@@ -66,4 +67,15 @@ export function assertCodyPacketContracts() {
   assert(packet.evidence.some(item => item.includes('link_document_to_project')), 'packet should include tool evidence when present')
   assert(packet.safetyNotes.some(note => note.toLowerCase().includes('approval') || note.toLowerCase().includes('mutate')), 'packet should include safety notes')
   assert(packet.testChecklist.length > 0, 'packet should include test checklist')
+
+  const inspectionPacket = buildCodyPacket({
+    content: 'Cody Cody Cody inspection photo capture should keep a live card with thumbnails and let me delete bad photos before completing the inspection.',
+    recentMessages: [
+      { role: 'user', text: 'Start inspection photos' },
+      { role: 'assistant', text: 'Inspection photo capture opened.' },
+    ],
+  })
+  assert(inspectionPacket.area === 'field', 'inspection packet should be field area')
+  assert(inspectionPacket.likelyFiles.includes('src/components/jobrolo/chat-input.tsx'), 'inspection packet should point to chat input tray')
+  assert(inspectionPacket.likelyFiles.includes('src/app/api/documents/[id]/route.ts'), 'inspection packet should point to inspection photo delete route')
 }

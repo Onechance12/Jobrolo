@@ -36,6 +36,8 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
   if (upload) {
     const uploadSupports = upload.route === 'company_pricing'
       ? ['upload-classifier', 'supplier', 'approval']
+      : upload.route === 'user_profile'
+        ? ['upload-classifier', 'brand-assets', 'approval']
       : upload.route === 'project_scope'
         ? ['document-type-routing', 'project-context', 'approval']
         : upload.route === 'project_invoice'
@@ -60,7 +62,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       workflowName: 'Upload routing',
       sticky: true,
       allowedTools: ['get_upload_status', 'get_document_content', 'link_document_to_customer', 'link_document_to_project', 'create_scope_from_document', 'review_price_sheet_items', 'create_template_upload_from_document', 'update_contractor_profile'],
-      blockedTools: upload.companyLevel ? ['create_customer', 'create_project_for_customer'] : [],
+      blockedTools: upload.companyLevel || upload.route === 'user_profile' ? ['create_customer', 'create_project_for_customer', 'link_document_to_customer', 'link_document_to_project'] : [],
       requiredContext: upload.needsClarification ? ['confirmed destination'] : undefined,
       nextStep: upload.needsClarification ? 'ask_clarification' : 'call_tool',
       summary: `Upload lane: ${upload.documentType} routed toward ${upload.storageScope}.`,
@@ -224,6 +226,27 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         'Reports should be completed through chat/cards first; builder pages are support surfaces.',
         'Do not finalize/share until required sections/photos are ready and approved.',
         'Recipient type controls visibility and wording.',
+      ],
+    })
+  }
+
+  if (/\b(my profile|profile photo|avatar|user icon|account photo|my role)\b/.test(text)) {
+    return buildIntent({
+      id: 'user_profile',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'user-profile',
+      supportingSkills: ['brand-assets', 'approval'],
+      workflowName: 'User profile',
+      sticky: false,
+      allowedTools: ['get_upload_status', 'consult_orchestrator'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'link_document_to_customer', 'link_document_to_project', 'update_contractor_profile'],
+      nextStep: 'ask_clarification',
+      summary: 'User profile lane: keep profile photos and personal setup on the user account, not customer/project/company files.',
+      laneRules: [
+        'User avatars belong to the logged-in user profile.',
+        'Do not attach profile photos to customer/project files.',
+        'Ask before applying an uploaded image as the account avatar.',
       ],
     })
   }

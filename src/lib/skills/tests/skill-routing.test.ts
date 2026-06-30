@@ -118,6 +118,8 @@ export function assertSkillRoutingContracts() {
     recentUserText: 'Use this as my profile photo.',
   })
   assert(avatar.route === 'user_profile', 'Profile photo/avatar should route to user profile behavior')
+  assert(!avatar.companyLevel, 'Profile photo/avatar should not be marked company-level')
+  assert(!avatar.projectLevel, 'Profile photo/avatar should not be marked project-level')
   assert(avatar.needsClarification, 'Implicit avatar should ask before applying to account')
 
   const ambiguous = classifyUploadForSkills({
@@ -253,6 +255,14 @@ export function assertSkillRoutingContracts() {
   assert(photoContext.requestIntent?.id === 'photo_evidence', `Photo request should resolve to photo_evidence intent, got ${photoContext.requestIntent?.id}`)
   const photoSkills = selectSkills(photoContext).map((selection) => selection.skill.id)
   assert(photoSkills.includes('photo-evidence'), `Photo request should select photo-evidence, got ${photoSkills.join(', ')}`)
+
+  const userProfileContext = buildSkillRoutingContext({ latestText: 'I uploaded this as my profile photo. Ask before applying it to my account and do not attach it to a customer or project.' })
+  assert(userProfileContext.requestIntent?.id === 'user_profile', `Profile photo request should resolve to user_profile intent, got ${userProfileContext.requestIntent?.id}`)
+  assert(userProfileContext.requestIntent?.primarySkill === 'user-profile', 'Profile photo request should be owned by user-profile')
+  assert(Boolean(userProfileContext.requestIntent?.blockedTools?.includes('link_document_to_project')), 'Profile photo request should block project attachment')
+  const userProfileSkills = selectSkills(userProfileContext).map((selection) => selection.skill.id)
+  assert(userProfileSkills.includes('user-profile'), `Profile photo request should select user-profile, got ${userProfileSkills.join(', ')}`)
+  assert(!userProfileSkills.includes('photo-evidence'), 'Profile photo request should not drift into photo evidence')
 
   const reportContext = buildSkillRoutingContext({ latestText: 'Create a roof report for Timothy and let me pick the photos.' })
   assert(reportContext.requestIntent?.id === 'roof_report', `Roof report should resolve to roof_report intent, got ${reportContext.requestIntent?.id}`)

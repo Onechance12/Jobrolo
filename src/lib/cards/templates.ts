@@ -504,6 +504,7 @@ export const JOBROLO_CARD_TEMPLATES: JobroloCardTemplate[] = [
     ],
     displayRules: [
       'Show thumbnails before long photo descriptions.',
+      'Inspection/photo evidence cards should let users remove blurry or wrong photos before finalizing the set.',
       'Photo actions should insert editable prompts with the real document/photo id behind the card action.',
       'Do not mix company/user profile images into customer/job photo evidence.',
     ],
@@ -601,6 +602,7 @@ export const JOBROLO_CARD_TEMPLATES: JobroloCardTemplate[] = [
     displayRules: [
       'Field cards should be sticky/glanceable and avoid form-like navigation.',
       'Location and GPS evidence must be shown separately from confirmed customer/project truth.',
+      'Inspection photo workflows should remain active while the user captures multiple sections, showing saved thumbnails by section before completion.',
       'Photo and observation actions should draft editable prompts.',
     ],
   },

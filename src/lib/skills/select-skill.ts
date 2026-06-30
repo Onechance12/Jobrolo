@@ -148,7 +148,7 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('crew-subcontractor', 0.86, 'Crew/subcontractor shared chat intent.'))
   }
 
-  if (/(photo|photos|front elevation|roof photos|damage photo|thumbnail|caption)/.test(text)) {
+  if (context.requestIntent?.id !== 'user_profile' && /(photo|photos|front elevation|roof photos|damage photo|thumbnail|caption)/.test(text)) {
     pushUnique(selections, select('photo-evidence', 0.86, 'Photo/evidence display, tagging, or report attachment intent.'))
   }
 

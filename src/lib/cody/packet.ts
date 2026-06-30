@@ -72,6 +72,7 @@ const AREA_PATTERNS: Array<[CodyArea, RegExp]> = [
 ]
 
 const STRONG_AREA_PATTERNS: Array<[CodyArea, RegExp]> = [
+  ['field', /\b(inspection photo tray|inspection photo capture|inspection photos?|photo checklist|front elevation|all elevations|roof photos?|damage photos?|take photo|live inspection|inspection card|captured this session)\b/i],
   ['company profile', /\b(company card|company profile|setup gaps?|research(?:ed|ing)? (?:my |the |our )?company|bbb|better business bureau|google reviews?|default terms|payment instructions|warranty text|estimate disclaimer|company logo|brand assets?)\b/i],
   ['onboarding/auth', /\b(setup mode|stuck in onboarding|create workspace|join workspace|invite code|account entry)\b/i],
   ['agent/tools', /\b(narrated operational work|without a valid executable tool call|tool call|tool_call|wrong workflow|misfire)\b/i],
@@ -267,6 +268,9 @@ function likelyIssueFromContent(area: CodyArea, content: string) {
   if (/\b(review docs?|needs review|still.*review|approved.*still|link(?:ed|ing).*still)\b/i.test(content)) {
     return 'A review/inbox item appears to stay open after the underlying document action completed. Check the InboxItem lifecycle and mark document-review items actioned when a link/save succeeds.'
   }
+  if (/\b(inspection photo tray|inspection photo capture|inspection photos?|photo checklist|front elevation|all elevations|roof photos?|damage photos?|take photo|live inspection|inspection card|captured this session)\b/i.test(content)) {
+    return 'Inspection photo capture is behaving like a one-off upload/chat message instead of a persistent live inspection tray with section buckets, thumbnails, notes, deletion, and final save/complete state.'
+  }
   if (area === 'company profile' && /\b(fetching|research|profile|company)\b/i.test(content) && /\bwithout a valid executable tool call|did not include any tool_calls|narrated/i.test(content)) {
     return 'Company profile/research intent was answered from narration instead of the company-profile or research tool path.'
   }
@@ -295,6 +299,17 @@ function likelyFilesFromContent(area: CodyArea, content: string) {
       'src/lib/prompts.ts',
       'src/lib/skills/select-skill.ts',
       'src/lib/skills/definitions/customers-projects.ts',
+    ]
+  }
+  if (/\b(inspection photo tray|inspection photo capture|inspection photos?|photo checklist|front elevation|all elevations|roof photos?|damage photos?|take photo|live inspection|inspection card|captured this session)\b/i.test(content)) {
+    return [
+      'src/components/jobrolo/chat-input.tsx',
+      'src/app/api/upload/route.ts',
+      'src/app/api/documents/[id]/route.ts',
+      'src/lib/project-context.ts',
+      'src/lib/field-copilot.ts',
+      'src/components/jobrolo/copilot-cards.tsx',
+      'src/lib/cards/templates.ts',
     ]
   }
   if (/\b(end cody|cody cody cody|cody session|cody chat)\b/i.test(content)) {

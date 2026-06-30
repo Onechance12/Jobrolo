@@ -331,7 +331,7 @@ export function classifyUploadForSkills(input: UploadSkillInput): UploadSkillCla
       route: 'user_profile',
       storageScope: 'user_profile',
       uploadPurpose: input.uploadPurpose || 'user_avatar',
-      companyLevel: true,
+      companyLevel: false,
       projectLevel: false,
       needsClarification: !explicitlyConfirmed,
       reason: 'Upload appears to be a user profile photo/avatar.',
