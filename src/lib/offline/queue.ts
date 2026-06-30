@@ -2,6 +2,11 @@ import type { OfflineQueueInput, OfflineQueueItem, OfflineQueueStatus, OfflineSt
 
 export const OFFLINE_QUEUE_STORAGE_KEY = 'jobrolo.offline.queue.v1'
 
+function notifyOfflineQueueChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('jobrolo:offline-queue-changed'))
+}
+
 export function getBrowserOfflineStorage(): OfflineStorageLike | null {
   if (typeof window === 'undefined') return null
   try {
@@ -45,6 +50,7 @@ function isQueueItem(value: unknown): value is OfflineQueueItem {
 function writeQueue(storage: OfflineStorageLike | null, key: string, items: OfflineQueueItem[]) {
   if (!storage) return
   storage.setItem(key, JSON.stringify(items))
+  notifyOfflineQueueChanged()
 }
 
 export function createOfflineQueueItem(input: OfflineQueueInput, localId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`): OfflineQueueItem {

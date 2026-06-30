@@ -14,9 +14,11 @@ const { assertFoundationContextContracts } = jiti('./src/lib/brain/tests/foundat
 const { assertLocalTruthContracts } = jiti('./src/lib/truth/tests/local-truth.test.ts')
 const { assertCardContracts } = jiti('./src/lib/cards/tests/card-contracts.test.ts')
 const { assertOfflineFoundationContracts } = jiti('./src/lib/offline/tests/offline-foundation.test.ts')
+const { assertPwaContracts } = jiti('./src/lib/offline/tests/pwa-contracts.test.ts')
 
 assertCardContracts()
 assertOfflineFoundationContracts()
+assertPwaContracts()
 assertFoundationContextContracts()
 assertBrainContextContracts()
 assertSkillRegistryContracts()
