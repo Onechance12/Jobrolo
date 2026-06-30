@@ -16,17 +16,24 @@ export function PwaRegister() {
 
     let cancelled = false
 
-    window.addEventListener('load', () => {
+    const register = () => {
       if (cancelled) return
       navigator.serviceWorker
         .register(SERVICE_WORKER_PATH)
         .catch(err => {
           console.warn('[pwa] service worker registration failed:', err)
         })
-    }, { once: true })
+    }
+
+    if (document.readyState === 'complete') {
+      register()
+    } else {
+      window.addEventListener('load', register, { once: true })
+    }
 
     return () => {
       cancelled = true
+      window.removeEventListener('load', register)
     }
   }, [])
 

@@ -336,6 +336,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const promptGroups = promptGroupsFor(mode, shortcuts)
   const uploadPromptGroups = pendingFiles.length ? uploadPromptGroupsFor(mode, pendingFiles) : []
   const shortcutRailGroups = pendingFiles.length ? uploadPromptGroups : promptGroups
+  const hasUserInput = Boolean(text.trim() || pendingFiles.length)
   const shouldShowShortcutRail = !text.trim() && !listening && shortcutRailGroups.length > 0
   const activeShortcutGroup = shortcutSheetGroupId ? shortcutRailGroups.find(group => group.id === shortcutSheetGroupId) ?? null : null
 
@@ -372,8 +373,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
         />
       ) : null}
       {listening && <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/30"><span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" /></span><span className="text-sm font-medium text-blue-800 dark:text-blue-100">Listening{interimText ? `: ${interimText}` : '…'}</span></div>}
-      <div className="flex items-end gap-2">
-        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="p-2.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-50 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
+      <div className="flex items-start gap-2">
+        <div className="relative flex-shrink-0"><button onClick={() => setShowAttachMenu(v => !v)} disabled={disabled || submitting} className="mt-0.5 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2.5 text-muted-foreground hover:bg-muted disabled:opacity-50" aria-label="Add photo or file"><Plus className="w-5 h-5" /></button>
           {showAttachMenu && (<><div className="fixed inset-0 z-10" onClick={() => setShowAttachMenu(false)} /><div className="absolute bottom-12 left-0 z-20 max-h-[70vh] min-w-[260px] overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
             {mode === 'field' ? <MenuButton icon={<Camera className="w-5 h-5 text-emerald-600 dark:text-emerald-300" />} label="Inspection photos" hint="Choose roof/interior/attic section" onClick={() => openInspectionIntake(null)} /> : null}
             <MenuButton icon={<Camera className="w-5 h-5 text-blue-600 dark:text-blue-300" />} label="Take photo" hint="Save field photos" onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click() }} />
@@ -388,8 +389,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           </button>
         ) : (
           <>
-            {speechSupported && <button onClick={startListening} disabled={disabled || submitting} className={cn('flex-shrink-0 rounded-full transition-all min-w-[52px] min-h-[52px] flex items-center justify-center', listening ? 'bg-slate-800 text-white shadow-lg dark:bg-slate-100 dark:text-slate-950' : 'bg-blue-600 text-white hover:bg-blue-700', (disabled || submitting) && 'opacity-50')} aria-label={listening ? 'Stop voice input' : 'Start voice input'}><Mic className="w-5 h-5" /></button>}
-            {(text.trim() || pendingFiles.length > 0) && !listening && <button onClick={handleSend} disabled={disabled || submitting} className="flex-shrink-0 p-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center"><Send className="w-4 h-4" /></button>}
+            {speechSupported && (!hasUserInput || listening) && <button onClick={startListening} disabled={disabled || submitting} className={cn('mt-0.5 flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded-full border-2 transition-all', listening ? 'border-blue-500 bg-blue-500/10 text-blue-500 shadow-[0_0_18px_rgba(37,99,235,0.25)]' : 'border-blue-500 bg-transparent text-blue-500 hover:bg-blue-500/10', (disabled || submitting) && 'opacity-50')} aria-label={listening ? 'Stop voice input' : 'Start voice input'}><Mic className="h-4 w-4" /></button>}
+            {hasUserInput && !listening && <button onClick={handleSend} disabled={disabled || submitting} className="mt-0.5 flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 p-2.5 text-white hover:bg-blue-700 disabled:opacity-40"><Send className="w-4 h-4" /></button>}
           </>
         )}
       </div>
