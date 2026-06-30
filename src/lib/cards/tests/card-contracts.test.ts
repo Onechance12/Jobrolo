@@ -30,6 +30,9 @@ export function assertCardContracts() {
     'company_phone_number_search',
     'company_phone_number_provision',
     'phone_auth_setup',
+    'field_map_card',
+    'geo_event',
+    'location_event',
   ]
 
   for (const cardType of expectedStructuredTypes) {
@@ -58,6 +61,11 @@ export function assertCardContracts() {
   const fieldTemplate = findJobroloCardTemplate('field_inspection_lead')
   assert(fieldTemplate?.id === 'field-inspection', `Field inspection cards should resolve to field-inspection, got ${fieldTemplate?.id}`)
   assert(Boolean(fieldTemplate?.displayRules.some(rule => /remain active/i.test(rule) && /thumbnails/i.test(rule))), 'Field inspection card should keep photo workflow active with thumbnails')
+
+  const fieldMapTemplate = findJobroloCardTemplate('field_map_card')
+  assert(fieldMapTemplate?.id === 'field-map', `Field map cards should resolve to field-map, got ${fieldMapTemplate?.id}`)
+  assert(Boolean(fieldMapTemplate?.displayRules.some(rule => /many location events/i.test(rule))), 'Field map card should document many location events per property')
+  assert(Boolean(fieldMapTemplate?.displayRules.some(rule => /AR|glasses/i.test(rule))), 'Field map card should be AR/glasses-ready')
 
   const companyPhoneTemplate = findJobroloCardTemplate('company_phone_numbers')
   assert(companyPhoneTemplate?.id === 'company-phone-numbers', `Company phone cards should resolve to company-phone-numbers, got ${companyPhoneTemplate?.id}`)

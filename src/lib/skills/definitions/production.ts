@@ -72,7 +72,7 @@ export const productionSkills: JobroloSkill[] = [
       'Do not require homeowner name or phone before starting a field inspection lead.',
       'Ask before converting property observations into real customer/project records.',
     ],
-    output: { cards: ['field-inspection', 'photo-evidence'] },
+    output: { cards: ['field-inspection', 'field-map', 'photo-evidence'] },
     outputFormat: 'Short field card or next-action prompt tied to location, lead, or project context.',
   },
   {

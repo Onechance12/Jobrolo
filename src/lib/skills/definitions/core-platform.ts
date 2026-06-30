@@ -156,7 +156,7 @@ export const corePlatformSkills: JobroloSkill[] = [
       'Do not create customers, projects, invoices, price imports, or external messages from offline cache without explicit confirmation after sync.',
       'If offline evidence conflicts with server truth, surface a conflict instead of overwriting records.',
     ],
-    output: { cards: ['activity-timeline', 'evidence-intake'] },
+    output: { cards: ['activity-timeline', 'evidence-intake', 'field-map'] },
     failureHandling: [
       'If sync is unavailable, keep the event pending and tell the user it is saved locally, not in Jobrolo records yet.',
       'If an offline event has no project/customer context, acknowledge it only and ask where to attach after connection returns.',
