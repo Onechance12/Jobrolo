@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Crosshair, ExternalLink, Home, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, X } from 'lucide-react'
+import { Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, X } from 'lucide-react'
 
 type BrowserLocation = {
   lat: number
@@ -48,7 +48,28 @@ const STATUS_META: Record<string, { label: string; color: string; pin: string }>
   not_interested: { label: 'Not interested', color: 'border-rose-300/35 bg-rose-500/15 text-rose-100', pin: 'border-rose-100 bg-rose-500 shadow-rose-500/40' },
   converted: { label: 'Converted', color: 'border-violet-300/35 bg-violet-500/15 text-violet-100', pin: 'border-violet-100 bg-violet-500 shadow-violet-500/45' },
   inspection_set: { label: 'Inspection', color: 'border-cyan-300/35 bg-cyan-500/15 text-cyan-100', pin: 'border-cyan-100 bg-cyan-500 shadow-cyan-500/45' },
+  renter: { label: 'Renter', color: 'border-orange-300/35 bg-orange-500/15 text-orange-100', pin: 'border-orange-100 bg-orange-500 shadow-orange-500/40' },
+  no_soliciting: { label: 'No soliciting', color: 'border-red-300/35 bg-red-500/15 text-red-100', pin: 'border-red-100 bg-red-600 shadow-red-500/45' },
+  do_not_knock: { label: 'Do not knock', color: 'border-red-300/35 bg-red-950/70 text-red-100', pin: 'border-red-100 bg-red-950 shadow-red-500/45' },
+  new_roof: { label: 'New roof', color: 'border-sky-300/35 bg-sky-500/15 text-sky-100', pin: 'border-sky-100 bg-sky-500 shadow-sky-500/40' },
+  other_roofer: { label: 'Other roofer', color: 'border-fuchsia-300/35 bg-fuchsia-500/15 text-fuchsia-100', pin: 'border-fuchsia-100 bg-fuchsia-500 shadow-fuchsia-500/40' },
+  bad_fit: { label: 'Bad fit', color: 'border-stone-300/35 bg-stone-500/15 text-stone-100', pin: 'border-stone-100 bg-stone-600 shadow-stone-500/35' },
 }
+
+const PRIMARY_OUTCOMES = [
+  { status: 'knocked', label: 'Knocked' },
+  { status: 'no_answer', label: 'No answer' },
+  { status: 'interested', label: 'Interested' },
+  { status: 'follow_up', label: 'Follow up' },
+]
+
+const PROPERTY_OUTCOMES = [
+  { status: 'renter', label: 'Renter' },
+  { status: 'no_soliciting', label: 'No soliciting' },
+  { status: 'do_not_knock', label: 'Do not knock' },
+  { status: 'new_roof', label: 'New roof' },
+  { status: 'other_roofer', label: 'Other roofer' },
+]
 
 function isValidLocation(loc: BrowserLocation | null): loc is BrowserLocation {
   return !!loc
@@ -94,6 +115,10 @@ function labelForLead(lead: FieldLead) {
   return lead.homeownerName || lead.address || lead.notes || 'Dropped lead'
 }
 
+function leadHasPin(lead: FieldLead) {
+  return typeof lead.latitude === 'number' && typeof lead.longitude === 'number'
+}
+
 function pinPosition(lead: FieldLead, center: BrowserLocation) {
   if (typeof lead.latitude !== 'number' || typeof lead.longitude !== 'number') return null
   const x = ((lead.longitude - (center.lng - MAP_SPAN)) / (MAP_SPAN * 2)) * 100
@@ -123,6 +148,8 @@ export function CanvassingMapMode() {
   const [showLeads, setShowLeads] = useState(true)
 
   const leads = useMemo(() => mapData?.leads ?? [], [mapData?.leads])
+  const pinnedLeads = useMemo(() => leads.filter(leadHasPin), [leads])
+  const unpinnedLeads = useMemo(() => leads.filter(lead => !leadHasPin(lead)), [leads])
   const selectedLead = useMemo(() => leads.find(lead => lead.id === selectedLeadId) ?? null, [leads, selectedLeadId])
 
   const loadMapData = useCallback(async () => {
@@ -173,10 +200,10 @@ export function CanvassingMapMode() {
   const mapUrl = useMemo(() => isValidLocation(location) ? `${openStreetMapEmbedUrl(location)}&refresh=${mapRefreshKey}` : null, [location, mapRefreshKey])
   const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
   const visiblePins = useMemo(() => isValidLocation(location)
-    ? leads
+    ? pinnedLeads
       .map(lead => ({ lead, pos: pinPosition(lead, location) }))
       .filter((item): item is { lead: FieldLead; pos: NonNullable<ReturnType<typeof pinPosition>> } => Boolean(item.pos))
-    : [], [leads, location])
+    : [], [pinnedLeads, location])
 
   async function dropLeadHere() {
     if (!isValidLocation(location)) {
@@ -233,6 +260,33 @@ export function CanvassingMapMode() {
     }
   }
 
+  async function attachCurrentLocation(lead: FieldLead) {
+    if (!isValidLocation(location)) {
+      await locateMe()
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/canvassing/leads/${lead.id}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          location: { lat: location.lat, lng: location.lng, accuracyMeters: location.accuracyMeters, source: 'field_map_attach_location' },
+          metadata: { locationAttachedFromMap: true },
+        }),
+      })
+      if (!res.ok) throw new Error('Could not attach this lead to your current map location.')
+      await loadMapData()
+      setSelectedLeadId(lead.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not attach this lead to your current map location.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const summary = mapData?.summary
 
   return (
@@ -259,8 +313,8 @@ export function CanvassingMapMode() {
         </div>
 
         <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[11px]">
-          <MapStat label="Leads" value={summary?.leadCount ?? leads.length} />
-          <MapStat label="Knocked" value={summary?.knocked ?? 0} />
+          <MapStat label="Pinned" value={pinnedLeads.length} />
+          <MapStat label="Need GPS" value={unpinnedLeads.length} />
           <MapStat label="Follow-up" value={summary?.followUp ?? 0} />
           <MapStat label="Hot" value={summary?.interested ?? 0} />
         </div>
@@ -328,8 +382,10 @@ export function CanvassingMapMode() {
           <LeadCard
             lead={selectedLead}
             saving={saving}
+            hasLocation={isValidLocation(location)}
             onClose={() => setSelectedLeadId(null)}
             onStatus={status => { void updateLeadStatus(selectedLead, status) }}
+            onAttachLocation={() => { void attachCurrentLocation(selectedLead) }}
             onPrompt={promptInMainChat}
           />
         ) : null}
@@ -339,7 +395,9 @@ export function CanvassingMapMode() {
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/60">Nearby pins</div>
-                <div className="text-[11px] text-white/45">{leads.length ? 'Tap a lead to work it.' : 'No saved pins yet.'}</div>
+                <div className="text-[11px] text-white/45">
+                  {pinnedLeads.length ? 'Tap a pin or lead to work it.' : unpinnedLeads.length ? 'Some leads need GPS before they can pin.' : 'No saved pins yet.'}
+                </div>
               </div>
               <div className="flex gap-1">
                 <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full text-white/70 hover:bg-white/10 hover:text-white" onClick={() => { void loadMapData() }} disabled={loadingMap}>
@@ -351,7 +409,7 @@ export function CanvassingMapMode() {
               </div>
             </div>
             <div className="flex gap-2 overflow-x-auto px-3 py-3">
-              {leads.slice(0, 20).map(lead => {
+              {pinnedLeads.slice(0, 20).map(lead => {
                 const meta = statusMeta(lead.status)
                 return (
                   <button
@@ -366,6 +424,29 @@ export function CanvassingMapMode() {
                         <div className="truncate text-xs text-white/50">{lead.address || lead.phone || 'No address yet'}</div>
                       </div>
                       <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
+                    </div>
+                  </button>
+                )
+              })}
+              {unpinnedLeads.slice(0, 12).map(lead => {
+                const meta = statusMeta(lead.status)
+                return (
+                  <button
+                    key={lead.id}
+                    type="button"
+                    onClick={() => setSelectedLeadId(lead.id)}
+                    className="min-w-[230px] rounded-2xl border border-amber-300/20 bg-amber-500/[0.08] p-3 text-left shadow-lg transition hover:bg-amber-500/15"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">{labelForLead(lead)}</div>
+                        <div className="truncate text-xs text-amber-100/65">{lead.address || lead.phone || 'Needs map location'}</div>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
+                    </div>
+                    <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-300/20 px-2 py-1 text-[10px] text-amber-100/80">
+                      <Link2 className="h-3 w-3" />
+                      Attach GPS
                     </div>
                   </button>
                 )
@@ -418,18 +499,23 @@ function MapStat({ label, value }: { label: string; value: number }) {
 function LeadCard({
   lead,
   saving,
+  hasLocation,
   onClose,
   onStatus,
+  onAttachLocation,
   onPrompt,
 }: {
   lead: FieldLead
   saving: boolean
+  hasLocation: boolean
   onClose: () => void
   onStatus: (status: string) => void
+  onAttachLocation: () => void
   onPrompt: (prompt: string) => void
 }) {
   const meta = statusMeta(lead.status)
   const label = labelForLead(lead)
+  const hasPin = leadHasPin(lead)
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl">
       <div className="flex items-start justify-between gap-3">
@@ -446,11 +532,45 @@ function LeadCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2.5 py-1 text-xs ${meta.color}`}>{meta.label}</span>
-        <button type="button" onClick={() => onStatus('knocked')} disabled={saving} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10">Knocked</button>
-        <button type="button" onClick={() => onStatus('no_answer')} disabled={saving} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10">No answer</button>
-        <button type="button" onClick={() => onStatus('interested')} disabled={saving} className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-100 hover:bg-emerald-500/20">Interested</button>
-        <button type="button" onClick={() => onStatus('follow_up')} disabled={saving} className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-500/20">Follow up</button>
+        {PRIMARY_OUTCOMES.map(outcome => (
+          <button
+            key={outcome.status}
+            type="button"
+            onClick={() => onStatus(outcome.status)}
+            disabled={saving}
+            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+          >
+            {outcome.label}
+          </button>
+        ))}
       </div>
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+        {PROPERTY_OUTCOMES.map(outcome => {
+          const outcomeMeta = statusMeta(outcome.status)
+          return (
+            <button
+              key={outcome.status}
+              type="button"
+              onClick={() => onStatus(outcome.status)}
+              disabled={saving}
+              className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${outcomeMeta.color}`}
+            >
+              {outcome.label}
+            </button>
+          )
+        })}
+      </div>
+      {!hasPin ? (
+        <button
+          type="button"
+          onClick={onAttachLocation}
+          disabled={saving || !hasLocation}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-500/15 disabled:opacity-50"
+        >
+          <Link2 className="h-4 w-4" />
+          Attach this lead to my current GPS pin
+        </button>
+      ) : null}
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Update this field lead: ${label}. Add homeowner, phone, address, notes, and next step from chat.`)}>
           <MessageCircle className="mr-1.5 h-4 w-4" />

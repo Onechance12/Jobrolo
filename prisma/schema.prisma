@@ -1600,7 +1600,7 @@ model CanvassingLead {
   address         String?
   latitude        Float?
   longitude       Float?
-  status          String   @default("new") // new, knocked, interested, follow_up, converted, not_interested, no_answer
+  status          String   @default("new") // new, knocked, interested, follow_up, converted, not_interested, no_answer, inspection_set, renter, no_soliciting, do_not_knock, new_roof, other_roofer
   homeownerName   String?
   phone           String?
   notes           String?
@@ -1619,7 +1619,7 @@ model CanvassingActivity {
   sessionId       String?
   leadId          String?
   userId          String?
-  type            String   // knock, photo, note, no_answer, interested, follow_up, converted
+  type            String   // knock, photo, note, no_answer, interested, follow_up, converted, renter, no_soliciting, do_not_knock, new_roof, other_roofer
   summary         String
   latitude        Float?
   longitude       Float?
