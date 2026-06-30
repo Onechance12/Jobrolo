@@ -23,11 +23,15 @@ export function assertCodyPacketContracts() {
 
   assert(extractCodyFeedbackActivation('Cody Cody Cody: upload approval does nothing') === null, 'Cody Cody Cody should open Cody mode, not one-shot capture')
   assert(extractCodyFeedbackActivation('hey Cody upload approval does nothing') === null, 'old hey Cody trigger should not activate Cody')
+  assert(extractCodyFeedbackActivation('hey Cody: upload approval does nothing') === null, 'hey Cody should not activate direct Cody feedback')
+  assert(extractCodyFeedbackActivation('Cody note: inspection photo tray needs real delete') === null, 'single Cody note should not activate direct Cody feedback')
+  assert(extractCodyFeedbackActivation('log for Cody: map locate button did not refresh') === null, 'log for Cody should not activate direct Cody feedback')
+  assert(extractCodyFeedbackActivation('Cody Cody note: inspection photo tray needs real delete')?.audience === 'cody', 'Cody Cody note should activate direct Cody feedback')
+  assert(extractCodyFeedbackActivation('Cody Cody note - map locate button did not refresh')?.content === 'map locate button did not refresh', 'Cody Cody note should support dash separator')
 
   const codexActivation = extractCodyFeedbackActivation('note to Codex: review this patch')
   assert(codexActivation?.audience === 'codex', 'note to Codex should still activate direct Codex feedback')
-  const codyActivation = extractCodyFeedbackActivation('note to Cody: upload approval does nothing')
-  assert(codyActivation?.audience === 'cody', 'note to Cody should activate direct Cody feedback')
+  assert(extractCodyFeedbackActivation('note to Cody: upload approval does nothing') === null, 'note to Cody should not activate direct Cody feedback')
 
   assert(isCodyBlockOpenText('Cody Cody Cody upload approval does nothing') === true, 'triple Cody should open Cody review mode')
   assert(isCodyBlockOpenText('Cody help me debug uploads') === false, 'single Cody should not open Cody review mode')

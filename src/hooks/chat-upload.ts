@@ -13,6 +13,7 @@ export type UploadedDocument = {
   thumbnailUrl?: string | null
   avatarUrl?: string | null
   companyLogoUrl?: string | null
+  uploadContext?: Record<string, unknown>
 }
 
 export type UploadBatchResult = {
@@ -116,11 +117,20 @@ export async function uploadFilesSequentially(files: File[], opts: { fields?: Re
       const data = await uploadOneFile(file, opts.fields ?? {}, opts.signal)
       const docs = (data.documents || []) as UploadedDocument[]
       documents.push(...docs)
+      if (data.uploadContext && typeof data.uploadContext === 'object') {
+        uploadContext = {
+          ...data.uploadContext,
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+        }
+      }
       if (data.needsLink) {
         needsLink = true
         deferLinkPrompt = deferLinkPrompt || data.deferLinkPrompt === true
         suggestedPrompt = data.suggestedPrompt
         uploadContext = {
+          ...uploadContext,
           documentIds: documents.map(d => d.id),
           filenames: documents.map(d => d.originalName),
           fileTypes: documents.map(d => d.fileType),
@@ -133,6 +143,32 @@ export async function uploadFilesSequentially(files: File[], opts: { fields?: Re
   }
 
   return { documents, failures, needsLink, deferLinkPrompt, suggestedPrompt, uploadContext }
+}
+
+export function isInspectionPhotoUpload(fields: Record<string, string> | undefined) {
+  return fields?.uploadPurpose === 'inspection_photo'
+}
+
+export function inspectionPhotoSavedMessage(fields: Record<string, string> | undefined, count: number) {
+  const section = fields?.photoSectionLabel || 'inspection photos'
+  const noun = count === 1 ? 'photo' : 'photos'
+  return `Saved ${count} ${section} ${noun} to this inspection set. Keep capturing the next section, or complete the inspection photo set when you are done.`
+}
+
+export function emitInspectionPhotosSaved(input: {
+  documents: UploadedDocument[]
+  uploadFields?: Record<string, string>
+  uploadContext?: Record<string, unknown>
+}) {
+  if (typeof window === 'undefined' || !isInspectionPhotoUpload(input.uploadFields)) return
+  window.dispatchEvent(new CustomEvent('jobrolo:inspection-photos-saved', {
+    detail: {
+      documents: input.documents,
+      photoSection: input.uploadFields?.photoSection || input.uploadContext?.photoSection,
+      photoSectionLabel: input.uploadFields?.photoSectionLabel || input.uploadContext?.photoSectionLabel,
+      inspectionSessionId: input.uploadFields?.inspectionSessionId || input.uploadContext?.inspectionSessionId,
+    },
+  }))
 }
 
 export function attachmentFromDocument(doc: UploadedDocument): MessageAttachment {

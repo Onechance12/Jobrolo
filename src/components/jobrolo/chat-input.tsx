@@ -24,6 +24,40 @@ interface Props {
   mode?: 'command' | 'field'
 }
 
+type InspectionTrayPhoto = {
+  id: string
+  name: string
+  url: string | null
+  thumbnailUrl: string | null
+  sectionId: string
+  sectionLabel: string
+  status?: string
+  size?: number
+}
+
+const INSPECTION_TRAY_STORAGE_KEY = 'jobrolo:inspection-photo-tray-v1'
+const INSPECTION_SESSION_STORAGE_KEY = 'jobrolo:inspection-session-id-v1'
+
+function loadStoredInspectionTray(): InspectionTrayPhoto[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(INSPECTION_TRAY_STORAGE_KEY) || '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(item => item && typeof item.id === 'string' && typeof item.sectionId === 'string')
+  } catch {
+    return []
+  }
+}
+
+function getInspectionSessionId() {
+  if (typeof window === 'undefined') return `inspection-${Date.now()}`
+  const existing = window.sessionStorage.getItem(INSPECTION_SESSION_STORAGE_KEY)
+  if (existing) return existing
+  const next = `inspection-${crypto.randomUUID()}`
+  window.sessionStorage.setItem(INSPECTION_SESSION_STORAGE_KEY, next)
+  return next
+}
+
 function shouldRequestBrowserLocation(prompt: string) {
   const t = prompt.toLowerCase().replace(/[’']/g, "'")
   const relayedInfo = /\b(customer|homeowner|owner|tenant|renter|adjuster|roofer|crew|sub|sales|pm)\s+(?:texted|messaged|emailed|called|said|told|sent)|\b(?:text|message|email|call)\s+(?:from|came in|said)|\b(?:scope|estimate|document|pdf|file|photo|image|report)\s+(?:says|said|shows|mentions|lists|has)|\b(?:according to|from the pdf|from the document|from the file|uploaded scope|uploaded estimate)\b/i.test(t)
@@ -110,6 +144,8 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   const [shortcutSheetGroupId, setShortcutSheetGroupId] = useState<string | null>(null)
   const [inspectionPickerOpen, setInspectionPickerOpen] = useState(false)
   const [inspectionSectionId, setInspectionSectionId] = useState<string | null>(null)
+  const [inspectionSessionId] = useState(getInspectionSessionId)
+  const [inspectionPhotos, setInspectionPhotos] = useState<InspectionTrayPhoto[]>(loadStoredInspectionTray)
   const fileInputRef = useRef<HTMLInputElement>(null); const cameraInputRef = useRef<HTMLInputElement>(null); const textareaRef = useRef<HTMLTextAreaElement>(null); const recognitionRef = useRef<any>(null)
   const textRef = useRef(text); useEffect(() => { textRef.current = text }, [text])
   const selectedInspectionSection = inspectionSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === inspectionSectionId) ?? null : null
@@ -150,6 +186,12 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
   }, [])
 
   useEffect(() => {
+    try {
+      window.sessionStorage.setItem(INSPECTION_TRAY_STORAGE_KEY, JSON.stringify(inspectionPhotos.slice(-80)))
+    } catch {}
+  }, [inspectionPhotos])
+
+  useEffect(() => {
     const onInsertPrompt = (event: Event) => {
       const detail = (event as CustomEvent<{ text?: string }>).detail
       if (detail?.text) {
@@ -173,15 +215,47 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       setShowAttachMenu(false)
       setLocalError(null)
     }
+    const onInspectionPhotosSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        documents?: Array<{ id: string; originalName: string; url?: string | null; thumbnailUrl?: string | null; status?: string; size?: number }>
+        photoSection?: string
+        photoSectionLabel?: string
+      }>).detail
+      const sectionId = detail?.photoSection || inspectionSectionId || 'uncategorized'
+      const sectionLabel = detail?.photoSectionLabel || INSPECTION_PHOTO_SECTIONS.find(section => section.id === sectionId)?.label || 'Uncategorized'
+      const docs = detail?.documents || []
+      if (!docs.length) return
+      setInspectionPhotos(previous => {
+        const existing = new Set(previous.map(photo => photo.id))
+        const next = docs
+          .filter(doc => doc.id && !existing.has(doc.id))
+          .map(doc => ({
+            id: doc.id,
+            name: doc.originalName || 'inspection photo',
+            url: doc.url || null,
+            thumbnailUrl: doc.thumbnailUrl || doc.url || null,
+            sectionId,
+            sectionLabel,
+            status: doc.status,
+            size: doc.size,
+          }))
+        return next.length ? [...previous, ...next] : previous
+      })
+      setInspectionPickerOpen(true)
+      setInspectionSectionId(sectionId === 'uncategorized' ? null : sectionId)
+      setLocalError(null)
+    }
     window.addEventListener('jobrolo:open-file-picker', openFilePicker)
     window.addEventListener('jobrolo:open-camera', openCamera)
     window.addEventListener('jobrolo:open-inspection-photo-intake', openInspectionIntake)
+    window.addEventListener('jobrolo:inspection-photos-saved', onInspectionPhotosSaved)
     return () => {
       window.removeEventListener('jobrolo:open-file-picker', openFilePicker)
       window.removeEventListener('jobrolo:open-camera', openCamera)
       window.removeEventListener('jobrolo:open-inspection-photo-intake', openInspectionIntake)
+      window.removeEventListener('jobrolo:inspection-photos-saved', onInspectionPhotosSaved)
     }
-  }, [])
+  }, [inspectionSectionId])
 
   useEffect(() => { const ta = textareaRef.current; if (!ta) return; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px' }, [text])
 
@@ -210,6 +284,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
             uploadPurpose: 'inspection_photo',
             photoSection: selectedInspectionSection.id,
             photoSectionLabel: selectedInspectionSection.label,
+            inspectionSessionId,
           }
         : undefined
       const needsTextLocation = Boolean(t && shouldRequestBrowserLocation(t))
@@ -230,7 +305,10 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
           setLocalError(`${browserLocationErrorMessage(err)} I can still save the upload, but it will not include GPS evidence.`)
         }
       }
-      const result = await onSend({ text: finalText, displayText: t, attachments: filesToSend, uploadFields: { ...uploadFields, ...locationFields } })
+      const displayText = selectedInspectionSection && filesToSend.length
+        ? `${selectedInspectionSection.label}: ${filesToSend.length} inspection photo${filesToSend.length === 1 ? '' : 's'}`
+        : t
+      const result = await onSend({ text: finalText, displayText, attachments: filesToSend, uploadFields: { ...uploadFields, ...locationFields } })
       if (result && typeof result === 'object' && result.keepAttachments) {
         setLocalError('Upload did not finish. I kept the file attached so you can try again.')
         return
@@ -287,6 +365,22 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
     if (!textRef.current.trim() || isGeneratedInspectionPrompt(textRef.current)) setText(inspectionPromptForSection(selectedInspectionSection))
     if (source === 'camera') cameraInputRef.current?.click()
     else fileInputRef.current?.click()
+  }
+  const deleteInspectionTrayPhoto = async (id: string) => {
+    const photo = inspectionPhotos.find(item => item.id === id)
+    if (!photo) return
+    setInspectionPhotos(photos => photos.filter(item => item.id !== id))
+    setLocalError(null)
+    try {
+      const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Could not delete that inspection photo.')
+      }
+    } catch (err) {
+      setInspectionPhotos(photos => photos.some(item => item.id === id) ? photos : [...photos, photo])
+      setLocalError(err instanceof Error ? err.message : 'Could not delete that inspection photo.')
+    }
   }
   const insertPrompt = (prompt: string) => {
     setText(prompt)
@@ -352,9 +446,17 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
       {inspectionPickerOpen ? (
         <InspectionPhotoIntakeCard
           selectedSectionId={inspectionSectionId}
+          pendingFiles={pendingFiles}
+          savedPhotos={inspectionPhotos}
           onSelectSection={chooseInspectionSection}
           onTakePhoto={() => openInspectionPicker('camera')}
           onUpload={() => openInspectionPicker('file')}
+          onRemovePending={(index) => setPendingFiles(files => files.filter((_, idx) => idx !== index))}
+          onRemoveSaved={deleteInspectionTrayPhoto}
+          onComplete={() => {
+            setInspectionPickerOpen(false)
+            setLocalError('Inspection photo set saved in this session. Ask Jobrolo to build the report or keep capturing more sections when ready.')
+          }}
           onClose={() => setInspectionPickerOpen(false)}
         />
       ) : null}
@@ -462,24 +564,41 @@ function inspectionSectionUploadLabel(section: InspectionPhotoSection) {
 
 function InspectionPhotoIntakeCard({
   selectedSectionId,
+  pendingFiles,
+  savedPhotos,
   onSelectSection,
   onTakePhoto,
   onUpload,
+  onRemovePending,
+  onRemoveSaved,
+  onComplete,
   onClose,
 }: {
   selectedSectionId: string | null
+  pendingFiles: File[]
+  savedPhotos: InspectionTrayPhoto[]
   onSelectSection: (sectionId: string) => void
   onTakePhoto: () => void
   onUpload: () => void
+  onRemovePending: (index: number) => void
+  onRemoveSaved: (id: string) => void
+  onComplete: () => void
   onClose: () => void
 }) {
   const selected = selectedSectionId ? INSPECTION_PHOTO_SECTIONS.find(s => s.id === selectedSectionId) : null
+  const pendingForSelected = selected ? pendingFiles : []
+  const savedBySection = INSPECTION_PHOTO_SECTIONS.map(section => ({
+    section,
+    photos: savedPhotos.filter(photo => photo.sectionId === section.id),
+  })).filter(group => group.photos.length > 0)
+  const uncategorized = savedPhotos.filter(photo => !INSPECTION_PHOTO_SECTIONS.some(section => section.id === photo.sectionId))
+  const totalCount = savedPhotos.length + pendingFiles.length
   return (
     <div className="mb-2 max-h-[58dvh] overflow-y-auto rounded-2xl border border-emerald-300/60 bg-emerald-50 p-3 shadow-sm dark:border-emerald-900/70 dark:bg-emerald-950/25">
       <div className="mb-2 flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-50">Inspection photo capture</div>
-          <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Stays open while this inspection is active. Pick a section, then take or upload photos.</div>
+          <div className="text-xs text-emerald-900/70 dark:text-emerald-100/70">Live inspection tray. Capture by section, review thumbnails, remove mistakes, then complete the set.</div>
         </div>
         <button type="button" onClick={onClose} className="inline-flex min-h-[34px] items-center gap-1 rounded-full px-2 text-xs font-medium text-emerald-950/70 hover:bg-emerald-100 dark:text-emerald-100/80 dark:hover:bg-emerald-900/40" aria-label="Close inspection photo capture">
           <X className="h-4 w-4" />
@@ -504,6 +623,34 @@ function InspectionPhotoIntakeCard({
           </button>
         ))}
       </div>
+      {pendingForSelected.length > 0 ? (
+        <div className="mt-3 rounded-2xl border border-emerald-300/70 bg-background/70 p-2 dark:border-emerald-900/70 dark:bg-background/35">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold text-emerald-950 dark:text-emerald-50">Ready to save · {selected?.label}</div>
+              <div className="text-[10px] text-muted-foreground">Remove bad shots before sending.</div>
+            </div>
+            <span className="rounded-full bg-emerald-600/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200">{pendingForSelected.length}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {pendingForSelected.map((file, index) => (
+              <PendingInspectionThumb key={`${file.name}-${index}`} file={file} onRemove={() => onRemovePending(index)} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {savedBySection.length > 0 || uncategorized.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:text-emerald-200">Captured this session</div>
+            <span className="rounded-full bg-emerald-600/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200">{savedPhotos.length} saved</span>
+          </div>
+          {savedBySection.map(group => (
+            <InspectionSectionBucket key={group.section.id} label={group.section.label} photos={group.photos} onRemove={onRemoveSaved} />
+          ))}
+          {uncategorized.length > 0 ? <InspectionSectionBucket label="Uncategorized" photos={uncategorized} onRemove={onRemoveSaved} /> : null}
+        </div>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={onTakePhoto} className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700">
           <Camera className="h-4 w-4" />
@@ -514,11 +661,47 @@ function InspectionPhotoIntakeCard({
           Upload
         </button>
       </div>
-      <button type="button" onClick={onClose} className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center rounded-xl border border-emerald-300 bg-background/80 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 dark:border-emerald-900/70 dark:text-emerald-100 dark:hover:bg-emerald-950/40">
-        Complete inspection photo set
+      <button type="button" onClick={onComplete} className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center rounded-xl border border-emerald-300 bg-background/80 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-50 dark:border-emerald-900/70 dark:text-emerald-100 dark:hover:bg-emerald-950/40">
+        Save / complete inspection photo set{totalCount ? ` (${totalCount})` : ''}
       </button>
       <div className="mt-2 text-[11px] text-emerald-900/75 dark:text-emerald-100/70">
-        {selected ? `Selected: ${selected.label}. Photos will be tagged with this section when you send.` : 'Select a section first so Jobrolo does not have to guess what these photos are.'}
+        {selected ? `Selected: ${selected.label}. New photos will be tagged here. Analysis may finish in the background if AI/OCR is available.` : 'Select a section first so Jobrolo does not have to guess what these photos are.'}
+      </div>
+    </div>
+  )
+}
+
+function PendingInspectionThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [previewUrl] = useState<string | null>(() => isImageFile(file.type) ? URL.createObjectURL(file) : null)
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
+  return (
+    <div className="group relative overflow-hidden rounded-xl border border-border bg-card">
+      {previewUrl ? <img src={previewUrl} alt={file.name} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square w-full place-items-center bg-muted"><FileText className="h-5 w-5 text-muted-foreground" /></div>}
+      <button type="button" onClick={onRemove} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/65 text-white shadow-sm" aria-label="Remove staged photo">
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <div className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-1 text-[9px] text-white">staged</div>
+    </div>
+  )
+}
+
+function InspectionSectionBucket({ label, photos, onRemove }: { label: string; photos: InspectionTrayPhoto[]; onRemove: (id: string) => void }) {
+  return (
+    <div className="rounded-2xl border border-emerald-300/60 bg-background/70 p-2 dark:border-emerald-900/70 dark:bg-background/35">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-foreground">{label}</div>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{photos.length}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {photos.map(photo => (
+          <div key={photo.id} className="group relative overflow-hidden rounded-xl border border-border bg-card">
+            {photo.thumbnailUrl || photo.url ? <img src={photo.thumbnailUrl || photo.url || ''} alt={photo.name} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square w-full place-items-center bg-muted"><Camera className="h-5 w-5 text-muted-foreground" /></div>}
+            <button type="button" onClick={() => onRemove(photo.id)} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/65 text-white shadow-sm" aria-label="Remove photo from inspection tray">
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <div className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-1 text-[9px] text-white">{photo.status || 'saved'}</div>
+          </div>
+        ))}
       </div>
     </div>
   )

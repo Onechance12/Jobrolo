@@ -87,7 +87,7 @@ export function CanvassingMapMode() {
 
   return (
     <main className="fixed inset-0 z-50 flex min-h-dvh flex-col overflow-hidden bg-slate-950 text-white">
-      <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-slate-950/85 px-4 py-3 backdrop-blur">
+      <div className="absolute inset-x-0 top-0 z-10 border-b border-white/10 bg-slate-950/85 px-4 pb-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-white/55">
@@ -109,7 +109,7 @@ export function CanvassingMapMode() {
         </div>
       </div>
 
-      <div className="relative flex-1 pt-[72px]">
+      <div className="relative flex-1 pt-[calc(72px_+_env(safe-area-inset-top))]">
         {mapUrl ? (
           <iframe
             key={`field-map-${mapRefreshKey}`}
@@ -137,7 +137,7 @@ export function CanvassingMapMode() {
         )}
       </div>
 
-      <div className="absolute inset-x-3 bottom-4 z-10 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-950/85 p-2 text-xs text-white/70 shadow-2xl backdrop-blur">
+      <div className="absolute inset-x-3 bottom-[calc(1rem_+_env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-950/85 p-2 text-xs text-white/70 shadow-2xl backdrop-blur">
         <div className="px-2">
           {isValidLocation(location)
             ? <>GPS ready{location.accuracyMeters ? ` · ±${Math.round(location.accuracyMeters)}m` : ''}</>

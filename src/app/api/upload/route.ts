@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
     const requireUploadConfirmation = String(form.get('requireUploadConfirmation') || '').trim() === 'true'
     const photoSection = String(form.get('photoSection') || '').trim()
     const photoSectionLabel = String(form.get('photoSectionLabel') || '').trim()
+    const inspectionSessionId = String(form.get('inspectionSessionId') || '').trim()
     const captureLocation = uploadCaptureLocation(form)
 
     let workspaceId: string | undefined
@@ -201,6 +202,7 @@ export async function POST(req: NextRequest) {
               requireUploadConfirmation,
               photoSection: photoSection || null,
               photoSectionLabel: photoSectionLabel || null,
+              inspectionSessionId: inspectionSessionId || null,
               captureLocation,
               capturedFrom: 'chat_input',
               companyPricingDefault: shouldStoreAsCompanyPricing,
@@ -367,10 +369,30 @@ export async function POST(req: NextRequest) {
     const companyPricingUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => d.fileType === 'price_sheet')
     const companyTemplateUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => d.storageScope === 'company_template')
     const companyAssetUpload = !companyLevelUpload && documents.length > 0 && documents.every(d => ['brand_asset', 'user_profile', 'company_profile'].includes(d.storageScope || ''))
+    const inspectionPhotoUpload = !companyLevelUpload && uploadPurpose === 'inspection_photo' && documents.length > 0
     const needsLink = !companyLevelUpload && !companyPricingUpload && !companyTemplateUpload && !companyAssetUpload && !customerId && !projectId && !workspaceId
     return NextResponse.json({
       documents,
-      ...(companyPricingUpload ? {
+      ...(inspectionPhotoUpload ? {
+        needsLink: false,
+        deferLinkPrompt: true,
+        suggestedPrompt: documents.length === 1
+          ? `Saved this ${photoSectionLabel || 'inspection'} photo to the active inspection set.`
+          : `Saved ${documents.length} ${photoSectionLabel || 'inspection'} photos to the active inspection set.`,
+        uploadContext: {
+          documentIds: documents.map(d => d.id),
+          filenames: documents.map(d => d.originalName),
+          fileTypes: documents.map(d => d.fileType),
+          uploadPurpose: 'inspection_photo',
+          photoSection: photoSection || null,
+          photoSectionLabel: photoSectionLabel || null,
+          inspectionSessionId: inspectionSessionId || null,
+          projectId: projectId || null,
+          customerId: customerId || null,
+          workspaceId: workspaceId || null,
+          captureLocation,
+        },
+      } : companyPricingUpload ? {
         needsLink: false,
         deferLinkPrompt: true,
         suggestedPrompt: documents.length === 1

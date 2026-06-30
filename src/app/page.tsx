@@ -1087,7 +1087,7 @@ function ActionNeededMenu({
   }
 
   return (
-    <div className="fixed inset-x-3 top-[4.75rem] z-50 max-h-[calc(100dvh-9rem)] w-auto overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-10 sm:max-h-none sm:w-[min(24rem,calc(100vw-1.5rem))]">
+    <div className="fixed inset-x-3 top-[calc(4.75rem_+_env(safe-area-inset-top))] z-50 max-h-[calc(100dvh_-_9rem_-_env(safe-area-inset-top))] w-auto overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-10 sm:max-h-none sm:w-[min(24rem,calc(100vw-1.5rem))]">
       <div className="flex min-w-0 items-start justify-between gap-3 border-b border-border p-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold">Action Needed</div>

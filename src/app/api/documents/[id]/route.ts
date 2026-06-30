@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { requireContext } from '@/lib/security/context'
 import { requireDocument } from '@/lib/security/ownership'
 import { enqueueAgentJob, kickAgentJob } from '@/lib/jobs/queue'
+import { deleteStoredFile } from '@/lib/storage'
 export const runtime = 'nodejs'
 
 const STUCK_DOCUMENT_JOB_MS = 2 * 60 * 1000
@@ -138,6 +139,76 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       project: docWithRelations.project,
       customer: docWithRelations.customer,
       createdAt: docWithRelations.createdAt,
+    },
+  })
+}
+
+function parseExtractedData(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function isInspectionPhotoDocument(doc: {
+  fileType: string
+  mimeType: string
+  extractedData: string | null
+}) {
+  const extracted = parseExtractedData(doc.extractedData)
+  const uploadContext = extracted.uploadContext && typeof extracted.uploadContext === 'object' && !Array.isArray(extracted.uploadContext)
+    ? extracted.uploadContext as Record<string, unknown>
+    : {}
+  return (
+    uploadContext.uploadPurpose === 'inspection_photo' ||
+    typeof uploadContext.inspectionSessionId === 'string' ||
+    (doc.fileType === 'photo' && doc.mimeType.startsWith('image/') && typeof uploadContext.photoSection === 'string')
+  )
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const ctx = await requireContext(req).catch(e => e)
+  if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
+  const { id } = await params
+
+  const doc = await db.document.findFirst({
+    where: { id, contractorId: ctx.contractorId },
+    select: {
+      id: true,
+      originalName: true,
+      filename: true,
+      fileType: true,
+      mimeType: true,
+      filePath: true,
+      thumbnailPath: true,
+      extractedData: true,
+    },
+  })
+  if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  if (!isInspectionPhotoDocument(doc)) {
+    return NextResponse.json({
+      error: 'Direct delete is only available for inspection photo tray items. Use the normal file delete approval flow for other saved documents.',
+    }, { status: 403 })
+  }
+
+  await db.document.delete({ where: { id: doc.id } })
+
+  const [fileDeleted, thumbnailDeleted] = await Promise.all([
+    deleteStoredFile(doc.filePath),
+    deleteStoredFile(doc.thumbnailPath),
+  ])
+
+  return NextResponse.json({
+    ok: true,
+    deleted: {
+      id: doc.id,
+      name: doc.originalName || doc.filename,
+      fileDeleted,
+      thumbnailDeleted,
     },
   })
 }

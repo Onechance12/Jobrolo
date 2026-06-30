@@ -272,7 +272,7 @@ export function WorkspaceSidebar({ onNewChat, onNavigate, onCollapse }: Props) {
   const hiddenPrivateChatCount = Math.max(0, visiblePrivateChatCount - shownPrivateChatCount)
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-r border-border bg-sidebar md:w-64">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-r border-border bg-sidebar pt-[env(safe-area-inset-top)] md:w-64">
       <div className="flex-shrink-0 border-b border-border p-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

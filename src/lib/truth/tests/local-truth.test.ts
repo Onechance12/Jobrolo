@@ -23,6 +23,10 @@ export function assertLocalTruthContracts() {
   const customerPhotos = buildLocalTruthToolCall('Show photos for Timothy Disen grouped by category.')
   assert(customerPhotos?.name === 'get_customer_file', `Named photo requests should prefer customer file context, got ${customerPhotos?.name}`)
 
+  const customerFollowUp = buildLocalTruthToolCall('Who needs follow-up for Timothy Disen? Check saved tasks, notes, projects, and chats.')
+  assert(customerFollowUp?.name === 'get_customer_file', `Named customer follow-up context should route to get_customer_file, got ${customerFollowUp?.name}`)
+  assert(customerFollowUp.args.query === 'Timothy Disen', `Named customer follow-up query should be Timothy Disen, got ${String(customerFollowUp.args.query)}`)
+
   const recentUploads = buildLocalTruthToolCall('Show recent uploads that are still processing.')
   assert(recentUploads?.name === 'get_recent_uploads', `Recent uploads should route to get_recent_uploads, got ${recentUploads?.name}`)
 

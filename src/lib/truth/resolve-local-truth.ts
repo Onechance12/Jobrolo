@@ -93,6 +93,37 @@ function customerFileQueryFromText(text: string) {
   return null
 }
 
+function customerContextQueryFromText(text: string) {
+  const clean = plainTruthText(text).replace(/\s+/g, ' ').trim()
+  const lower = clean.toLowerCase()
+  if (!clean || hasLocalTruthMutationIntent(lower)) return null
+  if (/\b(company|business|contractor)\s+(kpi|kpis|health|intelligence|profile|setup)\b/.test(lower)) return null
+  if (!/\b(follow[- ]?up|tasks?|notes?|projects?|jobs?|chats?|conversation|customer context|client context|next steps?|what needs done)\b/.test(lower)) return null
+  if (!/\b(check|show|list|view|pull|display|open|who|what|which|where|needs?)\b/.test(lower)) return null
+
+  const patterns = [
+    /\b(?:for|on|about|with)\s+(.+?)(?:\?|$|\.\s|,\s)/i,
+    /\b(.+?)\s+(?:needs?|need)\s+follow[- ]?up\b/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = clean.match(pattern)?.[1]?.trim()
+    if (!match) continue
+    const query = match
+      .replace(/\b(saved|tasks?|notes?|projects?|jobs?|chats?|conversation|customer|client|homeowner|follow[- ]?up|records?|database|jobrolo|please|the|my|our)\b/gi, ' ')
+      .replace(/'s\b/gi, '')
+      .replace(/[?.!,]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!query) continue
+    if (/^(this|that|current|active|the|a|an|customer|client|homeowner|project|job|it|them)$/i.test(query)) continue
+    if (query.length < 2) continue
+    return query
+  }
+
+  return null
+}
+
 function isProjectDocumentPacketRequest(text: string, activeProjectId?: string | null) {
   if (!activeProjectId) return false
   const lower = plainTruthText(text).toLowerCase()
@@ -183,6 +214,16 @@ export function resolveLocalTruthRoute(text: string, context: LocalTruthContext 
       reason: 'User asked for a saved customer/client file by name or context.',
       confidence: 0.82,
       toolCall: { name: 'get_customer_file', args: { query: customerFileQuery } },
+    }
+  }
+
+  const customerContextQuery = customerContextQueryFromText(userText)
+  if (customerContextQuery) {
+    return {
+      id: 'customer-context',
+      reason: 'User asked for customer-specific follow-up/tasks/notes/projects/chats from saved records.',
+      confidence: 0.81,
+      toolCall: { name: 'get_customer_file', args: { query: customerContextQuery } },
     }
   }
 

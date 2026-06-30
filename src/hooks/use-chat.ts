@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useWorkspaceStore } from '@/store/workspace-store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
-import { attachmentFromDocument, uploadAnalysisFollowupFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
+import { attachmentFromDocument, emitInspectionPhotosSaved, inspectionPhotoSavedMessage, isInspectionPhotoUpload, uploadAnalysisFollowupFromDocument, uploadFilesSequentially } from '@/hooks/chat-upload'
 import { serializeMessagesForAgentHistory } from '@/hooks/chat-history'
 
 // Terminal states — once a document reaches one of these, we stop polling.
@@ -275,6 +275,34 @@ export function useChat() {
           }
           for (const a of previewAttachments) URL.revokeObjectURL(a.url)
           await refreshBusinessContext()
+
+          if (isInspectionPhotoUpload(uploadFields)) {
+            if (data.failures.length > 0) {
+              addMessage({
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `I saved ${data.documents.length} inspection photo${data.documents.length === 1 ? '' : 's'}, but ${data.failures.length} failed:\n${data.failures.map(f => `• ${f.fileName}: ${f.error}`).join('\n')}`,
+                createdAt: new Date().toISOString(),
+              })
+            }
+            emitInspectionPhotosSaved({ documents: data.documents, uploadFields, uploadContext: data.uploadContext })
+            addMessage({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: inspectionPhotoSavedMessage(uploadFields, data.documents.length),
+              contextType: 'inspection_photo_saved',
+              contextData: {
+                cardType: 'inspection_photo_saved',
+                documentIds: data.documents.map(doc => doc.id),
+                photoSection: uploadFields.photoSection,
+                photoSectionLabel: uploadFields.photoSectionLabel,
+                inspectionSessionId: uploadFields.inspectionSessionId,
+              },
+              createdAt: new Date().toISOString(),
+            })
+            clearUploadProgress()
+            return { ok: true }
+          }
 
           // Upload success means "file saved". If the user also typed instructions
           // about the upload, give analysis a short head start, but do not let a

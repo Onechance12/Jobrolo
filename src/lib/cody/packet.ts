@@ -194,9 +194,7 @@ export function extractCodyFeedbackActivation(text: string): CodyActivation | nu
   const clean = text.trim()
   if (!clean) return null
 
-  const codyMarker = clean.match(/^\s*\(?\s*note\s+to\s+(cody)\s*\)?\s*[:\-–—]?\s*/i)
-    ?? clean.match(/^\s*(?:tell|send|save)\s+(?:this\s+)?(?:to|for)\s+(cody)\s*[:\-–—]?\s*/i)
-    ?? clean.match(/^\s*(?:tell|send|save)\s+(cody)\s+(?:this\s+)?[:\-–—]?\s*/i)
+  const codyMarker = clean.match(/^\s*\(?\s*cody\s+cody\s+note\s*\)?\s*[:\-–—]\s*/i)
   if (codyMarker) {
     const content = clean.slice(codyMarker[0].length).trim()
     return content ? { audience: 'cody', content } : null
