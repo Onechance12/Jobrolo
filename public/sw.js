@@ -7,7 +7,7 @@
  * - falls back to /offline when a route has never been cached on this device
  */
 
-const CACHE_VERSION = 'jobrolo-pwa-v2'
+const CACHE_VERSION = 'jobrolo-pwa-v3'
 const SHELL_CACHE = `${CACHE_VERSION}:shell`
 const STATIC_CACHE = `${CACHE_VERSION}:static`
 const ROUTE_CACHE = `${CACHE_VERSION}:routes`
