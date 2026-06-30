@@ -34,6 +34,7 @@ function usage() {
   console.log(`Usage:
   npm run live:version
   npm run debug:actions -- --limit 25
+  npm run debug:actions -- --limit 25 --json
   npm run debug:runtime -- --minutes 120
   npm run debug:upload -- <documentId>
   npm run debug:trace -- --chatId <chatId>
@@ -128,11 +129,34 @@ async function version() {
 }
 
 async function actions() {
-  printJson(await request(`/api/dev/action-queue${query({
-    limit: valueAfter('--limit', '50'),
+  const body = await request(`/api/dev/action-queue${query({
+    limit: valueAfter('--limit', '15'),
     actionStatus: valueAfter('--action-status'),
     inboxStatus: valueAfter('--inbox-status'),
-  })}`))
+  })}`)
+  if (has('--json')) {
+    printJson(body)
+    return
+  }
+  const actionRequests = Array.isArray(body.actionRequests) ? body.actionRequests : []
+  const inboxItems = Array.isArray(body.inboxItems) ? body.inboxItems : []
+  console.log(`Action queue summary`)
+  console.log(`filters=${JSON.stringify(body.filters ?? {})}`)
+  console.log(`counts=${JSON.stringify(body.counts ?? {})}`)
+  console.log(`actionRequests=${actionRequests.length}`)
+  for (const item of actionRequests) {
+    const summary = String(item.summary ?? '').replace(/\s+/g, ' ').slice(0, 140)
+    console.log(`- ${item.id} | ${item.status} | ${item.priority} | ${item.type} | ${item.title ?? 'Untitled'}`)
+    if (summary) console.log(`  ${summary}`)
+  }
+  console.log(`inboxItems=${inboxItems.length}`)
+  for (const item of inboxItems) {
+    const summary = String(item.summary ?? '').replace(/\s+/g, ' ').slice(0, 140)
+    const roles = Array.isArray(item.roles) && item.roles.length ? ` roles=${item.roles.join(',')}` : item.role ? ` role=${item.role}` : ''
+    const duplicates = item.duplicateCount && item.duplicateCount > 1 ? ` duplicates=${item.duplicateCount}` : ''
+    console.log(`- ${item.id} | ${item.status} | ${item.priority} | ${item.type}${roles}${duplicates} | ${item.title ?? 'Untitled'}`)
+    if (summary) console.log(`  ${summary}`)
+  }
 }
 
 async function runtime() {

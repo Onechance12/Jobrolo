@@ -678,9 +678,72 @@ export async function executeFieldAction(ctx: TenantContext, input: FieldActionI
   return { visit, action: { key: actionKey, definition: def }, actionRequest, inboxItems, briefing }
 }
 
+function cleanInboxSummary(value: string | null | undefined, max = 220) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const withoutBrowserLocation = raw
+    .replace(/\[BROWSER_LOCATION\][\s\S]*?(?=(?:\n\n|$))/gi, 'Current GPS location was captured.')
+    .replace(/latitude:\s*-?\d+(?:\.\d+)?/gi, '')
+    .replace(/longitude:\s*-?\d+(?:\.\d+)?/gi, '')
+    .replace(/accuracyMeters:\s*\d+/gi, '')
+    .replace(/capturedAt:\s*[^\n]+/gi, '')
+    .replace(/source:\s*browser_gps/gi, '')
+  const compacted = withoutBrowserLocation.replace(/\s+/g, ' ').trim()
+  return compacted.length > max ? `${compacted.slice(0, max - 1).trim()}…` : compacted
+}
+
+function inboxDedupeKey(item: {
+  actionRequestId?: string | null
+  relatedType?: string | null
+  relatedId?: string | null
+  type?: string | null
+  title?: string | null
+  summary?: string | null
+  projectId?: string | null
+  customerId?: string | null
+}) {
+  if (item.actionRequestId) return `action:${item.actionRequestId}`
+  if (item.relatedType && item.relatedId) return `related:${item.relatedType}:${item.relatedId}:${item.type ?? ''}`
+  const title = String(item.title ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
+  const summary = cleanInboxSummary(item.summary, 100).toLowerCase()
+  return `fallback:${item.type ?? ''}:${item.projectId ?? ''}:${item.customerId ?? ''}:${title}:${summary}`
+}
+
+function dedupeInboxItems<T extends {
+  id: string
+  role?: string | null
+  priority?: string | null
+  summary?: string | null
+  title?: string | null
+  actionRequestId?: string | null
+  relatedType?: string | null
+  relatedId?: string | null
+  type?: string | null
+  projectId?: string | null
+  customerId?: string | null
+  createdAt?: Date | null
+}>(items: T[]) {
+  const byKey = new Map<string, T & { roles?: string[]; duplicateCount?: number }>()
+  for (const item of items) {
+    const key = inboxDedupeKey(item)
+    const existing = byKey.get(key)
+    const cleaned = { ...item, summary: cleanInboxSummary(item.summary) } as T & { roles?: string[]; duplicateCount?: number }
+    if (!existing) {
+      cleaned.roles = item.role ? [item.role] : []
+      cleaned.duplicateCount = 1
+      byKey.set(key, cleaned)
+      continue
+    }
+    existing.duplicateCount = (existing.duplicateCount ?? 1) + 1
+    if (item.role && !existing.roles?.includes(item.role)) existing.roles = [...(existing.roles ?? []), item.role]
+  }
+  return Array.from(byKey.values())
+}
+
 export async function listCopilotInbox(ctx: TenantContext, options: { role?: string | null; projectId?: string | null; status?: string | null; limit?: number } = {}) {
   const role = options.role ?? ctx.user?.role ?? undefined
   const restrictToRole = role && !(ctx.user?.role === 'owner' && !options.role)
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
   const items = await db.inboxItem.findMany({
     where: {
       contractorId: ctx.contractorId,
@@ -689,9 +752,10 @@ export async function listCopilotInbox(ctx: TenantContext, options: { role?: str
       ...(options.status ? { status: options.status } : { status: { in: ['unread', 'read'] } }),
     },
     orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-    take: Math.min(Math.max(options.limit ?? 50, 1), 200),
+    take: Math.min(limit * 3, 200),
   })
-  return { count: items.length, items }
+  const deduped = dedupeInboxItems(items).slice(0, limit)
+  return { count: deduped.length, totalRawCount: items.length, items: deduped }
 }
 
 export async function decideActionRequest(ctx: TenantContext, actionRequestId: string, decision: 'approved' | 'rejected', notes?: string | null) {

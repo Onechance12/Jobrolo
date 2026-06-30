@@ -234,6 +234,13 @@ export function assertSkillRoutingContracts() {
   const appointmentSkills = selectSkills(appointmentContext).map((selection) => selection.skill.id)
   assert(appointmentSkills.includes('appointment-scheduling'), `Appointment scheduling should select appointment-scheduling, got ${appointmentSkills.join(', ')}`)
 
+  const draftFollowUpContext = buildSkillRoutingContext({ latestText: 'Draft a short friendly homeowner follow-up text about a roof inspection.' })
+  assert(draftFollowUpContext.requestIntent?.id === 'communication_draft', `Draft follow-up should resolve to communication_draft intent, got ${draftFollowUpContext.requestIntent?.id}`)
+  assert(draftFollowUpContext.requestIntent?.primarySkill === 'communication-routing', 'Draft follow-up should be owned by communication-routing')
+  const draftFollowUpSkills = selectSkills(draftFollowUpContext).map((selection) => selection.skill.id)
+  assert(draftFollowUpSkills.includes('communication-routing'), `Draft follow-up should select communication-routing, got ${draftFollowUpSkills.join(', ')}`)
+  assert(!draftFollowUpSkills.includes('appointment-scheduling'), 'Draft follow-up text should not drift into appointment scheduling')
+
   const staleAllowedTools = new Set(['list_appointments', 'update_appointment', 'update_roof_report_photo', 'get_workspace_members', 'update_workspace_member_role', 'queue_outbound_message'])
   for (const skill of JOBROLO_SKILLS) {
     for (const toolName of skill.allowedTools ?? []) {

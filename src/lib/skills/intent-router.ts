@@ -138,7 +138,32 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
-  if (/\b(schedule|calendar|appointment|book|reschedule|follow[- ]?up|adjuster meeting|site visit|inspection time|what.*calendar|what.*scheduled)\b/.test(text)) {
+  if (
+    /\b(draft|write|prepare|compose|word|make)\b[\s\S]{0,80}\b(follow[- ]?up|customer update|homeowner|customer|client|sms|text|email|message)\b/.test(text) ||
+    /\b(friendly|short|polite)\b[\s\S]{0,80}\b(follow[- ]?up|customer update|homeowner|customer|client|sms|text|email|message)\b/.test(text) ||
+    /\b(customer update|homeowner update|crew message|sms draft|text draft|email draft|message draft)\b/.test(text)
+  ) {
+    return buildIntent({
+      id: 'communication_draft',
+      mode: 'workflow',
+      confidence: 0.88,
+      primarySkill: 'communication-routing',
+      supportingSkills: ['role-permissions', 'approval'],
+      workflowName: 'Communication draft',
+      sticky: false,
+      allowedTools: ['consult_orchestrator'],
+      blockedTools: ['create_appointment', 'update_project_schedule'],
+      nextStep: 'answer',
+      summary: 'Communication lane: draft customer/homeowner/crew wording without scheduling or sending unless explicitly requested.',
+      laneRules: [
+        'Drafting a follow-up message is not the same as scheduling a follow-up appointment.',
+        'Do not send SMS/email or invite anyone without explicit approval.',
+        'If the user asks to schedule a time, switch into appointment scheduling.',
+      ],
+    })
+  }
+
+  if (/\b(schedule|calendar|appointment|book|reschedule|adjuster meeting|site visit|inspection time|what.*calendar|what.*scheduled)\b/.test(text) || /\b(follow[- ]?up)\b[\s\S]{0,50}\b(call|appointment|meeting|time|date|tomorrow|today|next week|calendar|schedule|book)\b/.test(text)) {
     return buildIntent({
       id: 'appointment_scheduling',
       mode: 'workflow',

@@ -40,6 +40,25 @@ function isSavedCustomerListRequest(text: string) {
   )
 }
 
+function isCompanyProfileReadRequest(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  return (
+    /\b(show|view|pull|display|what(?:'s| is)|check|list)\b[\s\S]{0,80}\b(company|contractor|business)\s+(profile|info|information|setup|details)\b/.test(lower) ||
+    /\b(company|contractor|business)\s+(profile|info|information|setup|details)\b[\s\S]{0,80}\b(saved|missing|need|needs|complete|incomplete|ready)\b/.test(lower) ||
+    /\b(what|which|show|list|display)\b[\s\S]{0,80}\b(missing|needed|need|incomplete)\b[\s\S]{0,80}\b(estimates?|invoices?|reports?|contracts?|signatures?|company profile|company setup)\b/.test(lower)
+  )
+}
+
+function isActionCenterReadRequest(text: string) {
+  const lower = plainTruthText(text).toLowerCase()
+  if (!lower || hasLocalTruthMutationIntent(lower)) return false
+  return (
+    /\b(what|show|list|view|pull|display|check)\b[\s\S]{0,80}\b(needs?\s+attention|action needed|pending approvals?|review items?|failed work|routed tasks?|inbox|notifications?)\b/.test(lower) ||
+    /\b(needs?\s+attention|action needed|pending approvals?|review items?|failed work|routed tasks?)\b/.test(lower)
+  )
+}
+
 function customerFileQueryFromText(text: string) {
   const clean = plainTruthText(text).replace(/\s+/g, ' ').trim()
   const lower = clean.toLowerCase()
@@ -111,6 +130,24 @@ function buildDocumentReadToolCall(text: string): ToolCall | null {
 
 export function resolveLocalTruthRoute(text: string, context: LocalTruthContext = {}): LocalTruthRoute | null {
   const userText = plainTruthText(text)
+  if (isActionCenterReadRequest(userText)) {
+    return {
+      id: 'action-center',
+      reason: 'User asked for pending approvals, review items, failed work, routed tasks, or Action Needed.',
+      confidence: 0.9,
+      toolCall: { name: 'get_copilot_inbox', args: { limit: 25 } },
+    }
+  }
+
+  if (isCompanyProfileReadRequest(userText)) {
+    return {
+      id: 'company-profile',
+      reason: 'User asked to view saved company profile/setup readiness from Jobrolo records.',
+      confidence: 0.88,
+      toolCall: { name: 'get_contractor_profile', args: {} },
+    }
+  }
+
   if (isPriceSheetReviewRequest(userText)) {
     const filename = documentHintFromPriceSheetText(userText)
     return {

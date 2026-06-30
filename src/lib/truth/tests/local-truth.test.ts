@@ -33,6 +33,18 @@ export function assertLocalTruthContracts() {
   const priceRows = buildLocalTruthToolCall('Show the first 10 price sheet rows.')
   assert(priceRows?.name === 'review_price_sheet_items', `Price sheet rows should route to review_price_sheet_items, got ${priceRows?.name}`)
 
+  const companyProfile = buildLocalTruthToolCall('Show my company profile and what setup items are missing.')
+  assert(companyProfile?.name === 'get_contractor_profile', `Company profile reads should route to get_contractor_profile, got ${companyProfile?.name}`)
+
+  const companyMutation = buildLocalTruthToolCall('Update my company profile phone number.')
+  assert(!companyMutation, 'Company profile mutations should not route through local truth')
+
+  const actionCenter = buildLocalTruthToolCall('What needs attention right now? Show pending approvals, review items, failed work, and routed tasks.')
+  assert(actionCenter?.name === 'get_copilot_inbox', `Action Center reads should route to get_copilot_inbox, got ${actionCenter?.name}`)
+
+  const approvalMutation = buildLocalTruthToolCall('Approve the pending roof report.')
+  assert(!approvalMutation, 'Approval decisions should not route through local truth')
+
   const activePacket = buildLocalTruthToolCall('Show this job file packet.', { activeProjectId: 'project_123' })
   assert(activePacket?.name === 'get_project_document_packet', `Active job packet should route to get_project_document_packet, got ${activePacket?.name}`)
   assert(activePacket.args.projectId === 'project_123', 'Active job packet should pass the active project id')

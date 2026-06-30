@@ -124,7 +124,12 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('lead-intake', 0.9, 'Lead/opportunity intake intent.'))
   }
 
-  if (/(schedule|calendar|appointment|book|reschedule|follow[- ]?up|adjuster meeting|site visit)/.test(text)) {
+  if (/(draft|write|prepare|compose|customer update|homeowner update|sms draft|text draft|email draft|message draft)/.test(text) && /(follow[- ]?up|customer|homeowner|client|sms|text|email|message)/.test(text)) {
+    pushUnique(selections, select('communication-routing', 0.9, 'Customer/homeowner communication drafting intent.'))
+    pushUnique(selections, select('role-permissions', 0.76, 'Drafts may need visibility/recipient boundaries before sending.'))
+  }
+
+  if (/(schedule|calendar|appointment|book|reschedule|adjuster meeting|site visit)/.test(text) || /(follow[- ]?up)[\s\S]{0,50}(call|appointment|meeting|time|date|tomorrow|today|next week|calendar|schedule|book)/.test(text)) {
     pushUnique(selections, select('appointment-scheduling', 0.88, 'Calendar/appointment workflow intent.'))
   }
 

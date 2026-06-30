@@ -235,6 +235,7 @@ export type JobroloIntentId =
   | 'appointment_scheduling'
   | 'photo_evidence'
   | 'roof_report'
+  | 'communication_draft'
   | 'communication_routing'
   | 'activity_timeline'
   | 'role_permissions'
