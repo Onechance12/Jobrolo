@@ -130,6 +130,16 @@ function pinPosition(lead: FieldLead, center: BrowserLocation) {
   }
 }
 
+function locationFromMapPoint(clientX: number, clientY: number, rect: DOMRect, center: BrowserLocation): BrowserLocation {
+  const x = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1)
+  const y = Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1)
+  return {
+    lat: center.lat + MAP_SPAN - (y * MAP_SPAN * 2),
+    lng: center.lng - MAP_SPAN + (x * MAP_SPAN * 2),
+    accuracyMeters: center.accuracyMeters,
+  }
+}
+
 function promptInMainChat(prompt: string) {
   if (typeof window === 'undefined') return
   const encoded = encodeURIComponent(prompt)
@@ -146,6 +156,7 @@ export function CanvassingMapMode() {
   const [mapData, setMapData] = useState<FieldMapPayload | null>(null)
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [showLeads, setShowLeads] = useState(true)
+  const [dropMode, setDropMode] = useState(false)
 
   const leads = useMemo(() => mapData?.leads ?? [], [mapData?.leads])
   const pinnedLeads = useMemo(() => leads.filter(leadHasPin), [leads])
@@ -205,14 +216,20 @@ export function CanvassingMapMode() {
       .filter((item): item is { lead: FieldLead; pos: NonNullable<ReturnType<typeof pinPosition>> } => Boolean(item.pos))
     : [], [pinnedLeads, location])
 
-  async function dropLeadHere() {
-    if (!isValidLocation(location)) {
-      await locateMe()
-      return
-    }
+  function prependLead(lead: FieldLead) {
+    setMapData(prev => ({
+      ...(prev ?? {}),
+      leads: [lead, ...((prev?.leads ?? []).filter(existing => existing.id !== lead.id))],
+    }))
+    setSelectedLeadId(lead.id)
+    setShowLeads(true)
+  }
+
+  async function createLeadAt(target: BrowserLocation, source: 'field_map_drop' | 'field_map_tap') {
     setSaving(true)
     setError(null)
     try {
+      const droppedByTap = source === 'field_map_tap'
       const res = await fetch('/api/canvassing/leads', {
         method: 'POST',
         credentials: 'same-origin',
@@ -220,20 +237,40 @@ export function CanvassingMapMode() {
         body: JSON.stringify({
           status: 'new',
           source: 'field_map',
-          notes: 'Dropped from field map. Add homeowner, address, and door result from chat.',
-          location: { lat: location.lat, lng: location.lng, accuracyMeters: location.accuracyMeters, source: 'field_map_drop' },
-          metadata: { droppedFromMap: true },
+          notes: droppedByTap
+            ? 'Dropped from map tap. Add homeowner, address, and door result from chat.'
+            : 'Dropped from current GPS. Add homeowner, address, and door result from chat.',
+          location: { lat: target.lat, lng: target.lng, accuracyMeters: target.accuracyMeters, source },
+          metadata: { droppedFromMap: true, droppedByTap },
         }),
       })
       if (!res.ok) throw new Error('Could not drop lead here.')
       const json = await res.json()
-      setSelectedLeadId(json?.lead?.id ?? null)
+      if (json?.lead) prependLead(json.lead)
       await loadMapData()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not drop lead here.')
     } finally {
       setSaving(false)
     }
+  }
+
+  async function dropLeadHere() {
+    if (!isValidLocation(location)) {
+      await locateMe()
+      return
+    }
+    await createLeadAt(location, 'field_map_drop')
+  }
+
+  async function dropLeadFromMapTap(clientX: number, clientY: number, rect: DOMRect) {
+    if (!isValidLocation(location)) {
+      await locateMe()
+      return
+    }
+    const target = locationFromMapPoint(clientX, clientY, rect, location)
+    setDropMode(false)
+    await createLeadAt(target, 'field_map_tap')
   }
 
   async function updateLeadStatus(lead: FieldLead, status: string) {
@@ -323,15 +360,43 @@ export function CanvassingMapMode() {
       <div className="relative flex-1 pt-[calc(138px_+_env(safe-area-inset-top))]">
         {mapUrl ? (
           <>
-            <iframe
-              key={`field-map-${mapRefreshKey}`}
-              title="Current field location map"
-              src={mapUrl}
-              className="h-full w-full border-0 saturate-[.95]"
-              loading="eager"
-              referrerPolicy="no-referrer"
-            />
+            <div className="absolute inset-0">
+              <iframe
+                key={`field-map-${mapRefreshKey}`}
+                title="Current field location map"
+                src={mapUrl}
+                className="h-full w-full border-0 saturate-[.95]"
+                loading="eager"
+                referrerPolicy="no-referrer"
+              />
+            </div>
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_34%,rgba(2,6,23,.12)_70%,rgba(2,6,23,.35)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
+              <div className="absolute inset-0 opacity-[.16] [background-image:linear-gradient(rgba(125,211,252,.65)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,.65)_1px,transparent_1px)] [background-size:64px_64px]" />
+              <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/25" />
+              <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/15" />
+              <div className="absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/10" />
+              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-cyan-200/10" />
+              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-cyan-200/10" />
+            </div>
+            {dropMode ? (
+              <button
+                type="button"
+                aria-label="Tap map to drop lead"
+                className="absolute inset-0 z-[15] cursor-crosshair bg-cyan-950/10"
+                onClick={event => {
+                  void dropLeadFromMapTap(
+                    event.clientX,
+                    event.clientY,
+                    event.currentTarget.getBoundingClientRect(),
+                  )
+                }}
+              >
+                <span className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full border border-cyan-300/35 bg-slate-950/90 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-2xl backdrop-blur">
+                  Tap the property to drop a lead
+                </span>
+              </button>
+            ) : null}
             <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
               <div className="h-5 w-5 rounded-full border-2 border-white bg-blue-500 shadow-[0_0_24px_rgba(59,130,246,.9)]" />
               <div className="mx-auto mt-1 h-8 w-px bg-blue-500/70" />
@@ -464,7 +529,17 @@ export function CanvassingMapMode() {
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="rounded-full bg-emerald-600 px-3 hover:bg-emerald-500" onClick={dropLeadHere} disabled={saving || locating || !isValidLocation(location)}>
               {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
-              Drop lead
+              Drop here
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={`rounded-full px-3 text-white ${dropMode ? 'bg-cyan-500/25 ring-1 ring-cyan-300/40 hover:bg-cyan-500/30' : 'bg-white/10 hover:bg-white/15'}`}
+              onClick={() => setDropMode(value => !value)}
+              disabled={saving || locating || !isValidLocation(location)}
+            >
+              <MapPin className="mr-1.5 h-4 w-4" />
+              {dropMode ? 'Cancel tap' : 'Tap map'}
             </Button>
             {!showLeads ? (
               <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" onClick={() => setShowLeads(true)}>
