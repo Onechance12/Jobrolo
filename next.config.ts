@@ -2,6 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  experimental: {
+    // Next 16/Turbopack defaults to child-process plugin execution. In the
+    // Codex macOS sandbox, PostCSS loader evaluation can fail because that
+    // runtime tries to spawn/bind a local helper process. Worker threads keep
+    // normal `npm run build` on Turbopack while avoiding that sandbox failure.
+    turbopackPluginRuntimeStrategy: 'workerThreads',
+  },
   // SECURITY: Do not ignore TypeScript errors — type safety is critical for auth/tenant isolation
   typescript: {
     ignoreBuildErrors: false,
