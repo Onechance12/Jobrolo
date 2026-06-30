@@ -86,7 +86,7 @@ function openStreetMapEmbedUrl(loc: BrowserLocation) {
   const right = loc.lng + MAP_SPAN
   const top = loc.lat + MAP_SPAN
   const bottom = loc.lat - MAP_SPAN
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik&marker=${loc.lat}%2C${loc.lng}`
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik`
 }
 
 function externalMapUrl(loc: BrowserLocation) {
@@ -370,14 +370,17 @@ export function CanvassingMapMode() {
                 referrerPolicy="no-referrer"
               />
             </div>
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_34%,rgba(2,6,23,.12)_70%,rgba(2,6,23,.35)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,.04)_0,transparent_34%,rgba(2,6,23,.16)_70%,rgba(2,6,23,.42)_100%)]" />
             <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
-              <div className="absolute inset-0 opacity-[.16] [background-image:linear-gradient(rgba(125,211,252,.65)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,.65)_1px,transparent_1px)] [background-size:64px_64px]" />
-              <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/25" />
-              <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/15" />
-              <div className="absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/10" />
-              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-cyan-200/10" />
-              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-cyan-200/10" />
+              <div className="absolute inset-0 opacity-[.24] [background-image:linear-gradient(rgba(125,211,252,.72)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,.72)_1px,transparent_1px)] [background-size:64px_64px]" />
+              <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/35 shadow-[0_0_44px_rgba(34,211,238,.14)]" />
+              <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/22" />
+              <div className="absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/14" />
+              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-cyan-200/18" />
+              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-cyan-200/18" />
+              <div className="absolute right-3 top-3 rounded-full border border-cyan-300/25 bg-slate-950/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/85 backdrop-blur">
+                Jobrolo overlay
+              </div>
             </div>
             {dropMode ? (
               <button
