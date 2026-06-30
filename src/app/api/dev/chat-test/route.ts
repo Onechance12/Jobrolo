@@ -9,6 +9,7 @@ import { buildSkillRoutingContext } from '@/lib/skills/context'
 import { selectSkills } from '@/lib/skills/select-skill'
 import { orchestrateSkills } from '@/lib/skills/orchestrate-skills'
 import { hasLocalTruthMutationIntent, resolveLocalTruthRoute } from '@/lib/truth/resolve-local-truth'
+import { compileLocalAction } from '@/lib/truth/compile-local-action'
 
 export const runtime = 'nodejs'
 
@@ -114,6 +115,11 @@ export async function POST(req: NextRequest) {
   }
 
   const localTruthRoute = resolveLocalTruthRoute(message, { activeProjectId: activeProjectId || null })
+  const localAction = compileLocalAction(message, {
+    activeCustomerId: activeCustomerId || null,
+    activeProjectId: activeProjectId || null,
+    documentIds,
+  })
   const skillContext = buildSkillRoutingContext({
     latestText: message,
     channelType,
@@ -153,8 +159,29 @@ export async function POST(req: NextRequest) {
       : {
           canAvoidAiForInitialRead: false,
           reason: mutationIntent
-            ? 'Mutation-like request must go through the full trusted agent/tool/approval path.'
+            ? localAction
+              ? 'Mutation-like request has a deterministic local action candidate. Execution still must go through the trusted tool/approval path.'
+              : 'Mutation-like request must go through the full trusted agent/tool/approval path.'
             : 'No deterministic local-truth read route matched this prompt.',
+        },
+    localAction: localAction
+      ? {
+          canAvoidAiForRouting: true,
+          id: localAction.id,
+          status: localAction.status,
+          reason: localAction.reason,
+          confidence: localAction.confidence,
+          requiresApproval: localAction.requiresApproval,
+          toolCall: localAction.toolCall ?? null,
+          missingContext: localAction.missingContext ?? [],
+          blockedTools: localAction.blockedTools ?? [],
+          userPrompt: localAction.userPrompt ?? null,
+        }
+      : {
+          canAvoidAiForRouting: false,
+          reason: mutationIntent
+            ? 'No deterministic local action compiler route matched this mutation-like prompt.'
+            : 'Prompt is not a local action candidate.',
         },
     skillRouting: {
       selected: skillSelections.map(selection => ({
