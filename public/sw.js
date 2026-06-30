@@ -16,7 +16,8 @@ const SHELL_ASSETS = [
   '/offline',
   '/manifest.webmanifest',
   '/logo.png',
-  '/logo.svg',
+  '/logo-192.png',
+  '/logo-512.png',
 ]
 
 const APP_SHELL_ROUTES = new Set([
@@ -78,7 +79,8 @@ function isAppShellRoute(requestUrl) {
 function isStaticAssetRequest(request, requestUrl) {
   return requestUrl.pathname.startsWith('/_next/static/')
     || requestUrl.pathname === '/logo.png'
-    || requestUrl.pathname === '/logo.svg'
+    || requestUrl.pathname === '/logo-192.png'
+    || requestUrl.pathname === '/logo-512.png'
     || requestUrl.pathname === '/manifest.webmanifest'
     || ['style', 'script', 'worker', 'image', 'font'].includes(request.destination)
 }

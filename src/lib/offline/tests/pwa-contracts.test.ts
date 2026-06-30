@@ -20,7 +20,7 @@ export function assertPwaContracts() {
   if (!manifest.start_url?.startsWith('/')) throw new Error('PWA manifest must use a same-origin start_url')
   if (manifest.scope !== '/') throw new Error('PWA manifest must keep app scope at /')
   if (manifest.display !== 'standalone') throw new Error('PWA manifest must request standalone display')
-  if (!manifest.icons?.some(icon => icon.src === '/logo.png' && icon.purpose?.includes('maskable'))) {
+  if (!manifest.icons?.some(icon => icon.src === '/logo-512.png' && icon.purpose?.includes('maskable'))) {
     throw new Error('PWA manifest must include a maskable app icon')
   }
 
@@ -31,6 +31,8 @@ export function assertPwaContracts() {
     'const APP_SHELL_ROUTES = new Set',
     "'/offline'",
     "'/manifest.webmanifest'",
+    "'/logo-192.png'",
+    "'/logo-512.png'",
     "if (isApiRequest(url)) return",
     "request.mode === 'navigate'",
     "networkFirstAppShell(request)",

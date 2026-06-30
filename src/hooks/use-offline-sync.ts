@@ -23,8 +23,8 @@ function getPendingCount() {
 }
 
 export function useOfflineSync(): OfflineSyncState {
-  const [online, setOnline] = useState(true)
-  const [pendingCount, setPendingCount] = useState(0)
+  const [online, setOnline] = useState(getOnlineState)
+  const [pendingCount, setPendingCount] = useState(getPendingCount)
   const [syncing, setSyncing] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
@@ -59,8 +59,6 @@ export function useOfflineSync(): OfflineSyncState {
   }, [refresh])
 
   useEffect(() => {
-    refresh()
-
     const handleOnline = () => {
       refresh()
       void syncNow()
