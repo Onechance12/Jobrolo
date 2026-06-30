@@ -29,6 +29,7 @@ type ToolExecutionResultLike = {
 
 const PRE_AI_LOCAL_ACTION_TOOLS = new Set([
   'record_tester_feedback',
+  'get_canvassing_map',
   'create_canvassing_lead_at_location',
   'start_field_inspection_lead',
   'create_scope_from_document',
@@ -134,6 +135,23 @@ export function compileLocalAction(text: string, context: LocalActionContext = {
   const clean = cleanText(text)
   const lower = clean.toLowerCase()
   if (!clean) return null
+
+  if (/\b(open|show|pull up|display|bring up|launch)\b.{0,50}\b(field\s+|job\s+|current\s+)?map\b/.test(lower) || /^map(?:\s+(?:where i am|where i'm at|my location|current location|here))?$/.test(lower)) {
+    return ready({
+      id: 'show-field-map',
+      reason: 'User asked to show the field map or saved map pins.',
+      confidence: 0.92,
+      requiresApproval: false,
+      toolCall: {
+        name: 'get_canvassing_map',
+        args: {
+          includeConverted: true,
+          limit: 250,
+        },
+      },
+      blockedTools: ['create_canvassing_lead_at_location', 'start_canvassing_session', 'create_customer', 'create_project_for_customer'],
+    })
+  }
 
   if (/\bcody cody note\b/.test(lower)) {
     const note = clean.replace(/^[\s\S]*?\bcody cody note\b\s*:?\s*/i, '').trim()
@@ -438,6 +456,10 @@ export function formatLocalActionFinalText(candidate: LocalActionCandidate, resu
 
   if (candidate.id === 'start-field-inspection') {
     return 'Saved this as a field inspection lead. Confirm the property/customer details before converting it to a real customer or job.'
+  }
+
+  if (candidate.id === 'show-field-map') {
+    return 'Loaded the field map card from saved Jobrolo map records. No lead, canvassing run, customer, or project was created.'
   }
 
   if (candidate.id === 'attach-upload-to-customer') {

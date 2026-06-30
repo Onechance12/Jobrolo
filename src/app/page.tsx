@@ -16,6 +16,7 @@ import { cn, getInitials } from '@/lib/utils'
 import { ArrowLeft, Plus, Loader2, Menu, Volume2, LogOut, MapPin, UserPlus, X, Copy, Check, Settings, Bell, MessageCircle, Briefcase, Home, Hammer, Upload, Users, ChevronDown, ChevronRight, ExternalLink, CheckCircle2, XCircle, Trash2, PanelLeftOpen } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { ClientMessage } from '@/lib/types'
+import { buildFieldMapCardContract } from '@/lib/field-map/contracts'
 
 type ActionNeededItem = {
   id: string
@@ -297,16 +298,11 @@ export default function Page() {
       const assistantMessage: ClientMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'Opening the field map. This is just the map overlay — I am not starting a canvassing run or creating a lead.',
-        contextType: 'field_event',
-        contextData: {
-          cardType: 'field_event',
-          action: 'open_map',
-          mode: 'field',
-          title: 'Opening field map',
-          summary: 'Map opened without creating a field lead, canvassing run, customer, or project.',
-          projectId: currentWorkspace?.projectId ?? null,
-        },
+        content: 'Here is the field map card. I am opening the full map too, without creating a lead, canvassing run, customer, or project.',
+        contextType: 'field_map_card',
+        contextData: buildFieldMapCardContract({
+          title: 'Field command map',
+        }),
         createdAt: new Date().toISOString(),
       }
       if (isInWorkspace) {

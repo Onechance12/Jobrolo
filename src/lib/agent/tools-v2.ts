@@ -25,6 +25,7 @@ import { getFieldBriefing, executeFieldAction, resolveFieldEntity, listCopilotIn
 import { createUnsignedDocumentPdf, getSignedDocumentArtifacts } from '@/lib/final-documents'
 import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, createRoofReportPdf, reviewRoofReportCandidatePhotos, updateRoofReportPhotoSelection, bulkAddPhotosToRoofReport, shareRoofReport } from '@/lib/roof-reports'
 import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, convertCanvassingLead } from '@/lib/canvassing'
+import { buildFieldMapCardContract, type FieldMapPoint } from '@/lib/field-map/contracts'
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, recordFieldObservation, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
 import { researchCompany } from '@/lib/onboarding/research'
@@ -6036,7 +6037,39 @@ export const TOOLS: ToolDef[] = [
     allowedChannels: 'all',
     execute: async (args, contractorId, ctx) => {
       const result = await getCanvassingMap(await buildTrustedToolTenantContext(contractorId, ctx), args)
-      return { success: true, data: result }
+      const activityPoints: FieldMapPoint[] = (Array.isArray(result.activities) ? result.activities : [])
+        .filter((activity: any) => typeof activity.latitude === 'number' && typeof activity.longitude === 'number')
+        .slice(0, 100)
+        .map((activity: any) => {
+          const type = String(activity.type || 'field_activity')
+          const layerId = /knock|answer|interested|solicit|renter|door/i.test(type) ? 'door_attempts' : 'inspection_events'
+          return {
+            id: `activity:${activity.id}`,
+            layerId,
+            coordinate: {
+              lat: activity.latitude,
+              lng: activity.longitude,
+              source: layerId === 'door_attempts' ? 'door_attempt' : 'field_observation',
+              capturedAt: activity.createdAt ?? null,
+            },
+            title: activity.summary || type.replace(/_/g, ' '),
+            subtitle: layerId === 'door_attempts' ? 'Door/field outcome' : 'Field activity',
+            status: type,
+            source: layerId === 'door_attempts' ? 'door_attempt' : 'field_observation',
+            entityRefs: [
+              { kind: 'canvassing_activity' as const, id: activity.id },
+              activity.leadId ? { kind: 'canvassing_lead' as const, id: activity.leadId } : null,
+            ].filter(Boolean) as FieldMapPoint['entityRefs'],
+            evidenceType: type,
+            prompt: `Open this field map event and show linked lead/session context, notes, status, and next actions: ${activity.summary || type}.`,
+          }
+        })
+      const card = buildFieldMapCardContract({
+        title: 'Field command map',
+        leads: result.leads,
+        points: activityPoints,
+      })
+      return { success: true, data: { ...result, card } }
     },
   },
   {

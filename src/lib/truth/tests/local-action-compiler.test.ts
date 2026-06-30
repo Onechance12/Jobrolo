@@ -32,6 +32,16 @@ export function assertLocalActionCompilerContracts() {
   assert(Boolean(inspection.blockedTools?.includes('create_customer')), 'Inspection local action should block direct customer creation')
   assert(canRunLocalActionBeforeAi(inspection), 'Start inspection should be eligible for pre-AI execution')
 
+  const fieldMap = compileLocalAction('Show field map')
+  assert(fieldMap?.id === 'show-field-map', `Map should compile as show-field-map, got ${fieldMap?.id}`)
+  assert(fieldMap.status === 'ready', 'Map request should be ready')
+  assert(fieldMap.toolCall?.name === 'get_canvassing_map', `Map should call get_canvassing_map, got ${fieldMap.toolCall?.name}`)
+  assert(fieldMap.toolCall.args.includeConverted === true, 'Map request should include converted leads by default')
+  assert(fieldMap.toolCall.args.limit === 250, `Map request should use the field map default limit, got ${String(fieldMap.toolCall.args.limit)}`)
+  assert(Boolean(fieldMap.blockedTools?.includes('create_canvassing_lead_at_location')), 'Map local action should block lead creation')
+  assert(Boolean(fieldMap.blockedTools?.includes('start_canvassing_session')), 'Map local action should block session creation')
+  assert(canRunLocalActionBeforeAi(fieldMap), 'Show field map should be eligible for pre-AI execution')
+
   const scope = compileLocalAction('Save this as a scope of loss for Timothy Disen.', { documentIds: ['doc_123'] })
   assert(scope?.id === 'save-scope-document', `Scope should compile as save-scope-document, got ${scope?.id}`)
   assert(scope.status === 'ready', 'Scope with one document and customer should be ready')
