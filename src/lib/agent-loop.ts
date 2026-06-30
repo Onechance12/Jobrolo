@@ -18,6 +18,12 @@ import {
   formatLocalTruthFinalText,
 } from '@/lib/truth/format-local-truth'
 import {
+  canRunLocalActionBeforeAi,
+  compileLocalAction,
+  formatLocalActionFinalText,
+  localActionDirectResponse,
+} from '@/lib/truth/compile-local-action'
+import {
   buildCodyCaptureMessage,
   codyBlockOpeningContent,
   extractCodyFeedbackActivation,
@@ -1581,6 +1587,73 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         area: inferCodyArea(codyBlockAtStart.content || 'Cody review session'),
       }
     : null
+  const preAiLocalAction = !codyBlockAtStart.active && latestUserTextAtStart
+    ? compileLocalAction(latestUserTextAtStart, {
+        activeCustomerId: opts.activeCustomerId,
+        activeProjectId: opts.activeProjectId,
+        documentIds: opts.documentIds,
+      })
+    : null
+  const localActionDirectText = preAiLocalAction ? localActionDirectResponse(preAiLocalAction) : null
+  if (localActionDirectText) {
+    const iteration: AgentIteration = { iteration: 0, text: localActionDirectText, toolCalls: [], final: true }
+    opts.onIteration?.(iteration)
+    return {
+      final: { text: localActionDirectText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+      iterations: [iteration],
+      totalToolCalls: 0,
+    }
+  }
+  if (canRunLocalActionBeforeAi(preAiLocalAction)) {
+    let toolCall = preAiLocalAction!.toolCall!
+    if (toolCall.name === 'record_tester_feedback') {
+      toolCall = {
+        ...toolCall,
+        args: withTesterFeedbackDebugContext({
+          content: String(toolCall.args.content ?? ''),
+          source: toolCall.args.source === 'note_to_codex' ? 'note_to_codex' : 'note_to_cody',
+          area: typeof toolCall.args.area === 'string' ? toolCall.args.area : inferCodyArea(String(toolCall.args.content ?? '')),
+          severity: toolCall.args.severity === 'low' || toolCall.args.severity === 'high' || toolCall.args.severity === 'urgent' || toolCall.args.severity === 'normal'
+            ? toolCall.args.severity
+            : inferCodySeverity(String(toolCall.args.content ?? '')),
+        }, messages, opts),
+      }
+    }
+    console.log(`[agent-loop] running compiled local action before AI contractorId=${opts.contractorId} action=${preAiLocalAction!.id} tool=${toolCall.name}`)
+    const result = await executeTool(toolCall.name, toolCall.args, opts.contractorId, {
+      userId: opts.userId,
+      userRole: opts.userRole,
+      trustedDirectExecution: opts.trustedDirectExecution,
+      conversationId: opts.conversationId,
+      workspaceId: opts.workspaceId,
+      chatId: opts.chatId,
+      channelType: opts.channelType,
+      documentIds: opts.documentIds,
+    })
+    const card = toolResultCardPayload(result.data)
+    const finalText = formatLocalActionFinalText(preAiLocalAction!, result)
+    const iteration: AgentIteration = {
+      iteration: 0,
+      text: finalText,
+      toolCalls: [toolCall],
+      toolResults: [{ name: toolCall.name, success: result.success, data: result.data, error: result.error }],
+      final: true,
+    }
+    opts.onIteration?.(iteration)
+    return {
+      final: {
+        text: finalText,
+        contextType: card?.contextType ?? null,
+        contextData: card?.contextData ?? null,
+        actions: [],
+        tool_calls: [],
+        attachments: [],
+        final: true,
+      },
+      iterations: [iteration],
+      totalToolCalls: 1,
+    }
+  }
   const preAiLocalToolCall = !codyBlockAtStart.active
     ? buildDeterministicToolCall(messages, opts)
     : null

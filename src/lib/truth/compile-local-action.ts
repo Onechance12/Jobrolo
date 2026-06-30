@@ -21,6 +21,28 @@ export type LocalActionCandidate = {
   userPrompt?: string
 }
 
+type ToolExecutionResultLike = {
+  success: boolean
+  data: unknown
+  error?: string
+}
+
+const PRE_AI_LOCAL_ACTION_TOOLS = new Set([
+  'record_tester_feedback',
+  'create_canvassing_lead_at_location',
+  'start_field_inspection_lead',
+  'create_scope_from_document',
+  'link_document_to_customer',
+  'create_project_for_customer',
+  'create_project_chat',
+  'update_contractor_profile',
+])
+
+export function canRunLocalActionBeforeAi(candidate: LocalActionCandidate | null) {
+  if (!candidate || candidate.status !== 'ready' || !candidate.toolCall) return false
+  return PRE_AI_LOCAL_ACTION_TOOLS.has(candidate.toolCall.name)
+}
+
 function cleanText(text: string) {
   return plainTruthText(text).replace(/\s+/g, ' ').trim()
 }
@@ -133,8 +155,8 @@ export function compileLocalAction(text: string, context: LocalActionContext = {
       toolCall: {
         name: 'record_tester_feedback',
         args: {
-          title: note.slice(0, 90),
           content: note,
+          source: 'note_to_cody',
           area: 'qa',
           severity: 'normal',
         },
@@ -343,4 +365,100 @@ export function compileLocalAction(text: string, context: LocalActionContext = {
   }
 
   return null
+}
+
+function objectData(data: unknown) {
+  return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : null
+}
+
+function stringField(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function nestedObject(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function compact(text: string, max = 220) {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}…` : clean
+}
+
+export function localActionDirectResponse(candidate: LocalActionCandidate) {
+  if (candidate.status === 'needs_context') {
+    const missing = candidate.missingContext?.length ? ` Missing: ${candidate.missingContext.join(', ')}.` : ''
+    return `${candidate.userPrompt || 'I need one more detail before I can do that.'}${missing}`
+  }
+  if (candidate.status === 'unsupported') {
+    return candidate.userPrompt || `I understood the request, but this local action is not wired yet: ${candidate.reason}`
+  }
+  return null
+}
+
+export function formatLocalActionFinalText(candidate: LocalActionCandidate, result: ToolExecutionResultLike) {
+  const data = objectData(result.data)
+  const message = stringField(data, 'message')
+  if (!result.success) {
+    return `I understood that without needing AI, but it did not complete. ${result.error ? `Error: ${result.error}` : 'Please try again.'}`
+  }
+
+  if (data?.approvalRequired) {
+    const title = stringField(data, 'title') || 'Approval needed'
+    const summary = stringField(data, 'summary') || message || 'Review and approve this action before Jobrolo changes saved records.'
+    return `${title}. ${summary}`
+  }
+
+  if (
+    data?.needsClarification ||
+    data?.needsCustomer ||
+    data?.needsProject ||
+    data?.needsCompanyPricingReview ||
+    data?.needsCompanyTemplateWorkflow ||
+    data?.needsProcessing ||
+    data?.needsApproval
+  ) {
+    return message || candidate.userPrompt || 'I need one more detail before I can complete that.'
+  }
+
+  if (message) return message
+
+  if (candidate.id === 'cody-note') {
+    return 'Captured that note for Cody/Codex with the recent chat context.'
+  }
+
+  if (candidate.id === 'create-lead') {
+    const card = nestedObject(data, 'card')
+    const name = stringField(card, 'homeownerName')
+    const phone = stringField(card, 'phone')
+    const address = stringField(card, 'address')
+    return compact(`Saved the lead${name ? ` for ${name}` : ''}${phone ? ` · ${phone}` : ''}${address ? ` · ${address}` : ''}.`)
+  }
+
+  if (candidate.id === 'start-field-inspection') {
+    return 'Saved this as a field inspection lead. Confirm the property/customer details before converting it to a real customer or job.'
+  }
+
+  if (candidate.id === 'attach-upload-to-customer') {
+    return 'Attached the uploaded file/photo to the customer file from saved Jobrolo records.'
+  }
+
+  if (candidate.id === 'save-scope-document') {
+    return 'Saved the uploaded scope/estimate document to the job file from saved Jobrolo records.'
+  }
+
+  if (candidate.id === 'create-project') {
+    return 'Created the project/job from saved Jobrolo records.'
+  }
+
+  if (candidate.id === 'create-project-chat') {
+    return 'Created/opened the job chat from saved Jobrolo records.'
+  }
+
+  if (candidate.id === 'set-company-logo') {
+    return 'Prepared the company logo update. If approval is required, approve it before Jobrolo changes the saved company profile.'
+  }
+
+  return 'Completed that local Jobrolo action without needing AI.'
 }
