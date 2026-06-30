@@ -76,6 +76,10 @@ export function assertFieldMapContracts() {
   assert(Boolean(contract.viewport.bounds), 'Contract should compute bounds from available points')
   assert(contract.displayRules.some(rule => /many location events/i.test(rule)), 'Contract should document many-location-events rule')
   assert(contract.displayRules.some(rule => /renderer/i.test(rule)), 'Contract should keep map provider separate from truth')
+  assert(contract.actions.some(action => action.kind === 'open_full_map'), 'Field map card should expose a full-map expansion action')
+  assert(contract.actions.some(action => action.kind === 'drop_pin' && action.promptPattern), 'Field map card should expose a chat-first drop-pin prompt')
+  assert(contract.actions.some(action => action.kind === 'filter_layer' && action.layerId === 'photo_evidence'), 'Field map card should expose a photo-evidence layer action')
+  assert(contract.layers.filter(layer => layer.visibleByDefault).length >= 4, 'Field map renderer should have enough default-visible layers for a useful compact card')
 
   return true
 }

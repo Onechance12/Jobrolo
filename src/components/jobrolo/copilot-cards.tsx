@@ -21,6 +21,13 @@ import {
   type JobroloCardFamily,
   type JobroloCardTemplate,
 } from '@/lib/cards/templates'
+import type {
+  FieldMapCardAction,
+  FieldMapCardContract,
+  FieldMapLayer,
+  FieldMapLayerId,
+  FieldMapPoint,
+} from '@/lib/field-map/contracts'
 import {
   AlertTriangle,
   Building2,
@@ -542,6 +549,164 @@ function GenericContractCard({
   )
 }
 
+function fieldMapLayerLabel(layerId?: string | null, layers?: FieldMapLayer[]) {
+  if (!layerId) return 'Map point'
+  return layers?.find(layer => layer.id === layerId)?.label || humanize(layerId)
+}
+
+function fieldMapPointStatusTone(status?: string | null) {
+  const value = String(status || '').toLowerCase()
+  if (value.includes('hot') || value.includes('follow')) return 'bg-amber-500/15 text-amber-700 dark:text-amber-200'
+  if (value.includes('review') || value.includes('blocked') || value.includes('do_not')) return 'bg-rose-500/15 text-rose-700 dark:text-rose-200'
+  if (value.includes('complete')) return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
+  return 'bg-slate-500/15 text-muted-foreground'
+}
+
+function normalizeFieldMapPoints(data?: (Partial<FieldMapCardContract> & Record<string, any>) | null): FieldMapPoint[] {
+  const points = Array.isArray(data?.points) ? data.points : []
+  if (points.length) return points.filter(Boolean) as FieldMapPoint[]
+
+  const coordinate = data?.coordinate || data?.location || data?.viewport?.center
+  const lat = Number(coordinate?.lat ?? data?.lat ?? data?.latitude)
+  const lng = Number(coordinate?.lng ?? data?.lng ?? data?.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return []
+
+  return [{
+    id: textValue(data?.id) || `geo:${lat},${lng}`,
+    layerId: (data?.layerId || 'manual_pins') as FieldMapLayerId,
+    coordinate: {
+      lat,
+      lng,
+      accuracyMeters: typeof coordinate?.accuracyMeters === 'number' ? coordinate.accuracyMeters : null,
+      source: data?.source || coordinate?.source || 'system',
+    },
+    title: textValue(data?.title) || textValue(data?.address) || 'Saved map point',
+    subtitle: textValue(data?.summary) || textValue(data?.notes) || null,
+    status: textValue(data?.status) || 'active',
+    source: textValue(data?.source) || 'system',
+    entityRefs: [],
+    evidenceType: textValue(data?.evidenceType) || null,
+    prompt: textValue(data?.prompt) || null,
+  }]
+}
+
+function fieldMapActionPrompt(action: FieldMapCardAction) {
+  if (action.promptPattern) return action.promptPattern
+  if (action.kind === 'drop_pin') return 'Drop a field lead pin at my current location and let me add homeowner, address, status, and notes.'
+  if (action.kind === 'filter_layer' && action.layerId) return `Show the ${fieldMapLayerLabel(action.layerId)} layer on the field map and summarize what is saved there.`
+  if (action.kind === 'attach_gps') return 'Attach my current GPS location to the active field note, photo, lead, or inspection item after confirming the correct record.'
+  if (action.kind === 'open_evidence') return 'Open the selected map evidence and show me the linked customer, project, photos, notes, and next actions.'
+  return action.label
+}
+
+export function FieldMapCard({ data }: { data?: (Partial<FieldMapCardContract> & Record<string, any>) | null }) {
+  const layers = Array.isArray(data?.layers) ? data.layers as FieldMapLayer[] : []
+  const points = normalizeFieldMapPoints(data)
+  const counts: Partial<FieldMapCardContract['counts']> = data?.counts || {}
+  const totalPoints = Number(counts.totalPoints ?? points.length) || 0
+  const pinnedLeads = Number(counts.pinnedLeads ?? points.filter(point => point.layerId === 'leads').length) || 0
+  const needsGps = Number(counts.needsGps ?? 0) || 0
+  const photoEvidence = Number(counts.photoEvidence ?? points.filter(point => point.layerId === 'photo_evidence').length) || 0
+  const doorAttempts = Number(counts.doorAttempts ?? points.filter(point => point.layerId === 'door_attempts').length) || 0
+  const signatures = Number(counts.signatures ?? points.filter(point => point.layerId === 'signatures').length) || 0
+  const visibleLayers = (layers.length ? layers : [])
+    .filter(layer => layer.visibleByDefault || ['leads', 'photo_evidence', 'door_attempts', 'inspection_events', 'manual_pins'].includes(layer.id))
+    .slice(0, 6)
+  const actions = Array.isArray(data?.actions) ? data.actions as FieldMapCardAction[] : []
+  const promptActions = actions.filter(action => !['open_full_map', 'drop_pin'].includes(action.kind)).slice(0, 4)
+  const center = data?.viewport?.center
+  const centerLabel = center && typeof center.lat === 'number' && typeof center.lng === 'number'
+    ? `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}${typeof center.accuracyMeters === 'number' ? ` ±${Math.round(center.accuracyMeters)}m` : ''}`
+    : null
+
+  return (
+    <JobroloCard
+      tone="emerald"
+      templateId="field-map"
+      family="field"
+      speakableSummary="Field map card with saved pins, evidence layers, GPS context, and prompts to work from chat."
+      title={textValue(data?.title) || 'Field map'}
+      subtitle={textValue(data?.summary) || 'Pins, leads, photos, signatures, and field evidence are organized as map truth.'}
+      badge={totalPoints ? `${totalPoints} point${totalPoints === 1 ? '' : 's'}` : 'map truth'}
+      icon={<MapPin className="h-5 w-5" />}
+      footer={
+        <>
+          <Button size="sm" className="rounded-full" onClick={openFieldMap}>Open full map</Button>
+          <JobroloPromptButton tone="emerald" label="Drop pin" prompt="Drop a field lead pin at my current location and let me add homeowner, address, status, and notes." />
+          {promptActions.map(action => (
+            <JobroloPromptButton key={action.id || action.label} tone="emerald" label={action.label} prompt={fieldMapActionPrompt(action)} />
+          ))}
+        </>
+      }
+    >
+      <JobroloFactGrid columns={4}>
+        <JobroloFact label="Pinned" value={pinnedLeads || totalPoints} hint="saved map points" />
+        <JobroloFact label="Need GPS" value={needsGps} hint="records to place" />
+        <JobroloFact label="Photos" value={photoEvidence} hint="evidence layer" />
+        <JobroloFact label="Doors" value={doorAttempts} hint="field outcomes" />
+      </JobroloFactGrid>
+
+      {centerLabel || signatures ? (
+        <JobroloCardSection tone="emerald" eyebrow="Position" title={centerLabel || 'Map context'}>
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {centerLabel ? <Badge variant="outline" className="rounded-full text-[10px]">Center {centerLabel}</Badge> : null}
+            {signatures ? <Badge variant="outline" className="rounded-full text-[10px]">{signatures} signature point{signatures === 1 ? '' : 's'}</Badge> : null}
+          </div>
+        </JobroloCardSection>
+      ) : null}
+
+      {visibleLayers.length ? (
+        <JobroloCardSection tone="emerald" eyebrow="Layers" title="What this map can show">
+          <div className="flex flex-wrap gap-1.5">
+            {visibleLayers.map(layer => (
+              <button
+                key={layer.id}
+                type="button"
+                onClick={() => insertJobroloPrompt(`Show the ${layer.label} layer on the field map and summarize what is saved there.`)}
+                className="rounded-full border border-emerald-300/70 bg-emerald-100/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-950 shadow-[0_0_20px_-14px_currentColor] hover:bg-emerald-200 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-100"
+              >
+                {layer.label}
+              </button>
+            ))}
+          </div>
+        </JobroloCardSection>
+      ) : null}
+
+      <JobroloCardSection tone="emerald" eyebrow="Nearby points" title={points.length ? 'Saved evidence around this property' : 'No pinned evidence yet'}>
+        {points.length ? (
+          <div className="grid gap-2">
+            {points.slice(0, 5).map(point => (
+              <button
+                key={point.id}
+                type="button"
+                onClick={() => insertJobroloPrompt(point.prompt || `Open map point ${point.title}. Show linked customer, project, evidence, notes, and next actions.`)}
+                className="rounded-xl border bg-background/70 p-2 text-left transition hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-foreground">{point.title}</div>
+                    <div className="truncate text-xs text-muted-foreground">{point.subtitle || fieldMapLayerLabel(point.layerId, layers)}</div>
+                  </div>
+                  <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold', fieldMapPointStatusTone(point.status))}>
+                    {humanize(String(point.status || point.layerId))}
+                  </span>
+                </div>
+              </button>
+            ))}
+            {points.length > 5 ? (
+              <p className="text-xs text-muted-foreground">+{points.length - 5} more point{points.length - 5 === 1 ? '' : 's'} available in the full map.</p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Drop a lead, attach GPS to a photo/note, or open the full map. Jobrolo should keep every coordinate as evidence instead of collapsing a property into one pin.
+          </p>
+        )}
+      </JobroloCardSection>
+    </JobroloCard>
+  )
+}
+
 export function CopilotCardFromMessage({ contextType, contextData, content }: { contextType?: string | null; contextData?: Record<string, unknown> | null; content?: string }) {
   if (!contextType && !contextData) return null
   const cardType = String((contextData?.cardType || contextData?.type || contextType || '')).toLowerCase()
@@ -553,6 +718,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   }
   if (cardType.includes('field_event')) {
     return <FieldEventCard event={contextData as FieldEventLike} fallbackContent={content} />
+  }
+  if (cardType.includes('field_map') || cardType.includes('map_layer') || cardType.includes('geo_event') || cardType.includes('location_event')) {
+    return <FieldMapCard data={contextData as any} />
   }
   if (cardType.includes('location')) {
     return <LocationConfirmationCard location={contextData as LocationLike} />
