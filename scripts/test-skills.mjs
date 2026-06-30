@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 
 const require = createRequire(import.meta.url)
 const jiti = require('jiti')(process.cwd(), { interopDefault: true })
@@ -28,4 +29,5 @@ assertMultiSkillOrchestrationContracts()
 assertCodyPacketContracts()
 assertIntegrationRegistryContracts()
 assertLocalTruthContracts()
+execFileSync(process.execPath, ['scripts/dev-bridge.mjs', 'parser-test'], { stdio: 'inherit' })
 console.log('skill routing contracts passed')

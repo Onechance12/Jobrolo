@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import assert from 'node:assert/strict'
 
 const command = process.argv[2] || 'help'
 const args = process.argv.slice(3)
@@ -55,10 +56,14 @@ Environment:
 `)
 }
 
+function valueAfterFrom(inputArgs, flag, fallback = undefined) {
+  const index = inputArgs.indexOf(flag)
+  if (index === -1 || index + 1 >= inputArgs.length) return fallback
+  return inputArgs[index + 1]
+}
+
 function valueAfter(flag, fallback = undefined) {
-  const index = args.indexOf(flag)
-  if (index === -1 || index + 1 >= args.length) return fallback
-  return args[index + 1]
+  return valueAfterFrom(args, flag, fallback)
 }
 
 function query(params) {
@@ -70,25 +75,71 @@ function query(params) {
   return text ? `?${text}` : ''
 }
 
-function collectText(flag) {
-  const index = args.indexOf(flag)
-  if (index === -1 || index + 1 >= args.length) return undefined
-  return args.slice(index + 1).join(' ')
+function collectTextFrom(inputArgs, flag) {
+  const index = inputArgs.indexOf(flag)
+  if (index === -1 || index + 1 >= inputArgs.length) return undefined
+  return inputArgs.slice(index + 1).join(' ')
 }
 
-function collectUntilNextFlag(flag) {
-  const index = args.indexOf(flag)
-  if (index === -1 || index + 1 >= args.length) return undefined
+function collectText(flag) {
+  return collectTextFrom(args, flag)
+}
+
+function collectUntilNextFlagFrom(inputArgs, flag) {
+  const index = inputArgs.indexOf(flag)
+  if (index === -1 || index + 1 >= inputArgs.length) return undefined
   const values = []
-  for (let i = index + 1; i < args.length; i++) {
-    if (args[i].startsWith('--')) break
-    values.push(args[i])
+  for (let i = index + 1; i < inputArgs.length; i++) {
+    if (inputArgs[i].startsWith('--')) break
+    values.push(inputArgs[i])
   }
   return values.length ? values.join(' ') : undefined
 }
 
+function collectUntilNextFlag(flag) {
+  return collectUntilNextFlagFrom(args, flag)
+}
+
 function has(flag) {
   return args.includes(flag)
+}
+
+function assertParserContracts() {
+  const classifyArgs = [
+    '--filename',
+    'scan.pdf',
+    '--text',
+    'Upload',
+    'this',
+    'ABC',
+    'Supply',
+    'price',
+    'sheet',
+    '--mime',
+    'application/pdf',
+    '--project',
+  ]
+  const textPrompt = collectUntilNextFlagFrom(classifyArgs, '--text')
+  const recentUserText = valueAfterFrom(classifyArgs, '--recent-user-text') || textPrompt || undefined
+  assert.equal(valueAfterFrom(classifyArgs, '--filename'), 'scan.pdf')
+  assert.equal(valueAfterFrom(classifyArgs, '--mime'), 'application/pdf')
+  assert.equal(textPrompt, 'Upload this ABC Supply price sheet')
+  assert.equal(recentUserText, 'Upload this ABC Supply price sheet')
+
+  const explicitRecentTextArgs = [
+    '--filename',
+    'document.pdf',
+    '--recent-user-text',
+    'this is my company agreement',
+    '--text',
+    'fallback',
+  ]
+  const explicitRecentText = valueAfterFrom(explicitRecentTextArgs, '--recent-user-text') || collectUntilNextFlagFrom(explicitRecentTextArgs, '--text') || undefined
+  assert.equal(explicitRecentText, 'this is my company agreement')
+
+  const chatArgs = ['--message', 'Show', 'saved', 'clients', '--projectId', 'project_123']
+  assert.equal(collectUntilNextFlagFrom(chatArgs, '--message'), 'Show saved clients')
+  assert.equal(valueAfterFrom(chatArgs, '--projectId'), 'project_123')
 }
 
 async function request(path, { dev = true, method = 'GET', body } = {}) {
@@ -203,6 +254,8 @@ async function classify() {
     usage()
     process.exit(2)
   }
+  const textPrompt = collectUntilNextFlag('--text')
+  const recentUserText = valueAfter('--recent-user-text') || textPrompt || undefined
   printJson(await request('/api/dev/upload-classify', {
     method: 'POST',
     body: {
@@ -216,7 +269,7 @@ async function classify() {
       visibleText: valueAfter('--visible-text'),
       extractedText: valueAfter('--extracted-text'),
       metadataTitle: valueAfter('--metadata-title'),
-      recentUserText: valueAfter('--recent-user-text'),
+      recentUserText,
       photoSection: valueAfter('--photo-section'),
       hasCustomerContext: has('--customer'),
       hasProjectContext: has('--project'),
@@ -336,4 +389,8 @@ else if (command === 'cleanup') await cleanup()
 else if (command === 'cleanup-dry') await cleanupDry()
 else if (command === 'cleanup-apply') await cleanupApply()
 else if (command === 'chat-test') await chatTest()
+else if (command === 'parser-test') {
+  assertParserContracts()
+  console.log('dev bridge parser contracts passed')
+}
 else usage()
