@@ -26,12 +26,16 @@ export function assertPwaContracts() {
 
   const serviceWorker = readProjectFile('public/sw.js')
   const requiredSnippets = [
+    "const CACHE_VERSION = 'jobrolo-pwa-v2'",
     "const SHELL_ASSETS = [",
+    'const APP_SHELL_ROUTES = new Set',
     "'/offline'",
     "'/manifest.webmanifest'",
     "if (isApiRequest(url)) return",
     "request.mode === 'navigate'",
+    "networkFirstAppShell(request)",
     "cacheFirstStatic(request)",
+    "staleWhileRevalidateStatic(request)",
   ]
 
   for (const snippet of requiredSnippets) {
@@ -40,8 +44,26 @@ export function assertPwaContracts() {
     }
   }
 
-  if (/cache\.put\(request,\s*response\.clone\(\)\)/.test(serviceWorker) && !serviceWorker.includes('isStaticAssetRequest(request)')) {
-    throw new Error('PWA service worker may cache non-static responses')
+  if (!serviceWorker.includes("requestUrl.pathname.startsWith('/api/')")) {
+    throw new Error('PWA service worker must keep API routes network-only')
+  }
+
+  if (!serviceWorker.includes('if (isApiRequest(url)) return')) {
+    throw new Error('PWA fetch handler must bypass API requests before caching logic')
+  }
+
+  if (!serviceWorker.includes('isAppShellRoute(url) ? networkFirstAppShell(request) : networkOnlyNavigation(request)')) {
+    throw new Error('PWA navigation caching must be limited to explicit app shell routes')
+  }
+
+  if (serviceWorker.includes("APP_SHELL_ROUTES.add('/api")) {
+    throw new Error('PWA app shell routes must not include API routes')
+  }
+
+  for (const shellRoute of ["'/'", "'/field-copilot'", "'/canvassing'"]) {
+    if (!serviceWorker.includes(shellRoute)) {
+      throw new Error(`PWA service worker must include core app shell route ${shellRoute}`)
+    }
   }
 
   const layout = readProjectFile('src/app/layout.tsx')

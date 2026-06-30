@@ -1,15 +1,16 @@
 /* Jobrolo PWA service worker.
  *
- * Conservative by design:
- * - caches public shell/static assets only
- * - does not cache API responses
- * - does not cache authenticated HTML pages
- * - falls back to /offline for navigations when the network is unavailable
+ * Maximized app-shell behavior:
+ * - aggressively caches static assets
+ * - caches known app shell routes with network-first fallback
+ * - keeps /api/* network-only so private tenant data never becomes stale cache truth
+ * - falls back to /offline when a route has never been cached on this device
  */
 
-const CACHE_VERSION = 'jobrolo-pwa-v1'
+const CACHE_VERSION = 'jobrolo-pwa-v2'
 const SHELL_CACHE = `${CACHE_VERSION}:shell`
 const STATIC_CACHE = `${CACHE_VERSION}:static`
+const ROUTE_CACHE = `${CACHE_VERSION}:routes`
 
 const SHELL_ASSETS = [
   '/offline',
@@ -17,6 +18,21 @@ const SHELL_ASSETS = [
   '/logo.png',
   '/logo.svg',
 ]
+
+const APP_SHELL_ROUTES = new Set([
+  '/',
+  '/canvassing',
+  '/field-copilot',
+  '/invite',
+  '/login',
+  '/onboarding',
+  '/reset-password',
+  '/settings/company',
+  '/settings/notifications',
+  '/signup',
+  '/templates',
+  '/templates/intake',
+])
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -38,6 +54,10 @@ self.addEventListener('activate', event => {
   )
 })
 
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
+})
+
 function isSameOrigin(requestUrl) {
   return requestUrl.origin === self.location.origin
 }
@@ -46,8 +66,21 @@ function isApiRequest(requestUrl) {
   return requestUrl.pathname.startsWith('/api/')
 }
 
-function isStaticAssetRequest(request) {
-  return ['style', 'script', 'worker', 'image', 'font'].includes(request.destination)
+function normalizePath(pathname) {
+  if (pathname !== '/' && pathname.endsWith('/')) return pathname.slice(0, -1)
+  return pathname
+}
+
+function isAppShellRoute(requestUrl) {
+  return APP_SHELL_ROUTES.has(normalizePath(requestUrl.pathname))
+}
+
+function isStaticAssetRequest(request, requestUrl) {
+  return requestUrl.pathname.startsWith('/_next/static/')
+    || requestUrl.pathname === '/logo.png'
+    || requestUrl.pathname === '/logo.svg'
+    || requestUrl.pathname === '/manifest.webmanifest'
+    || ['style', 'script', 'worker', 'image', 'font'].includes(request.destination)
 }
 
 async function cacheFirstStatic(request) {
@@ -62,7 +95,42 @@ async function cacheFirstStatic(request) {
   return response
 }
 
-async function networkFirstNavigation(request) {
+async function staleWhileRevalidateStatic(request) {
+  const cached = await caches.match(request)
+  const fetchAndCache = fetch(request)
+    .then(response => {
+      if (response && response.ok) {
+        caches.open(STATIC_CACHE)
+          .then(cache => cache.put(request, response.clone()))
+          .catch(() => undefined)
+      }
+      return response
+    })
+
+  return cached || fetchAndCache
+}
+
+async function networkFirstAppShell(request) {
+  const cache = await caches.open(ROUTE_CACHE)
+  try {
+    const response = await fetch(request)
+    if (response && response.ok && response.type === 'basic') {
+      cache.put(request, response.clone()).catch(() => undefined)
+    }
+    return response
+  } catch {
+    const cached = await cache.match(request)
+      || await cache.match('/')
+      || await caches.match('/offline')
+
+    return cached || new Response('Jobrolo is offline. Reconnect to continue.', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
+  }
+}
+
+async function networkOnlyNavigation(request) {
   try {
     return await fetch(request)
   } catch {
@@ -83,11 +151,12 @@ self.addEventListener('fetch', event => {
   if (isApiRequest(url)) return
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstNavigation(request))
+    event.respondWith(isAppShellRoute(url) ? networkFirstAppShell(request) : networkOnlyNavigation(request))
     return
   }
 
-  if (isStaticAssetRequest(request)) {
-    event.respondWith(cacheFirstStatic(request))
+  if (isStaticAssetRequest(request, url)) {
+    const isImmutableNextAsset = url.pathname.startsWith('/_next/static/')
+    event.respondWith(isImmutableNextAsset ? cacheFirstStatic(request) : staleWhileRevalidateStatic(request))
   }
 })
