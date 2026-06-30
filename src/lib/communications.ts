@@ -160,7 +160,7 @@ async function sendSmsViaProvider(message: any) {
   if (provider === 'twilio') {
     const sid = process.env.TWILIO_ACCOUNT_SID
     const token = process.env.TWILIO_AUTH_TOKEN
-    const from = process.env.TWILIO_FROM_NUMBER
+    const from = await resolveTwilioFromNumber(message)
     if (!sid || !token || !from) throw new Error('Twilio credentials are not configured')
     const auth = Buffer.from(`${sid}:${token}`).toString('base64')
     const params = new URLSearchParams({ From: from, To: to, Body: body })
@@ -175,6 +175,18 @@ async function sendSmsViaProvider(message: any) {
   }
 
   throw new Error(`Unsupported SMS provider: ${provider}`)
+}
+
+async function resolveTwilioFromNumber(message: any) {
+  const contractorId = message.contractorId ? String(message.contractorId) : ''
+  if (contractorId) {
+    const companyNumber = await db.companyPhoneNumber.findFirst({
+      where: { contractorId, provider: 'twilio', status: 'active' },
+      orderBy: [{ purpose: 'asc' }, { createdAt: 'asc' }],
+    }).catch(() => null)
+    if (companyNumber?.phoneNumber) return companyNumber.phoneNumber
+  }
+  return process.env.TWILIO_FROM_NUMBER
 }
 
 export async function dispatchCommunicationMessage(id: string) {

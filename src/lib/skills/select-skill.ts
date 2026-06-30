@@ -164,6 +164,12 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('communication-routing', 0.84, 'External/internal communication routing intent.'))
   }
 
+  if (/(jobrolo number|company phone|company number|business texting number|sms number|texting number|twilio number|buy.*number|get.*number|provision.*number|phone sign[- ]?in|phone verification|verification code)/.test(text)) {
+    pushUnique(selections, select('company-phone-number', 0.92, 'Company phone number / Twilio communications setup intent.'))
+    pushUnique(selections, select('communication-routing', 0.82, 'Company numbers feed Jobrolo communication routing.'))
+    pushUnique(selections, select('integration-provider', 0.72, 'Twilio readiness may need provider configuration.'))
+  }
+
   if (/(homeowner portal|share with homeowner|share with adjuster|share with realtor|referral partner|external share|public link)/.test(text)) {
     pushUnique(selections, select('homeowner', 0.82, 'External homeowner/customer visibility intent.'))
     pushUnique(selections, select('communication-routing', 0.84, 'External share communication routing intent.'))

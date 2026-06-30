@@ -71,6 +71,21 @@ if (process.env.COMMUNICATIONS_ENABLED === 'true') {
   }
 }
 
+if (process.env.PHONE_AUTH_PROVIDER === 'twilio' || process.env.TWILIO_VERIFY_ENABLED === 'true') {
+  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID']) {
+    if (!process.env[key]) errors.push(`${key} required for Twilio phone verification`)
+  }
+}
+
+if (process.env.COMPANY_PHONE_NUMBERS_ENABLED === 'true') {
+  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']) {
+    if (!process.env[key]) errors.push(`${key} required for company phone-number provisioning`)
+  }
+  if (env === 'production' && !process.env.NEXT_PUBLIC_APP_URL) {
+    warnings.push('NEXT_PUBLIC_APP_URL should be set before provisioning Twilio numbers so inbound webhooks point to the live app.')
+  }
+}
+
 if (warnings.length) {
   console.warn('\nJobrolo preflight warnings:')
   for (const warning of warnings) console.warn(`- ${warning}`)

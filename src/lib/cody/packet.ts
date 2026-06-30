@@ -60,7 +60,7 @@ const AREA_PATTERNS: Array<[CodyArea, RegExp]> = [
   ['uploads/files', /\b(upload|file|photo|image|jpeg|jpg|png|pdf|document|attach|picker|thumbnail|storage)\b/i],
   ['documents/ocr', /\b(ocr|extract|analysis|analyzing|review docs?|scope|estimate|price sheet|template|classification)\b/i],
   ['onboarding/auth', /\b(onboard|signup|sign ?in|login|workspace|invite|join code|locked|stuck|setup mode|account)\b/i],
-  ['notifications', /\b(notification|bell|action needed|approval|approve|inbox|twilio|sms|email)\b/i],
+  ['notifications', /\b(notification|bell|action needed|approval|approve|inbox|twilio|sms|email|company phone|company number|jobrolo number|phone sign[- ]?in|verification code|texting number)\b/i],
   ['shortcuts', /\b(shortcut|prompt|pill|button|quick command)\b/i],
   ['field', /\b(field|gps|map|inspection|canvass|location|lead|door knock|property research)\b/i],
   ['roof reports', /\b(roof report|report builder|pdf report|photo report|property report)\b/i],
@@ -131,6 +131,17 @@ const AREA_FILES: Record<CodyArea, string[]> = {
   ],
   notifications: [
     'src/lib/notifications.ts',
+    'src/app/api/company-phone-numbers/route.ts',
+    'src/app/api/company-phone-numbers/search/route.ts',
+    'src/app/api/company-phone-numbers/provision/route.ts',
+    'src/app/api/auth/phone/start/route.ts',
+    'src/app/api/auth/phone/verify/route.ts',
+    'src/app/api/twilio/inbound/sms/route.ts',
+    'src/app/api/twilio/inbound/voice/route.ts',
+    'src/lib/phone.ts',
+    'src/lib/twilio.ts',
+    'src/lib/twilio-webhook.ts',
+    'src/lib/communications.ts',
     'src/lib/field-copilot.ts',
     'src/components/jobrolo/copilot-inbox-strip.tsx',
     'src/app/api/notifications',
@@ -249,6 +260,9 @@ function likelyIssueFromContent(area: CodyArea, content: string) {
   if (/\b(end cody|cody cody cody|cody session|cody chat)\b/i.test(content)) {
     return 'Cody session routing needs deterministic open/close handling with captured chat context, not normal assistant narration.'
   }
+  if (/\b(company phone|company number|jobrolo number|twilio|sms setup|business texting|phone sign[- ]?in|verification code|texting number)\b/i.test(content)) {
+    return 'Company phone/SMS setup may be misrouting across auth, Twilio provisioning, communication routing, or approval gating. Confirm whether the user needed sign-in verification, a saved company number, a number search, or a paid provisioning approval.'
+  }
   if (/\bInvalid (?:tool )?args|expected array|expected.*approved|expected.*rejected|decide_(?:pending_)?action_request/i.test(content)) {
     return 'Approval replay emitted malformed tool arguments before the stored action could run. Normalize approval decisions and actionRequestIds before schema validation.'
   }
@@ -294,6 +308,26 @@ function likelyFilesFromContent(area: CodyArea, content: string) {
       'scripts/cody-notes.mjs',
     ]
   }
+  if (/\b(company phone|company number|jobrolo number|twilio|sms setup|business texting|phone sign[- ]?in|verification code|texting number)\b/i.test(content)) {
+    return [
+      'src/lib/agent/tools-v2.ts',
+      'src/lib/skills/definitions/core-platform.ts',
+      'src/lib/skills/select-skill.ts',
+      'src/lib/skills/orchestrate-skills.ts',
+      'src/components/jobrolo/copilot-cards.tsx',
+      'src/app/api/company-phone-numbers/route.ts',
+      'src/app/api/company-phone-numbers/search/route.ts',
+      'src/app/api/company-phone-numbers/provision/route.ts',
+      'src/app/api/auth/phone/start/route.ts',
+      'src/app/api/auth/phone/verify/route.ts',
+      'src/app/api/twilio/inbound/sms/route.ts',
+      'src/app/api/twilio/inbound/voice/route.ts',
+      'src/lib/phone.ts',
+      'src/lib/twilio.ts',
+      'src/lib/twilio-webhook.ts',
+      'src/lib/communications.ts',
+    ]
+  }
   return AREA_FILES[area] ?? AREA_FILES.general
 }
 
@@ -320,7 +354,7 @@ function expectedForArea(area: CodyArea) {
     case 'signatures':
       return 'Signature flows should preserve audit trails, private storage, token safety, and clear signer/customer permissions.'
     case 'notifications':
-      return 'Notifications and approvals should explain what is being approved, complete after approval, and clear/archive cleanly.'
+      return 'Notifications, approvals, SMS routing, phone verification, and company-number setup should explain what is being approved or configured, complete after approval, and clear/archive cleanly.'
     case 'agent/tools':
       return 'Jobrolo should call executable tools for real work and honestly report failure instead of narrating operations.'
     case 'security/permissions':
@@ -351,7 +385,7 @@ function fixDirectionForArea(area: CodyArea) {
     case 'roof reports':
       return 'Trace report draft creation, photo selection state, approval requirements, PDF generation, and project/document linkage.'
     case 'notifications':
-      return 'Trace InboxItem/action request lifecycle: created → displayed → approved/rejected/actioned/archived. Ensure UI refreshes and status changes after action.'
+      return 'Trace InboxItem/action request lifecycle plus phone/SMS routes: created → displayed → approved/rejected/actioned/archived. For phone issues, verify auth phone verification, Twilio signature checks, provisioning approval, and communication routing.'
     case 'agent/tools':
       return 'Inspect deterministic routing, selected tools, tool result handling, and post-tool final answer guardrails.'
     case 'security/permissions':
@@ -378,7 +412,7 @@ function safetyNotesForArea(area: CodyArea) {
     return [...common, 'Do not overwrite company profile from public research without explicit approval.']
   }
   if (area === 'notifications') {
-    return [...common, 'Do not auto-approve destructive or external-send actions.']
+    return [...common, 'Do not auto-approve destructive or external-send actions.', 'Do not buy/provision Twilio numbers or send SMS without explicit owner/admin approval.']
   }
   if (area === 'security/permissions') {
     return [...common, 'Treat any cross-tenant or public private-data access as P0 until disproven.']
@@ -432,6 +466,9 @@ function testChecklistForArea(area: CodyArea) {
       return [
         'Create an approval item.',
         'Approve/reject it and verify status clears/updates.',
+        'Search company phone numbers without provisioning.',
+        'Verify provisioning requires owner/admin approval before Twilio purchase.',
+        'Verify phone sign-in code routes do not expose account data.',
         'Refresh and confirm it does not reappear incorrectly.',
         ...common,
       ]

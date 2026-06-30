@@ -34,6 +34,7 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'photo-evidence': ['file-attachment', 'project-context', 'activity-timeline'],
   'roof-report': ['photo-evidence', 'project-context', 'approval'],
   'communication-routing': ['role-permissions', 'approval'],
+  'company-phone-number': ['communication-routing', 'integration-provider', 'approval', 'role-permissions'],
   'role-permissions': ['approval'],
   'integration-provider': ['failure-handling'],
   'bid-quote': ['entity-resolver', 'price-list', 'job-cost'],
@@ -44,6 +45,7 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   approval: 'Risky or record-changing work must go through the trusted approval/tool layer.',
   'appointment-scheduling': 'Separate future calendar scheduling from active field inspections.',
   'communication-routing': 'Treat chat creation, copyable links, invites, and SMS/email sends as separate actions.',
+  'company-phone-number': 'Treat company numbers as communication infrastructure: list/search safely, provision only after owner/admin approval.',
   'document-type-routing': 'Route documents from user intent, visible extracted content, structure, and context — not filenames alone.',
   'entity-resolver': 'Resolve the customer, project, lead, or property before record-changing actions.',
   'file-attachment': 'Attach files/photos using real IDs and the correct company/customer/project/report context.',
@@ -71,6 +73,7 @@ const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
   'project-closeout': 'Build a closeout readiness checklist from saved project status, docs/reports/signatures, invoices/payments, job costs, commission, warranty packet, schedule, and activity. Do not mark the job closed without approval.',
   'labor-cost': 'Resolve the project and source evidence, then treat labor/subcontractor amounts as internal job-cost truth. Separate quoted, approved, invoiced, and paid states.',
   'material-ordering': 'Use saved supplier/order/delivery evidence first. If supplier APIs are not configured, say so and offer a manual check instead of pretending live status.',
+  'company-phone-number': 'List/search company phone numbers first. Provisioning a Twilio number is cost-bearing and owner/admin approval-gated; do not claim outbound SMS is ready until Twilio/A2P setup is ready.',
   'production-coordinator': 'Check project status, material readiness, financial/job-cost completeness, and approvals before saying a job is ready to build.',
   'supplier-invoice': 'Classify supplier invoices/delivery tickets as project-level cost or delivery evidence. Do not import them into company pricing unless the user explicitly confirms reusable price-list intent.',
 }
@@ -109,6 +112,7 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (/(commission|sales rep payout|rep pay|sales split)/.test(text)) return 'commission'
   if (/(material order|order status|delivery status|material drop|backorder|substitution)/.test(text)) return 'material-ordering'
   if (/(price\s*(sheet|list)|material prices|supplier pricing|review rows|pending import)/.test(text)) return 'price-list'
+  if (/(jobrolo number|company phone|company number|business texting number|sms number|texting number|twilio number|buy.*number|get.*number|provision.*number|phone sign[- ]?in|phone verification|verification code)/.test(text)) return 'company-phone-number'
 
   if (intentPrimary && getSkillById(intentPrimary) && !GENERIC_PRIMARY_SKILLS.has(intentPrimary)) return intentPrimary
 
@@ -126,7 +130,7 @@ function supportFor(primarySkill: string, selectedIds: string[], context: SkillR
   const configured = WORKFLOW_SUPPORTS[primarySkill] ?? []
   const intentSupports = context.requestIntent?.supportingSkills ?? []
   const selected = selectedIds.filter(id => id !== primarySkill && !['command-center', 'intent-routing', 'failure-handling'].includes(id))
-  const ordered = primarySkill === 'bid-quote'
+  const ordered = primarySkill === 'bid-quote' || primarySkill === 'company-phone-number'
     ? [...configured, ...intentSupports, ...selected]
     : [...intentSupports, ...configured, ...selected]
   return unique(ordered).filter(id => Boolean(getSkillById(id)) && id !== primarySkill)
@@ -154,6 +158,7 @@ function summarize(primarySkill: string, supportingSkills: string[], context: Sk
   const upload = context.uploadClassification
   if (upload) return `${upload.documentType} routed as ${upload.storageScope}. Primary skill: ${primarySkill}. Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   const primaryRecommendation = PRIMARY_RECOMMENDATIONS[primarySkill]
+  if (primarySkill === 'company-phone-number' && primaryRecommendation) return `${primaryRecommendation} Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   if (context.requestIntent?.id !== 'general') {
     return `${context.requestIntent?.summary} ${primaryRecommendation ?? `Primary skill: ${primarySkill}.`} Supporting review: ${supportingSkills.join(', ') || 'none'}.`
   }

@@ -15,9 +15,12 @@ import { hashPassword } from './password'
 export interface SignupInput {
   name: string
   email: string
-  password: string
+  password?: string
   companyName?: string
   website?: string
+  phone?: string
+  phoneE164?: string
+  phoneVerifiedAt?: Date | null
 }
 
 export interface SignupResult {
@@ -27,13 +30,14 @@ export interface SignupResult {
 }
 
 export async function bootstrapTenant(input: SignupInput): Promise<SignupResult> {
-  const { name, email, password, companyName, website } = input
+  const { name, email, password, companyName, website, phone, phoneE164, phoneVerifiedAt } = input
 
   // 1. Create Contractor (the company)
   const contractor = await db.contractor.create({
     data: {
       name,
       email,
+      phone: phoneE164 || phone || undefined,
       company: companyName || null,
       plan: 'pro',
       subscriptionStatus: 'trialing',
@@ -43,16 +47,19 @@ export async function bootstrapTenant(input: SignupInput): Promise<SignupResult>
   })
 
   // 2. Create User (the owner) with hashed password
-  const passwordHash = await hashPassword(password)
+  const passwordHash = password ? await hashPassword(password) : null
   const user = await db.user.create({
     data: {
       contractorId: contractor.id,
       name,
       email,
+      phone: phoneE164 || phone || undefined,
+      phoneE164: phoneE164 || undefined,
       role: 'owner',
       status: 'active',
       passwordHash,
       emailVerifiedAt: process.env.NODE_ENV === 'production' ? null : new Date(), // Dev: auto-verify. Prod: requires real email verification.
+      phoneVerifiedAt: phoneVerifiedAt || undefined,
     },
   })
 

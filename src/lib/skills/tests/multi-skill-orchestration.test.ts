@@ -113,6 +113,14 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(integration.primarySkill === 'integration-provider', `Integration primary should be integration-provider, got ${integration.primarySkill}`)
   assert(integration.supportingSkills.includes('failure-handling'), 'Integration provider should consult failure-handling for missing providers/fallbacks')
 
+  const companyPhone = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Get us a Jobrolo company phone number for SMS and customer calls.' }))
+  assert(companyPhone.primarySkill === 'company-phone-number', `Company phone primary should be company-phone-number, got ${companyPhone.primarySkill}`)
+  assert(companyPhone.supportingSkills.includes('communication-routing'), 'Company phone setup should consult communication-routing')
+  assert(companyPhone.supportingSkills.includes('integration-provider'), 'Company phone setup should consult integration-provider')
+  assert(companyPhone.supportingSkills.includes('approval'), 'Company phone provisioning should consult approval')
+  assert(companyPhone.approvalNeeded, 'Company phone provisioning should require approval before buying/provisioning numbers')
+  assert(companyPhone.recommendedAction.includes('Provisioning'), 'Company phone orchestration should explain provisioning approval/risk')
+
   const permissions = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' }))
   assert(permissions.primarySkill === 'role-permissions', `Permissions primary should be role-permissions, got ${permissions.primarySkill}`)
   assert(permissions.supportingSkills.includes('communication-routing'), 'Permissions should consult communication-routing for shared-chat visibility')

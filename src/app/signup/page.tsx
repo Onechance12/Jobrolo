@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Bell, KeyRound, Loader2, LockKeyhole, LogIn, Menu, Mic, Plus, Send, UserPlus } from 'lucide-react'
+import { Bell, KeyRound, Loader2, LockKeyhole, LogIn, Menu, Mic, Phone, Plus, Send, UserPlus } from 'lucide-react'
 
 type EntryMode = 'signup' | 'login' | 'join'
 type LobbyMessage = { role: 'user' | 'assistant'; content: string }
@@ -288,8 +288,11 @@ export default function SignupPage() {
   const [codyMode, setCodyMode] = useState(false)
   const [codyTranscript, setCodyTranscript] = useState<LobbyMessage[]>([])
   const [inviteCode, setInviteCode] = useState('')
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', companyName: '', website: '' })
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', phone: '', companyName: '', website: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const [phoneForm, setPhoneForm] = useState({ phone: '', code: '', name: '', companyName: '', website: '', email: '' })
+  const [phoneStep, setPhoneStep] = useState<'phone' | 'code'>('phone')
+  const [phoneMessage, setPhoneMessage] = useState<string | null>(null)
   const scrollRef = useRef<HTMLElement | null>(null)
   const messageRefs = useRef<Array<HTMLDivElement | null>>([])
   const previousLobbyMessageCountRef = useRef(0)
@@ -357,6 +360,59 @@ export default function SignupPage() {
       const data = await res.json()
       if (!res.ok) {
         setError(data.error || 'Login failed')
+        return
+      }
+      router.push(data.redirectTo || '/')
+      router.refresh()
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const startPhoneAuth = async () => {
+    setError(null)
+    setPhoneMessage(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/phone/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phoneForm.phone }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Could not send phone code')
+        return
+      }
+      setPhoneStep('code')
+      setPhoneMessage(`Code sent to ${data.phoneDisplay || data.phoneE164}.`)
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const verifyPhoneAuth = async () => {
+    setError(null)
+    setPhoneMessage(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/phone/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(phoneForm),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Phone verification failed')
+        return
+      }
+      if (data.needsSignup) {
+        setPhoneMessage(data.message || 'Phone verified. Add your name and company name to create the workspace.')
+        setMode('signup')
         return
       }
       router.push(data.redirectTo || '/')
@@ -664,6 +720,42 @@ export default function SignupPage() {
                 <Button type="submit" disabled={loading} className="mt-5 w-full bg-blue-600 text-white hover:bg-blue-700">
                   {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in…</> : 'Sign in'}
                 </Button>
+                <div className="mt-5 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-3">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-blue-100">
+                    <Phone className="h-4 w-4" />
+                    Sign in with phone
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Input
+                      type="tel"
+                      value={phoneForm.phone}
+                      onChange={e => setPhoneForm({ ...phoneForm, phone: e.target.value })}
+                      disabled={loading}
+                      className="border-white/10 bg-slate-950 text-white"
+                      placeholder="Mobile number"
+                    />
+                    <Button type="button" variant="outline" disabled={loading || !phoneForm.phone.trim()} onClick={() => void startPhoneAuth()} className="border-blue-300/25 bg-blue-500/10 text-blue-100 hover:bg-blue-500/20">
+                      Send code
+                    </Button>
+                  </div>
+                  {phoneStep === 'code' ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={phoneForm.code}
+                        onChange={e => setPhoneForm({ ...phoneForm, code: e.target.value })}
+                        disabled={loading}
+                        className="border-white/10 bg-slate-950 text-white"
+                        placeholder="Verification code"
+                      />
+                      <Button type="button" disabled={loading || !phoneForm.code.trim()} onClick={() => void verifyPhoneAuth()} className="bg-blue-600 text-white hover:bg-blue-700">
+                        Verify
+                      </Button>
+                    </div>
+                  ) : null}
+                  {phoneMessage ? <div className="mt-2 text-xs text-blue-100">{phoneMessage}</div> : null}
+                </div>
               </form>
             </div>
           ) : null}
@@ -729,6 +821,78 @@ export default function SignupPage() {
                   <div className="text-sm font-semibold text-white">Let’s create your company workspace.</div>
                   <div className="text-xs text-slate-400">After this, Jobrolo opens the real Command Center and helps finish setup from chat.</div>
                 </div>
+                <div className="mb-5 rounded-2xl border border-cyan-300/15 bg-cyan-500/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-cyan-100">
+                    <Phone className="h-4 w-4" />
+                    Create with phone instead
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Input
+                      type="tel"
+                      value={phoneForm.phone}
+                      onChange={e => setPhoneForm({ ...phoneForm, phone: e.target.value })}
+                      disabled={loading}
+                      className="border-white/10 bg-slate-950 text-white"
+                      placeholder="Mobile number"
+                    />
+                    <Button type="button" variant="outline" disabled={loading || !phoneForm.phone.trim()} onClick={() => void startPhoneAuth()} className="border-cyan-300/25 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20">
+                      Send code
+                    </Button>
+                  </div>
+                  {phoneStep === 'code' ? (
+                    <div className="mt-3 grid gap-3">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={phoneForm.code}
+                        onChange={e => setPhoneForm({ ...phoneForm, code: e.target.value })}
+                        disabled={loading}
+                        className="border-white/10 bg-slate-950 text-white"
+                        placeholder="Verification code"
+                      />
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          type="text"
+                          value={phoneForm.name}
+                          onChange={e => setPhoneForm({ ...phoneForm, name: e.target.value })}
+                          disabled={loading}
+                          className="border-white/10 bg-slate-950 text-white"
+                          placeholder="Your name"
+                        />
+                        <Input
+                          type="text"
+                          value={phoneForm.companyName}
+                          onChange={e => setPhoneForm({ ...phoneForm, companyName: e.target.value })}
+                          disabled={loading}
+                          className="border-white/10 bg-slate-950 text-white"
+                          placeholder="Company name"
+                        />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          type="email"
+                          value={phoneForm.email}
+                          onChange={e => setPhoneForm({ ...phoneForm, email: e.target.value })}
+                          disabled={loading}
+                          className="border-white/10 bg-slate-950 text-white"
+                          placeholder="Email optional"
+                        />
+                        <Input
+                          type="text"
+                          value={phoneForm.website}
+                          onChange={e => setPhoneForm({ ...phoneForm, website: e.target.value })}
+                          disabled={loading}
+                          className="border-white/10 bg-slate-950 text-white"
+                          placeholder="Website optional"
+                        />
+                      </div>
+                      <Button type="button" disabled={loading || !phoneForm.code.trim()} onClick={() => void verifyPhoneAuth()} className="bg-cyan-600 text-white hover:bg-cyan-700">
+                        Verify and create workspace
+                      </Button>
+                    </div>
+                  ) : null}
+                  {phoneMessage ? <div className="mt-2 text-xs text-cyan-100">{phoneMessage}</div> : null}
+                </div>
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="name" className="text-slate-200">Your name</Label>
@@ -737,6 +901,10 @@ export default function SignupPage() {
                   <div>
                     <Label htmlFor="email" className="text-slate-200">Email</Label>
                     <Input id="email" type="email" value={signupForm.email} onChange={e => setSignupForm({ ...signupForm, email: e.target.value })} required disabled={loading} className="mt-1 border-white/10 bg-slate-950 text-white" placeholder="you@company.com" />
+                  </div>
+                  <div>
+                    <Label htmlFor="signup-phone" className="text-slate-200">Phone optional</Label>
+                    <Input id="signup-phone" type="tel" value={signupForm.phone} onChange={e => setSignupForm({ ...signupForm, phone: e.target.value })} disabled={loading} className="mt-1 border-white/10 bg-slate-950 text-white" placeholder="Mobile number" />
                   </div>
                   <div>
                     <Label htmlFor="password" className="text-slate-200">Create password</Label>

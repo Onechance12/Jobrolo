@@ -39,8 +39,12 @@ const ROUTE_LIMITS: Record<string, RateLimitOptions> = {
   // Auth routes — strict limits to prevent brute force
   '/api/auth/login': { capacity: 5, refillRate: 0.0056 }, // 5 burst, 1 per 3 min (20/hr)
   '/api/auth/signup': { capacity: 3, refillRate: 0.0028 }, // 3 burst, 1 per 6 min (10/hr)
+  '/api/auth/phone/start': { capacity: 4, refillRate: 0.0056 }, // 4 burst, 1 per 3 min
+  '/api/auth/phone/verify': { capacity: 6, refillRate: 0.0056 }, // 6 burst, 1 per 3 min
   '/api/auth/reset-password/request': { capacity: 3, refillRate: 0.0056 }, // 3 burst, 1 per 3 min
   '/api/auth/reset-password/confirm': { capacity: 5, refillRate: 0.0056 }, // 5 burst, 1 per 3 min
+  '/api/company-phone-numbers/search': { capacity: 8, refillRate: 0.033 }, // 8 burst, ~2/min sustained
+  '/api/company-phone-numbers/provision': { capacity: 2, refillRate: 0.0017 }, // 2 burst, ~1/10min
 }
 
 export interface RateLimitResult {

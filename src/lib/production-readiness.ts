@@ -80,7 +80,25 @@ export async function getProductionReadinessReport() {
     label: 'SMS delivery',
     status: smsReady() ? 'ok' : 'warning',
     detail: smsReady() ? `SMS_PROVIDER=${env('SMS_PROVIDER')}` : 'SMS provider not fully configured.',
-    fix: 'Configure SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER when SMS is needed.',
+    fix: 'Configure SMS_PROVIDER=twilio, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and either TWILIO_FROM_NUMBER or contractor-owned company numbers.',
+  })
+
+  const phoneAuthRequested = env('PHONE_AUTH_PROVIDER') === 'twilio' || env('TWILIO_VERIFY_ENABLED') === 'true'
+  checks.push({
+    key: 'phone_auth',
+    label: 'Phone sign-in',
+    status: phoneAuthReady() ? 'ok' : (phoneAuthRequested ? 'error' : 'warning'),
+    detail: phoneAuthReady() ? 'Twilio Verify is configured.' : 'Twilio Verify is not fully configured.',
+    fix: 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_VERIFY_SERVICE_SID before enabling phone sign-in.',
+  })
+
+  const companyNumbersRequested = env('COMPANY_PHONE_NUMBERS_ENABLED') === 'true'
+  checks.push({
+    key: 'company_phone_numbers',
+    label: 'Company Jobrolo numbers',
+    status: twilioCoreReady() ? 'ok' : (companyNumbersRequested ? 'error' : 'warning'),
+    detail: twilioCoreReady() ? 'Twilio phone-number APIs are configured.' : 'Twilio phone-number APIs are not configured.',
+    fix: 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, NEXT_PUBLIC_APP_URL, and complete A2P 10DLC compliance before sending business SMS at scale.',
   })
 
   checks.push({
@@ -156,5 +174,11 @@ function emailReady() {
 function smsReady() {
   const provider = env('SMS_PROVIDER')
   if (provider !== 'twilio') return false
-  return present('TWILIO_ACCOUNT_SID') && present('TWILIO_AUTH_TOKEN') && present('TWILIO_FROM_NUMBER')
+  return twilioCoreReady() && (present('TWILIO_FROM_NUMBER') || env('COMPANY_PHONE_NUMBERS_ENABLED') === 'true')
+}
+function twilioCoreReady() {
+  return present('TWILIO_ACCOUNT_SID') && present('TWILIO_AUTH_TOKEN')
+}
+function phoneAuthReady() {
+  return twilioCoreReady() && present('TWILIO_VERIFY_SERVICE_SID')
 }

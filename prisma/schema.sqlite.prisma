@@ -30,6 +30,7 @@ model Contractor {
   subcontractors Subcontractor[]
   suppliers      Supplier[]
   users          User[]
+  companyPhoneNumbers CompanyPhoneNumber[]
   estimates      Estimate[]
   documents      Document[]
   priceSheets    PriceSheet[]
@@ -60,6 +61,7 @@ model User {
   name            String
   email           String   @unique
   phone           String?
+  phoneE164       String?  @unique
   role            String   @default("manager") // owner, manager, sales, crew, accounting
   avatar          String?
   status          String   @default("active") // active, suspended, invited
@@ -72,6 +74,7 @@ model User {
   passwordResetToken String?
   passwordResetExpires DateTime?
   emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
   // SECURITY: tokenVersion for session invalidation — increment on password reset/role change
   tokenVersion     Int      @default(0)
   // Soft delete
@@ -89,6 +92,30 @@ model User {
   apiKeys          ApiKey[]         @relation("ApiKeyOwner")
   commandShortcuts CommandShortcut[] @relation("CommandShortcutOwner")
   @@index([contractorId, status])
+  @@index([contractorId, phoneE164])
+}
+
+model CompanyPhoneNumber {
+  id                  String   @id @default(cuid())
+  contractorId        String
+  provider            String   @default("twilio")
+  phoneNumber         String   @unique
+  phoneNumberSid      String?  @unique
+  messagingServiceSid String?
+  friendlyName        String?
+  purpose             String   @default("company")
+  status              String   @default("active") // active, pending, released, failed, compliance_required
+  isoCountry          String   @default("US")
+  areaCode            String?
+  capabilitiesJson    String?
+  monthlyPrice        String?
+  a2pStatus           String?
+  metadataJson        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  contractor          Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  @@index([contractorId, status])
+  @@index([contractorId, purpose])
 }
 
 model Customer {

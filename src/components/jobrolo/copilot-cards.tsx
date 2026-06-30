@@ -629,6 +629,9 @@ export function CopilotCardFromMessage({ contextType, contextData, content }: { 
   if (cardType.includes('company_intelligence')) {
     return <CompanyIntelligenceCard data={contextData as CompanyIntelligenceLike} />
   }
+  if (cardType.includes('company_phone') || cardType.includes('phone_auth_setup')) {
+    return <CompanyPhoneNumbersCard data={contextData as any} />
+  }
   if (cardType.includes('company_profile')) {
     return <CompanyProfileCard data={contextData as CompanyProfileLike} />
   }
@@ -1324,6 +1327,118 @@ export function CompanyProfileCard({ data }: { data?: CompanyProfileLike | null 
             <JobroloPromptPills tone="amber" className="mt-2" pills={setupActions.slice(0, 12)} />
           </JobroloCardSection>
         ) : null}
+    </JobroloCard>
+  )
+}
+
+function companyPhoneNumberLabel(number: any) {
+  return textValue(number?.phoneNumber) || textValue(number?.number) || textValue(number?.friendlyName) || 'Company number'
+}
+
+function CompanyPhoneNumbersCard({ data }: { data?: any }) {
+  const cardType = String(data?.cardType || '').toLowerCase()
+  const numbers = Array.isArray(data?.numbers) ? data.numbers : []
+  const candidates = Array.isArray(data?.candidates) ? data.candidates : Array.isArray(data?.availableNumbers) ? data.availableNumbers : []
+  const provisioned = data?.number || data?.phoneNumberRecord || null
+  const activeNumbers = numbers.filter((number: any) => String(number?.status || '').toLowerCase() === 'active')
+  const hasConfiguredNumber = Boolean(provisioned || activeNumbers.length)
+  const title = cardType.includes('search')
+    ? 'Available Jobrolo numbers'
+    : cardType.includes('provision')
+      ? 'Jobrolo number provisioned'
+      : 'Company phone numbers'
+  const subtitle = cardType.includes('search')
+    ? 'Pick a number, then ask Jobrolo to provision it after approval.'
+    : hasConfiguredNumber
+      ? 'Company-owned numbers for SMS, voice, invites, and customer communication.'
+      : 'Set up a company number before Jobrolo sends SMS on your behalf.'
+  const setupPills = [
+    { label: 'Show numbers', prompt: 'Show my saved Jobrolo company phone numbers and explain which one is active for SMS.' },
+    { label: 'Search area code', prompt: 'Search available Jobrolo phone numbers in area code ' },
+    { label: 'SMS readiness', prompt: 'Check whether my company SMS and phone verification setup is ready. Tell me what is missing without showing secrets.' },
+    { label: 'Get number', prompt: 'Help me get a Jobrolo company phone number. Search available numbers first and ask before provisioning anything that costs money.' },
+  ]
+  const candidatePills = candidates.slice(0, 4).map((candidate: any) => {
+    const phone = companyPhoneNumberLabel(candidate)
+    return {
+      label: phone,
+      prompt: `Provision ${phone} as my Jobrolo company phone number after showing what will happen, what it can be used for, and asking for approval.`,
+    }
+  })
+  const footerPills = candidatePills.length ? candidatePills : setupPills
+
+  return (
+    <JobroloCard
+      tone="amber"
+      templateId="company-phone-numbers"
+      family="integration"
+      speakableSummary="Company communication number setup and Twilio readiness."
+      title={title}
+      subtitle={subtitle}
+      badge={hasConfiguredNumber ? 'communications' : 'setup needed'}
+      icon={<Radio className="h-6 w-6" />}
+      footer={<JobroloPromptPills tone="amber" pills={footerPills} />}
+    >
+      {provisioned ? (
+        <JobroloCardSection tone="emerald" eyebrow="Active number" title={companyPhoneNumberLabel(provisioned)}>
+          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+            <ProfileRow label="Purpose" value={textValue(provisioned.purpose) || 'company'} />
+            <ProfileRow label="A2P status" value={textValue(provisioned.a2pStatus) || 'not configured'} />
+          </div>
+        </JobroloCardSection>
+      ) : null}
+
+      {numbers.length ? (
+        <JobroloCardSection tone="amber" eyebrow="Saved numbers" title={`${numbers.length} saved`}>
+          <div className="space-y-2">
+            {numbers.slice(0, 5).map((number: any, index: number) => (
+              <div key={`${companyPhoneNumberLabel(number)}-${index}`} className="rounded-xl border bg-background/70 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-medium text-foreground">{companyPhoneNumberLabel(number)}</div>
+                  <Badge variant="secondary" className="text-[10px]">{textValue(number.status) || 'saved'}</Badge>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {[textValue(number.friendlyName), textValue(number.purpose), textValue(number.a2pStatus) ? `A2P: ${textValue(number.a2pStatus)}` : null].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </JobroloCardSection>
+      ) : null}
+
+      {candidates.length ? (
+        <JobroloCardSection tone="amber" eyebrow="Available numbers" title={`Search results${data?.areaCode ? ` · ${data.areaCode}` : ''}`}>
+          <div className="space-y-2">
+            {candidates.slice(0, 6).map((candidate: any, index: number) => (
+              <button
+                key={`${companyPhoneNumberLabel(candidate)}-${index}`}
+                type="button"
+                className="w-full rounded-xl border border-amber-400/30 bg-amber-500/5 p-3 text-left transition hover:border-amber-300/70 hover:bg-amber-500/10"
+                onClick={() => {
+                  const textarea = document.querySelector<HTMLTextAreaElement>('textarea')
+                  if (!textarea) return
+                  textarea.value = `Provision ${companyPhoneNumberLabel(candidate)} as my Jobrolo company phone number after showing what will happen, what it can be used for, and asking for approval.`
+                  textarea.dispatchEvent(new Event('input', { bubbles: true }))
+                  textarea.focus()
+                }}
+              >
+                <div className="font-medium text-foreground">{companyPhoneNumberLabel(candidate)}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {[textValue(candidate.locality), textValue(candidate.region), textValue(candidate.postalCode)].filter(Boolean).join(' · ') || 'SMS + voice capable'}
+                </div>
+              </button>
+            ))}
+          </div>
+        </JobroloCardSection>
+      ) : null}
+
+      {!numbers.length && !candidates.length && !provisioned ? (
+        <JobroloCardSection tone="amber" eyebrow="Setup path" title="Search before buying">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Jobrolo can search Twilio local numbers, then provision one only after an owner/admin approves the cost-bearing action. Business texting may still need A2P setup before larger outbound SMS use.
+          </p>
+        </JobroloCardSection>
+      ) : null}
     </JobroloCard>
   )
 }

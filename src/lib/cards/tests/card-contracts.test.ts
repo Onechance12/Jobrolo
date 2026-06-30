@@ -26,6 +26,10 @@ export function assertCardContracts() {
     'connection_onboarding',
     'cody_review',
     'canvassing_game_plan',
+    'company_phone_numbers',
+    'company_phone_number_search',
+    'company_phone_number_provision',
+    'phone_auth_setup',
   ]
 
   for (const cardType of expectedStructuredTypes) {
@@ -45,6 +49,11 @@ export function assertCardContracts() {
 
   const shortcutTemplate = findJobroloCardTemplate('command_shortcuts')
   assert(Boolean(shortcutTemplate?.displayRules.some(rule => /insert prompts/i.test(rule))), 'Shortcut card should explain shortcuts insert prompts')
+
+  const companyPhoneTemplate = findJobroloCardTemplate('company_phone_numbers')
+  assert(companyPhoneTemplate?.id === 'company-phone-numbers', `Company phone cards should resolve to company-phone-numbers, got ${companyPhoneTemplate?.id}`)
+  assert(Boolean(companyPhoneTemplate?.primaryPromptPills.some(pill => /Jobrolo number/i.test(pill.label))), 'Company phone card should expose Jobrolo-number setup prompts')
+  assert(Boolean(companyPhoneTemplate?.displayRules.some(rule => /Provisioning/i.test(rule) && /approval/i.test(rule))), 'Company phone card should document approval-gated provisioning')
 
   return true
 }

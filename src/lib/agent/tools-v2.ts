@@ -38,6 +38,8 @@ import { createWorkspaceInvite } from '@/lib/invitations/workspace-invites'
 import { createRoleNotification } from '@/lib/notifications'
 import { buildCodyPacket, inferCodyArea, inferCodySeverity } from '@/lib/cody/packet'
 import { getAllIntegrationReadiness, getIntegrationReadiness, getIntegrationsByCapability } from '@/lib/integrations/registry'
+import { normalizePhoneE164 } from '@/lib/phone'
+import { buyTwilioPhoneNumber, searchTwilioLocalNumbers, twilioPhoneProvisioningConfigured } from '@/lib/twilio'
 
 const INTEGRATION_CAPABILITIES = [
   'chat_reasoning',
@@ -90,6 +92,7 @@ export interface ToolDef {
 const TRUSTED_DIRECT_TOOLS = new Set(['create_customer', 'link_document_to_project'])
 const TRUSTED_DIRECT_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'sales'])
 const COMPANY_PROFILE_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator'])
+const COMPANY_PHONE_NUMBER_ROLES = new Set(['owner', 'admin', 'manager'])
 const INTERNAL_BRAIN_ROLES = new Set(['owner', 'admin', 'manager', 'project_manager', 'coordinator', 'sales', 'production', 'supplement', 'supplementer', 'office'])
 const PROJECT_CHAT_TYPES = [
   'main',
@@ -166,6 +169,14 @@ async function markDocumentLinkReviewsActioned(contractorId: string, documentId:
 
 function canManageCompanyProfile(ctx: ToolContext) {
   return COMPANY_PROFILE_ROLES.has(normalizeRole(ctx.userRole))
+}
+
+function canManageCompanyPhoneNumbers(ctx: ToolContext) {
+  return COMPANY_PHONE_NUMBER_ROLES.has(normalizeRole(ctx.userRole))
+}
+
+function canProvisionCompanyPhoneNumber(ctx: ToolContext) {
+  return normalizeRole(ctx.userRole) === 'owner' || normalizeRole(ctx.userRole) === 'admin'
 }
 
 function canUseInternalBrain(ctx: ToolContext) {
@@ -818,6 +829,25 @@ function compactApprovalArgs(args: Record<string, unknown>) {
 async function buildApprovalDetailsForTool(name: string, args: Record<string, unknown>, contractorId: string): Promise<ApprovalDetail> {
   const human = humanizeToolName(name)
 
+  if (name === 'provision_company_phone_number') {
+    const rawPhone = typeof args.phoneNumber === 'string' ? args.phoneNumber : ''
+    const normalized = normalizePhoneE164(rawPhone)
+    return {
+      title: 'Approval needed: Provision Jobrolo number',
+      summary: `Provision ${normalized.ok ? normalized.e164 : rawPhone || 'the selected phone number'} as a company-owned Jobrolo/Twilio number. This may create monthly Twilio charges and still requires business texting/A2P setup for larger outbound SMS use.`,
+      targetLabel: normalized.ok ? normalized.e164 : rawPhone,
+      destructive: false,
+      details: [
+        { label: 'Action', value: 'Provision company phone number' },
+        { label: 'Phone number', value: normalized.ok ? normalized.e164 : rawPhone },
+        { label: 'Purpose', value: typeof args.purpose === 'string' ? args.purpose : 'company' },
+        { label: 'Provider', value: 'Twilio' },
+        { label: 'Cost warning', value: 'May create recurring Twilio charges' },
+        { label: 'SMS readiness', value: 'A2P/business messaging may still be required' },
+      ],
+    }
+  }
+
   if (name === 'delete_customer') {
     const customerId = typeof args.customerId === 'string' ? args.customerId : undefined
     const customerName = typeof args.customerName === 'string' ? args.customerName : undefined
@@ -1139,6 +1169,182 @@ export const TOOLS: ToolDef[] = [
             profile: publicProfile,
             setupPrompts,
             status: 'saved',
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'get_company_phone_numbers',
+    description: 'List saved company-owned Jobrolo/Twilio phone numbers and communication readiness. Use when the user asks for their Jobrolo number, company SMS number, phone setup, or communication number status.',
+    schema: z.object({}),
+    allowedChannels: ['main', 'management'],
+    execute: async (_args, contractorId, ctx) => {
+      if (!canManageCompanyPhoneNumbers(ctx)) {
+        return { success: false, data: null, error: 'Only owner, admin, or manager roles can view company phone numbers.' }
+      }
+      const numbers = await db.companyPhoneNumber.findMany({
+        where: { contractorId },
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      })
+      return {
+        success: true,
+        data: {
+          numbers,
+          configured: numbers.some(number => number.status === 'active'),
+          twilioConfigured: twilioPhoneProvisioningConfigured(),
+          note: numbers.length
+            ? 'Company phone numbers loaded.'
+            : 'No company phone number is saved yet. Search available numbers before provisioning.',
+          card: {
+            cardType: 'company_phone_numbers',
+            status: numbers.length ? 'saved' : 'setup_needed',
+            numbers,
+            twilioConfigured: twilioPhoneProvisioningConfigured(),
+            promptPills: [
+              { label: 'Search area code', prompt: 'Search available Jobrolo phone numbers in area code ' },
+              { label: 'SMS readiness', prompt: 'Check whether my company SMS and phone verification setup is ready. Tell me what is missing without showing secrets.' },
+              { label: 'Get number', prompt: 'Help me get a Jobrolo company phone number. Search available numbers first and ask before provisioning anything that costs money.' },
+            ],
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'search_company_phone_numbers',
+    description: 'Search available Twilio local phone numbers for a company. This only searches; it does not buy or provision a number. Use before provisioning a Jobrolo company phone number.',
+    schema: z.object({
+      areaCode: z.string().max(8).optional(),
+      contains: z.string().max(20).optional(),
+      limit: z.number().int().min(1).max(20).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    execute: async (args, _contractorId, ctx) => {
+      if (!canManageCompanyPhoneNumbers(ctx)) {
+        return { success: false, data: null, error: 'Only owner, admin, or manager roles can search company phone numbers.' }
+      }
+      if (!twilioPhoneProvisioningConfigured()) {
+        return {
+          success: false,
+          data: {
+            card: {
+              cardType: 'company_phone_numbers',
+              status: 'twilio_not_configured',
+              promptPills: [
+                { label: 'Check integrations', prompt: 'Check my communication/Twilio integration readiness and tell me what environment variables are missing without showing secrets.' },
+              ],
+            },
+          },
+          error: 'Twilio phone provisioning is not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.',
+        }
+      }
+      const areaCode = args.areaCode ? String(args.areaCode).replace(/[^\d]/g, '').slice(0, 3) : undefined
+      const candidates = await searchTwilioLocalNumbers({ areaCode, contains: args.contains, limit: args.limit ?? 8 })
+      return {
+        success: true,
+        data: {
+          areaCode: areaCode ?? null,
+          candidates,
+          note: 'Searching does not buy a number. Provisioning requires owner/admin approval.',
+          card: {
+            cardType: 'company_phone_number_search',
+            status: candidates.length ? 'available' : 'none_found',
+            areaCode: areaCode ?? null,
+            candidates,
+            promptPills: candidates.slice(0, 4).map(candidate => ({
+              label: candidate.phoneNumber,
+              prompt: `Provision ${candidate.phoneNumber} as my Jobrolo company phone number after showing what will happen, what it can be used for, and asking for approval.`,
+            })),
+          },
+        },
+      }
+    },
+  },
+  {
+    name: 'provision_company_phone_number',
+    description: 'Provision/buy a selected Twilio phone number and save it as a company-owned Jobrolo communication number. This is cost-bearing and must require approval.',
+    schema: z.object({
+      phoneNumber: z.string().min(7).max(40),
+      purpose: z.string().max(80).optional(),
+      friendlyName: z.string().max(120).optional(),
+    }),
+    allowedChannels: ['main', 'management'],
+    requiresApproval: true,
+    execute: async (args, contractorId, ctx) => {
+      if (!canProvisionCompanyPhoneNumber(ctx)) {
+        return { success: false, data: null, error: 'Only owner/admin users can provision company phone numbers.' }
+      }
+      if (!twilioPhoneProvisioningConfigured()) {
+        return { success: false, data: null, error: 'Twilio phone provisioning is not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.' }
+      }
+      const normalized = normalizePhoneE164(args.phoneNumber)
+      if (!normalized.ok) return { success: false, data: null, error: normalized.error }
+
+      const existing = await db.companyPhoneNumber.findUnique({ where: { phoneNumber: normalized.e164 } }).catch(() => null)
+      if (existing) {
+        return {
+          success: true,
+          data: {
+            number: existing,
+            alreadySaved: true,
+            card: { cardType: 'company_phone_number_provision', status: 'already_saved', number: existing },
+          },
+        }
+      }
+
+      const contractor = await db.contractor.findUnique({ where: { id: contractorId }, select: { name: true, company: true } }).catch(() => null)
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')
+      const purchased = await buyTwilioPhoneNumber({
+        phoneNumber: normalized.e164,
+        friendlyName: args.friendlyName || `${contractor?.company || contractor?.name || 'Jobrolo'} phone`,
+        smsUrl: appUrl ? `${appUrl}/api/twilio/inbound/sms` : null,
+        voiceUrl: appUrl ? `${appUrl}/api/twilio/inbound/voice` : null,
+      })
+      const record = await db.companyPhoneNumber.create({
+        data: {
+          contractorId,
+          provider: 'twilio',
+          phoneNumber: purchased.phoneNumber,
+          phoneNumberSid: purchased.sid || undefined,
+          friendlyName: purchased.friendlyName || args.friendlyName || undefined,
+          purpose: args.purpose?.trim() || 'company',
+          status: 'active',
+          areaCode: purchased.phoneNumber.replace(/[^\d]/g, '').slice(1, 4) || undefined,
+          capabilitiesJson: JSON.stringify(purchased.capabilities || {}),
+          a2pStatus: 'not_configured',
+          metadataJson: JSON.stringify({
+            purchasedByUserId: ctx.userId ?? null,
+            requiresA2p10DlcForUsBusinessSms: true,
+            inboundSmsUrl: appUrl ? `${appUrl}/api/twilio/inbound/sms` : null,
+            inboundVoiceUrl: appUrl ? `${appUrl}/api/twilio/inbound/voice` : null,
+          }),
+        },
+      })
+      await createRoleNotification({
+        contractorId,
+        role: 'owner',
+        type: 'company_phone_number',
+        title: 'Jobrolo phone number provisioned',
+        summary: `${record.phoneNumber} was saved as a company communication number. A2P/business messaging setup may still be required.`,
+        priority: 'normal',
+        relatedType: 'company_phone_number',
+        relatedId: record.id,
+        payload: { cardType: 'company_phone_number_provision', numberId: record.id, phoneNumber: record.phoneNumber },
+      }).catch(() => null)
+      return {
+        success: true,
+        data: {
+          number: record,
+          note: 'Number saved. US business texting may still require A2P 10DLC registration before higher-volume customer messaging.',
+          card: {
+            cardType: 'company_phone_number_provision',
+            status: 'active',
+            number: record,
+            promptPills: [
+              { label: 'SMS readiness', prompt: 'Check whether this Jobrolo number is ready for customer SMS and tell me what setup is missing.' },
+              { label: 'Show numbers', prompt: 'Show my saved Jobrolo company phone numbers and explain which one is active for SMS.' },
+            ],
           },
         },
       }
@@ -5904,6 +6110,7 @@ function humanizeToolName(name: string) {
 }
 
 function approvalRoleForTool(name: string) {
+  if (name === 'provision_company_phone_number') return 'owner'
   if (/finance|price|cost|profit|billing/i.test(name)) return 'finance'
   if (/supplier|material|order/i.test(name)) return 'project_manager'
   if (/customer|signature|document|template|profile|delete|archive/i.test(name)) return 'project_manager'

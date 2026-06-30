@@ -6,6 +6,7 @@ import { issueSession, setSessionCookie } from '@/lib/security/session'
 import { audit } from '@/lib/security/context'
 import { rateLimitByIp } from '@/lib/security/rate-limit'
 import { markCommandCenterOnboardingReady } from '@/lib/onboarding/command-center-ready'
+import { normalizePhoneE164 } from '@/lib/phone'
 export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
@@ -17,8 +18,8 @@ export async function POST(req: NextRequest) {
     if (limited) return limited
 
     const body = await req.json()
-    const { name, email, password, companyName, website } = body as {
-      name?: string; email?: string; password?: string; companyName?: string; website?: string
+    const { name, email, password, companyName, website, phone } = body as {
+      name?: string; email?: string; password?: string; companyName?: string; website?: string; phone?: string
     }
 
     // Validation
@@ -34,6 +35,10 @@ export async function POST(req: NextRequest) {
     if (password.length < 8) {
       return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
     }
+    const normalizedPhone = phone?.trim() ? normalizePhoneE164(phone) : null
+    if (normalizedPhone && !normalizedPhone.ok) {
+      return NextResponse.json({ error: normalizedPhone.error }, { status: 400 })
+    }
 
     // Check for existing user with this email
     const existing = await db.user.findUnique({ where: { email: email.toLowerCase() } })
@@ -48,6 +53,8 @@ export async function POST(req: NextRequest) {
       password,
       companyName: companyName?.trim() || undefined,
       website: website?.trim() || undefined,
+      phone: normalizedPhone?.ok ? normalizedPhone.national : undefined,
+      phoneE164: normalizedPhone?.ok ? normalizedPhone.e164 : undefined,
     })
 
     // Issue session

@@ -43,6 +43,7 @@ export const skillRoutingTestCases = [
   'activity timeline routes into timeline lane',
   'project closeout routes into closeout/readiness lane',
   'integration provider requests route into provider lane',
+  'company phone number setup routes into company communication lane',
   'role permission requests route into permission lane',
   'Cody activation stays in read-only QA lane',
   'brain stem detects learning without turning on training/development organ',
@@ -277,6 +278,16 @@ export function assertSkillRoutingContracts() {
   assert(integrationContext.requestIntent?.id === 'integration_provider', `Integration request should resolve to integration_provider intent, got ${integrationContext.requestIntent?.id}`)
   const integrationSkills = selectSkills(integrationContext).map((selection) => selection.skill.id)
   assert(integrationSkills.includes('integration-provider'), `Integration request should select integration-provider, got ${integrationSkills.join(', ')}`)
+
+  const phoneNumberContext = buildSkillRoutingContext({ latestText: 'Help me get a Jobrolo company phone number in area code 817 for texting homeowners.' })
+  const phoneNumberSkills = selectSkills(phoneNumberContext).map((selection) => selection.skill.id)
+  assert(phoneNumberSkills.includes('company-phone-number'), `Company phone setup should select company-phone-number, got ${phoneNumberSkills.join(', ')}`)
+  assert(phoneNumberSkills.includes('communication-routing'), 'Company phone setup should consult communication-routing')
+  assert(phoneNumberSkills.includes('integration-provider'), 'Company phone setup should consult integration-provider readiness')
+
+  const twilioSearchSkills = skillIdsFor('Search available Twilio numbers in 817 before buying one.')
+  assert(twilioSearchSkills.includes('company-phone-number'), `Twilio number search should select company-phone-number, got ${twilioSearchSkills.join(', ')}`)
+  assert(twilioSearchSkills.includes('integration-provider'), 'Twilio number search should include integration-provider')
 
   const growthContext = buildSkillRoutingContext({ latestText: 'What should I do next to grow? Use my saved Jobrolo KPIs, public company research, and setup gaps.' })
   assert(growthContext.requestIntent?.id === 'company_intelligence', `Growth request should resolve to company_intelligence intent, got ${growthContext.requestIntent?.id}`)
