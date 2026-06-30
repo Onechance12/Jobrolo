@@ -72,6 +72,27 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(price\s*(sheet|list)|material prices?|supplier pricing|review rows|pending import|pricebook|price book)\b/.test(text)) {
+    return buildIntent({
+      id: 'price_list',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'price-list',
+      supportingSkills: [],
+      workflowName: 'Price list',
+      sticky: false,
+      allowedTools: ['review_price_sheet_items', 'import_price_sheet_items', 'list_documents'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'start_field_inspection_lead', 'create_scope_from_text'],
+      nextStep: 'call_tool',
+      summary: 'Price list lane: show or review saved company material pricing without drifting into customer files.',
+      laneRules: [
+        'Treat material price lists as company pricing unless the user clearly says the file is a job-specific quote or invoice.',
+        'For simple show/list requests, stay lightweight and do not consult unrelated skills.',
+        'Importing rows or changing company pricing still requires approval.',
+      ],
+    })
+  }
+
   if (/\b(cash\s+quote|cash\s+bid|\bbid\b|quote|proposal)\b/.test(text) && /\b(create|make|build|draft|start|need|generate|prepare|write|put together|price|pricing|research)\b/.test(text)) {
     return buildIntent({
       id: 'cash_quote_bid',

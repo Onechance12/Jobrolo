@@ -75,6 +75,8 @@ const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
   'supplier-invoice': 'Classify supplier invoices/delivery tickets as project-level cost or delivery evidence. Do not import them into company pricing unless the user explicitly confirms reusable price-list intent.',
 }
 
+const GENERIC_PRIMARY_SKILLS = new Set(['command-center', 'intent-routing', 'failure-handling'])
+
 function unique(values: Array<string | undefined | null>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))))
 }
@@ -94,8 +96,6 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   const upload = context.uploadClassification
   const intentPrimary = context.requestIntent?.primarySkill
 
-  if (intentPrimary && getSkillById(intentPrimary)) return intentPrimary
-
   if (upload?.route === 'company_pricing') return 'price-list'
   if (upload?.route === 'project_cost') return 'supplier-invoice'
   if (upload?.route === 'project_scope') return 'save-scope'
@@ -110,7 +110,9 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (/(material order|order status|delivery status|material drop|backorder|substitution)/.test(text)) return 'material-ordering'
   if (/(price\s*(sheet|list)|material prices|supplier pricing|review rows|pending import)/.test(text)) return 'price-list'
 
-  return selectedIds.find(id => !['command-center', 'intent-routing', 'failure-handling'].includes(id)) ?? selectedIds[0] ?? 'command-center'
+  if (intentPrimary && getSkillById(intentPrimary) && !GENERIC_PRIMARY_SKILLS.has(intentPrimary)) return intentPrimary
+
+  return selectedIds.find(id => !GENERIC_PRIMARY_SKILLS.has(id)) ?? selectedIds[0] ?? 'command-center'
 }
 
 function supportFor(primarySkill: string, selectedIds: string[], context: SkillRoutingContext): string[] {

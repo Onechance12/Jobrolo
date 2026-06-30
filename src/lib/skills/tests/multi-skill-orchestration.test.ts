@@ -73,6 +73,9 @@ export function assertMultiSkillOrchestrationContracts() {
   const simplePriceList = planForText('Show price list')
   assert(simplePriceList.primarySkill === 'price-list', `Show price list primary should be price-list, got ${simplePriceList.primarySkill}`)
   assert(simplePriceList.supportingSkills.length === 0, `Show price list should stay simple, got ${simplePriceList.supportingSkills.join(', ')}`)
+  const materialPriceList = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Show material price list' }))
+  assert(materialPriceList.primarySkill === 'price-list', `Material price list primary should be price-list, got ${materialPriceList.primarySkill}`)
+  assert(materialPriceList.supportingSkills.length === 0, `Material price list should stay simple, got ${materialPriceList.supportingSkills.join(', ')}`)
 
   const cashQuote = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a cash quote for Timothy using saved project files.' }))
   assert(cashQuote.primarySkill === 'bid-quote', `Cash quote primary should be bid-quote, got ${cashQuote.primarySkill}`)

@@ -199,6 +199,10 @@ export function assertSkillRoutingContracts() {
   assertSkillSelected('Show my material price list and first 10 rows', 'price-list', 'Show price list should select price-list behavior')
   const showPriceListSkills = skillIdsFor('Show my material price list and first 10 rows')
   assert(!showPriceListSkills.includes('file-attachment'), 'Show price list should not primarily route as generic file listing')
+  const showPriceListContext = buildSkillRoutingContext({ latestText: 'Show my material price list and first 10 rows' })
+  assert(showPriceListContext.requestIntent?.id === 'price_list', `Show price list should resolve to price_list intent, got ${showPriceListContext.requestIntent?.id}`)
+  assert(showPriceListContext.requestIntent?.primarySkill === 'price-list', 'Show price list intent should be owned by price-list')
+  assert(Boolean(showPriceListContext.requestIntent?.blockedTools?.includes('create_scope_from_text')), 'Price list intent should block scope creation from price list reads')
 
   const bidContext = buildSkillRoutingContext({ latestText: 'Create a cash quote for Timothy using the saved project photos.' })
   assert(bidContext.requestIntent?.id === 'cash_quote_bid', `Cash quote should resolve to cash_quote_bid intent, got ${bidContext.requestIntent?.id}`)

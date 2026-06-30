@@ -243,6 +243,7 @@ export type JobroloIntentId =
   | 'cody_review'
   | 'company_profile'
   | 'company_intelligence'
+  | 'price_list'
   | 'customer_project_inventory'
   | 'chat_invite'
   | 'general'
