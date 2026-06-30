@@ -137,7 +137,7 @@ export type UploadSkillRoute =
   | 'customer_project_file'
   | 'unassigned_review'
 
-export type UploadEvidenceKind = 'user_intent' | 'visible_content' | 'document_structure' | 'context' | 'filename_fallback' | 'mixed' | 'unknown'
+export type UploadEvidenceKind = 'user_intent' | 'visible_content' | 'document_structure' | 'context' | 'conflicting_evidence' | 'filename_fallback' | 'mixed' | 'unknown'
 
 export type EvidenceSignalTrust = 'strong' | 'medium' | 'weak'
 

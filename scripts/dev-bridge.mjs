@@ -44,6 +44,7 @@ function usage() {
   npm run debug:synthetic -- --message "Show Timothy file" --projectId <projectId>
   npm run debug:cleanup -- --limit 25
   npm run debug:cleanup-dry -- --action move_price_sheet_to_company_pricing --documentId <documentId>
+  npm run debug:cleanup-apply -- --action move_price_sheet_to_company_pricing --documentId <documentId> --confirm
   npm run debug:chat-test -- --message "Show saved clients"
   npm run debug:chat-test -- --live --confirm --contractorId <contractorId> --message "Show saved clients"
 
@@ -242,6 +243,25 @@ async function cleanupDry() {
   }))
 }
 
+async function cleanupApply() {
+  const action = valueAfter('--action')
+  const documentId = valueAfter('--documentId') || valueAfter('--document-id') || args.find(arg => !arg.startsWith('--'))
+  const confirm = has('--confirm') || valueAfter('--confirm') === 'true'
+  if (!action || !documentId) {
+    console.error('Missing --action or --documentId.')
+    usage()
+    process.exit(2)
+  }
+  if (!confirm) {
+    console.error('Refusing to apply cleanup without --confirm.')
+    process.exit(2)
+  }
+  printJson(await request('/api/dev/cleanup-apply', {
+    method: 'POST',
+    body: { action, documentId, confirm: true },
+  }))
+}
+
 function repeatedValues(flag) {
   const values = []
   for (let i = 0; i < args.length; i++) {
@@ -290,5 +310,6 @@ else if (command === 'classify') await classify()
 else if (command === 'synthetic') await synthetic()
 else if (command === 'cleanup') await cleanup()
 else if (command === 'cleanup-dry') await cleanupDry()
+else if (command === 'cleanup-apply') await cleanupApply()
 else if (command === 'chat-test') await chatTest()
 else usage()

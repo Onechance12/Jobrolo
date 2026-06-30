@@ -213,3 +213,96 @@ export async function buildDevCleanupDryRun(input: { action: DevCleanupAction; d
     },
   }
 }
+
+export async function applyDevCleanup(input: { action: DevCleanupAction; documentId: string; actor?: string; staleSince?: Date }) {
+  const candidate = await buildDevCleanupDryRun({
+    action: input.action,
+    documentId: input.documentId,
+    staleSince: input.staleSince,
+  })
+  if (!candidate) return null
+
+  const metadataJson = JSON.stringify({
+    source: 'dev_cleanup_bridge',
+    action: input.action,
+    before: candidate.currentState,
+    after: candidate.proposedState,
+    safety: candidate.safety,
+  })
+
+  const result = await db.$transaction(async tx => {
+    if (input.action === 'move_price_sheet_to_company_pricing') {
+      const document = await tx.document.update({
+        where: { id: input.documentId },
+        data: {
+          customerId: null,
+          projectId: null,
+          workspaceId: null,
+          fileType: 'price_sheet',
+          status: String(candidate.currentState.status ?? 'reviewed'),
+        },
+        select: { id: true, contractorId: true, originalName: true, fileType: true, status: true, customerId: true, projectId: true, workspaceId: true },
+      })
+      await tx.auditLog.create({
+        data: {
+          contractorId: document.contractorId,
+          actor: input.actor ?? 'dev:cody-bridge',
+          action: 'cleanup_move_price_sheet_to_company_pricing',
+          resourceType: 'document',
+          resourceId: document.id,
+          detail: `Moved price sheet to company-level pricing scope: ${document.originalName}`,
+          metadataJson,
+        },
+      })
+      return document
+    }
+
+    if (input.action === 'move_company_asset_to_profile_scope') {
+      const document = await tx.document.update({
+        where: { id: input.documentId },
+        data: {
+          customerId: null,
+          projectId: null,
+          workspaceId: null,
+        },
+        select: { id: true, contractorId: true, originalName: true, fileType: true, status: true, customerId: true, projectId: true, workspaceId: true },
+      })
+      await tx.auditLog.create({
+        data: {
+          contractorId: document.contractorId,
+          actor: input.actor ?? 'dev:cody-bridge',
+          action: 'cleanup_move_company_asset_to_profile_scope',
+          resourceType: 'document',
+          resourceId: document.id,
+          detail: `Moved company/user asset out of operational scope: ${document.originalName}`,
+          metadataJson,
+        },
+      })
+      return document
+    }
+
+    const document = await tx.document.update({
+      where: { id: input.documentId },
+      data: { status: 'needs_review' },
+      select: { id: true, contractorId: true, originalName: true, fileType: true, status: true, customerId: true, projectId: true, workspaceId: true },
+    })
+    await tx.auditLog.create({
+      data: {
+        contractorId: document.contractorId,
+        actor: input.actor ?? 'dev:cody-bridge',
+        action: 'cleanup_mark_stale_processing_document_needs_review',
+        resourceType: 'document',
+        resourceId: document.id,
+        detail: `Marked stale processing document for review: ${document.originalName}`,
+        metadataJson,
+      },
+    })
+    return document
+  })
+
+  return {
+    status: 'applied' as const,
+    candidate,
+    document: result,
+  }
+}

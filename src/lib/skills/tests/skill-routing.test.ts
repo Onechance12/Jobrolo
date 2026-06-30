@@ -143,7 +143,7 @@ export function assertSkillRoutingContracts() {
   })
   assert(conflictingPriceInvoice.route === 'unassigned_review', 'Price list intent conflicting with invoice content should not auto-route')
   assert(conflictingPriceInvoice.needsClarification, 'Conflicting price/invoice evidence should ask one clarification')
-  assert(Boolean(conflictingPriceInvoice.evidencePacket?.primaryEvidence === 'filename_fallback' || conflictingPriceInvoice.evidencePacket?.needsClarification), 'Conflicting evidence should carry a clarification packet')
+  assert(conflictingPriceInvoice.evidencePacket?.primaryEvidence === 'conflicting_evidence', `Conflicting evidence should be labeled as conflicting_evidence, got ${conflictingPriceInvoice.evidencePacket?.primaryEvidence}`)
 
   const customerInvoice = classifyUploadForSkills({
     filename: 'invoice.pdf',

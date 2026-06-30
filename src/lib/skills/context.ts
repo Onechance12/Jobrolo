@@ -108,6 +108,7 @@ function routeClarification(input: {
   reason: string
   suggestedPrompt?: string
   confidence?: number
+  evidence?: UploadEvidenceKind
 }): UploadSkillClassification {
   const fallbackType = input.mimeType.startsWith('image/')
     ? 'photo'
@@ -124,7 +125,7 @@ function routeClarification(input: {
     projectLevel: false,
     needsClarification: true,
     reason: input.reason,
-    evidence: input.weakType && input.weakType !== 'other' ? 'filename_fallback' : 'unknown',
+    evidence: input.evidence ?? (input.weakType && input.weakType !== 'other' ? 'filename_fallback' : 'unknown'),
     confidence: input.confidence ?? 0.35,
     suggestedPrompt: input.suggestedPrompt ?? 'Saved the file. Is this reusable company material, or is it for a specific customer/job?',
     routeLabel: 'Needs review',
@@ -317,6 +318,7 @@ export function classifyUploadForSkills(input: UploadSkillInput): UploadSkillCla
         ? 'This file was described like pricing, but the visible content looks like an invoice/quote. Should I treat it as company pricing or a job-specific supplier cost?'
         : 'The upload intent and document content disagree. Should I save this as company material or attach it to a customer/project?',
       confidence: 0.38,
+      evidence: 'conflicting_evidence',
     })
   }
 
