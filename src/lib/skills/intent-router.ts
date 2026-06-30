@@ -12,7 +12,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
   const text = compact(`${context.normalizedText || ''} ${context.latestText || ''}`)
   const upload = context.uploadClassification
 
-  if (/\b(cody cody cody|note to cody|hey cody|end cody|codex packet)\b/.test(text)) {
+  if (/\b(cody cody cody|cody cody note|note to cody|hey cody|end cody|codex packet)\b/.test(text)) {
     return buildIntent({
       id: 'cody_review',
       mode: 'qa',
@@ -247,6 +247,27 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         'User avatars belong to the logged-in user profile.',
         'Do not attach profile photos to customer/project files.',
         'Ask before applying an uploaded image as the account avatar.',
+      ],
+    })
+  }
+
+  if (/\b(company\s+logo|business\s+logo|company\s+brand|brand\s+asset|brand\s+mark|use .*logo|uploaded .*logo)\b/.test(text)) {
+    return buildIntent({
+      id: 'company_profile',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'brand-assets',
+      supportingSkills: ['company-profile', 'approval'],
+      workflowName: 'Company brand assets',
+      sticky: false,
+      allowedTools: ['get_contractor_profile', 'get_upload_status', 'update_contractor_profile', 'consult_orchestrator'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'link_document_to_customer', 'link_document_to_project', 'import_price_sheet_items'],
+      nextStep: 'ask_clarification',
+      summary: 'Company logo lane: keep uploaded logo/brand assets on the company profile, not customer/project files.',
+      laneRules: [
+        'Company logos belong to contractor profile/brand assets.',
+        'Do not attach logo uploads to customer/project files.',
+        'Ask before applying an uploaded image as the active company logo.',
       ],
     })
   }

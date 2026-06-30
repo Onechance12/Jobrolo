@@ -148,7 +148,12 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('crew-subcontractor', 0.86, 'Crew/subcontractor shared chat intent.'))
   }
 
-  if (context.requestIntent?.id !== 'user_profile' && /(photo|photos|front elevation|roof photos|damage photo|thumbnail|caption)/.test(text)) {
+  const isProfileOrBrandAssetIntent =
+    context.requestIntent?.id === 'user_profile' ||
+    context.requestIntent?.primarySkill === 'brand-assets' ||
+    /\b(company\s+logo|business\s+logo|profile photo|avatar|user icon|account photo|brand asset|brand mark)\b/.test(text)
+
+  if (!isProfileOrBrandAssetIntent && /(photo|photos|front elevation|roof photos|damage photo|thumbnail|caption)/.test(text)) {
     pushUnique(selections, select('photo-evidence', 0.86, 'Photo/evidence display, tagging, or report attachment intent.'))
   }
 
@@ -187,7 +192,7 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('approval', 0.86, 'Approval/destructive or replay-sensitive intent.'))
   }
 
-  if (/(cody cody cody|end cody|note to cody|codex packet|bug|test failed)/.test(text)) {
+  if (/(cody cody cody|cody cody note|end cody|note to cody|codex packet|bug|test failed)/.test(text)) {
     pushUnique(selections, select('qa', 0.9, 'Tester note or QA report.'))
   }
 

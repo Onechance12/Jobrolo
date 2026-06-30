@@ -264,6 +264,21 @@ export function assertSkillRoutingContracts() {
   assert(userProfileSkills.includes('user-profile'), `Profile photo request should select user-profile, got ${userProfileSkills.join(', ')}`)
   assert(!userProfileSkills.includes('photo-evidence'), 'Profile photo request should not drift into photo evidence')
 
+  const companyLogoContext = buildSkillRoutingContext({ latestText: 'Use this uploaded image as my company logo.' })
+  assert(companyLogoContext.requestIntent?.id === 'company_profile', `Company logo request should resolve to company_profile intent, got ${companyLogoContext.requestIntent?.id}`)
+  assert(companyLogoContext.requestIntent?.primarySkill === 'brand-assets', 'Company logo request should be owned by brand-assets')
+  assert(Boolean(companyLogoContext.requestIntent?.blockedTools?.includes('link_document_to_project')), 'Company logo request should block project attachment')
+  const companyLogoSkills = selectSkills(companyLogoContext).map((selection) => selection.skill.id)
+  assert(companyLogoSkills.includes('brand-assets'), `Company logo request should select brand-assets, got ${companyLogoSkills.join(', ')}`)
+  assert(!companyLogoSkills.includes('photo-evidence'), 'Company logo request should not drift into photo evidence')
+
+  const codyNoteContext = buildSkillRoutingContext({ latestText: 'Cody Cody note: inspection card loses thumbnails after taking photos.' })
+  assert(codyNoteContext.requestIntent?.id === 'cody_review', `Cody note should resolve to cody_review intent, got ${codyNoteContext.requestIntent?.id}`)
+  assert(codyNoteContext.requestIntent?.primarySkill === 'qa', 'Cody note should be owned by QA')
+  const codyNoteSkills = selectSkills(codyNoteContext).map((selection) => selection.skill.id)
+  assert(codyNoteSkills.includes('qa'), `Cody note should select qa, got ${codyNoteSkills.join(', ')}`)
+  assert(!codyNoteSkills.includes('field-copilot'), 'Cody note should not drift into field-copilot even when it mentions inspection')
+
   const reportContext = buildSkillRoutingContext({ latestText: 'Create a roof report for Timothy and let me pick the photos.' })
   assert(reportContext.requestIntent?.id === 'roof_report', `Roof report should resolve to roof_report intent, got ${reportContext.requestIntent?.id}`)
   const reportSkills = selectSkills(reportContext).map((selection) => selection.skill.id)
