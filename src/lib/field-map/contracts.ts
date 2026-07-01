@@ -29,6 +29,7 @@ export type FieldMapLayerId =
   | 'door_attempts'
   | 'inspection_events'
   | 'photo_evidence'
+  | 'appointments'
   | 'documents'
   | 'signatures'
   | 'materials'
@@ -42,11 +43,14 @@ export type FieldMapEntityKind =
   | 'customer'
   | 'project'
   | 'property'
+  | 'property_memory'
+  | 'field_location_ping'
   | 'canvassing_lead'
   | 'canvassing_activity'
   | 'door_attempt'
   | 'property_observation'
   | 'field_visit'
+  | 'appointment'
   | 'document'
   | 'photo'
   | 'signature_request'
@@ -159,6 +163,7 @@ export const FIELD_MAP_DEFAULT_LAYERS: FieldMapLayer[] = [
   { id: 'door_attempts', label: 'Door attempts', purpose: 'Knocked, no answer, renter, no soliciting, and follow-up events.', visibleByDefault: true, arRelevant: true },
   { id: 'inspection_events', label: 'Inspection events', purpose: 'Inspection start, observations, and damage notes.', visibleByDefault: true, arRelevant: true },
   { id: 'photo_evidence', label: 'Photos', purpose: 'Photo evidence coordinates tied to inspection/project context.', visibleByDefault: true, arRelevant: true },
+  { id: 'appointments', label: 'Appointments', purpose: 'Scheduled inspections, follow-ups, adjuster meetings, and jobsite visits tied to location context.', visibleByDefault: true, arRelevant: true },
   { id: 'documents', label: 'Documents', purpose: 'Uploaded document/signature/source evidence locations.', visibleByDefault: false, arRelevant: true },
   { id: 'signatures', label: 'Signatures', purpose: 'Where signatures or approvals were captured.', visibleByDefault: false, arRelevant: true },
   { id: 'materials', label: 'Materials', purpose: 'Delivery tickets, drops, supplier events, and material readiness.', visibleByDefault: false, arRelevant: false },

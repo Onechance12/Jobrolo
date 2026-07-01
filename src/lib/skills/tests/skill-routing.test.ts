@@ -224,7 +224,17 @@ export function assertSkillRoutingContracts() {
   assert(leadContext.requestIntent?.id === 'lead_intake', `Lead creation should resolve to lead_intake intent, got ${leadContext.requestIntent?.id}`)
   const leadSkills = selectSkills(leadContext).map((selection) => selection.skill.id)
   assert(leadSkills.includes('lead-intake'), `Lead creation should select lead-intake, got ${leadSkills.join(', ')}`)
+  assert(leadSkills.includes('field-map'), 'Lead intake should include field-map awareness for map-created leads')
   assert(!leadSkills.includes('roof-report'), 'Lead intake should not drift into roof report workflow')
+
+  const mapContext = buildSkillRoutingContext({ latestText: 'Edit map pin lead ID: cmr23g4zd000otq2c3fuy5wes. Mark no answer and save note that husband gets home at 4.' })
+  assert(mapContext.requestIntent?.id === 'field_map', `Map pin edit should resolve to field_map intent, got ${mapContext.requestIntent?.id}`)
+  assert(mapContext.requestIntent?.primarySkill === 'field-map', 'Map pin edit should be owned by field-map')
+  assert(Boolean(mapContext.requestIntent?.allowedTools?.includes('update_canvassing_lead')), 'Field map intent should allow lead/pin updates')
+  assert(Boolean(mapContext.requestIntent?.blockedTools?.includes('create_customer')), 'Field map intent should block direct customer creation')
+  const mapSkills = selectSkills(mapContext).map((selection) => selection.skill.id)
+  assert(mapSkills.includes('field-map'), `Map pin edit should select field-map, got ${mapSkills.join(', ')}`)
+  assert(mapSkills.includes('activity-timeline'), 'Map pin edit should preserve activity timeline context')
 
   const appointmentContext = buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' })
   assert(appointmentContext.requestIntent?.id === 'appointment_scheduling', `Future inspection should resolve to appointment_scheduling intent, got ${appointmentContext.requestIntent?.id}`)

@@ -116,6 +116,12 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('file-attachment', 0.8, 'File/photo display or attachment context may be needed.'))
   }
 
+  if (/(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)/.test(text)) {
+    pushUnique(selections, select('field-map', 0.93, 'Field map / map pin workflow intent.'))
+    pushUnique(selections, select('lead-intake', 0.78, 'Map pins can become lead intake context.'))
+    pushUnique(selections, select('activity-timeline', 0.72, 'Map edits should preserve activity history.'))
+  }
+
   if (/(create customer|add client|new homeowner|save customer)/.test(text)) {
     pushUnique(selections, select('customer-creation', 0.86, 'Customer creation intent.'))
   }

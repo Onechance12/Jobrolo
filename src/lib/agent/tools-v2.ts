@@ -6072,10 +6072,92 @@ export const TOOLS: ToolDef[] = [
             prompt: `Open this field map event and show linked lead/session context, notes, status, and next actions: ${activity.summary || type}.`,
           }
         })
+      const locationPingPoints: FieldMapPoint[] = (Array.isArray((result as any).locationPings) ? (result as any).locationPings : [])
+        .filter((ping: any) => typeof ping.latitude === 'number' && typeof ping.longitude === 'number')
+        .slice(0, 100)
+        .map((ping: any) => ({
+          id: `location_ping:${ping.id}`,
+          layerId: ping.documentId ? 'photo_evidence' : ping.appointmentId ? 'appointments' : 'manual_pins',
+          coordinate: {
+            lat: ping.latitude,
+            lng: ping.longitude,
+            accuracyMeters: ping.accuracyMeters ?? null,
+            source: ping.source || 'browser_gps',
+            capturedAt: ping.capturedAt ?? ping.createdAt ?? null,
+          },
+          title: ping.documentId ? 'Photo/upload GPS' : ping.appointmentId ? 'Appointment GPS' : 'Saved GPS point',
+          subtitle: ping.source || 'Field location evidence',
+          status: 'active',
+          source: ping.source || 'browser_gps',
+          entityRefs: [
+            { kind: 'field_location_ping' as const, id: ping.id },
+            ping.canvassingLeadId ? { kind: 'canvassing_lead' as const, id: ping.canvassingLeadId } : null,
+            ping.projectId ? { kind: 'project' as const, id: ping.projectId } : null,
+            ping.customerId ? { kind: 'customer' as const, id: ping.customerId } : null,
+            ping.appointmentId ? { kind: 'appointment' as const, id: ping.appointmentId } : null,
+            ping.documentId ? { kind: 'document' as const, id: ping.documentId } : null,
+          ].filter(Boolean) as FieldMapPoint['entityRefs'],
+          evidenceType: ping.source || 'location_ping',
+          prompt: 'Open this saved GPS evidence point and show linked lead, customer, project, appointment, document, and timeline context.',
+        }))
+      const propertyPoints: FieldMapPoint[] = (Array.isArray((result as any).propertyMemories) ? (result as any).propertyMemories : [])
+        .filter((property: any) => typeof property.latitude === 'number' && typeof property.longitude === 'number')
+        .slice(0, 100)
+        .map((property: any) => ({
+          id: `property_memory:${property.id}`,
+          layerId: 'properties',
+          coordinate: {
+            lat: property.latitude,
+            lng: property.longitude,
+            source: 'property_address',
+            capturedAt: property.updatedAt ?? null,
+          },
+          title: property.address || property.ownerName || 'Saved property memory',
+          subtitle: [property.status, property.roofCondition, property.damageSignal].filter(Boolean).join(' · ') || 'Property memory',
+          status: property.status || 'active',
+          source: 'property_memory',
+          entityRefs: [
+            { kind: 'property_memory' as const, id: property.id, label: property.address ?? null },
+            property.primaryLeadId ? { kind: 'canvassing_lead' as const, id: property.primaryLeadId } : null,
+            property.projectId ? { kind: 'project' as const, id: property.projectId } : null,
+            property.customerId ? { kind: 'customer' as const, id: property.customerId } : null,
+          ].filter(Boolean) as FieldMapPoint['entityRefs'],
+          evidenceType: 'property_memory',
+          prompt: `Open property memory for ${property.address || 'this property'} with door attempts, photos, notes, follow-ups, and linked job context.`,
+        }))
+      // Appointments currently store human-readable location text. They become visible map
+      // points through linked FieldLocationPing rows; do not invent coordinates here.
+      const appointmentPoints: FieldMapPoint[] = []
+      const fieldVisitPoints: FieldMapPoint[] = (Array.isArray((result as any).fieldVisits) ? (result as any).fieldVisits : [])
+        .filter((visit: any) => typeof visit.latitude === 'number' && typeof visit.longitude === 'number')
+        .slice(0, 100)
+        .map((visit: any) => ({
+          id: `field_visit:${visit.id}`,
+          layerId: visit.type === 'canvassing' ? 'door_attempts' : 'inspection_events',
+          coordinate: {
+            lat: visit.latitude,
+            lng: visit.longitude,
+            accuracyMeters: visit.accuracyMeters ?? null,
+            source: 'field_observation',
+            capturedAt: visit.updatedAt ?? visit.createdAt ?? null,
+          },
+          title: visit.title || visit.outcome || visit.type || 'Field visit',
+          subtitle: visit.notes || visit.status || 'Field visit',
+          status: visit.status || 'active',
+          source: 'field_visit',
+          entityRefs: [
+            { kind: 'field_visit' as const, id: visit.id, label: visit.title ?? null },
+            visit.appointmentId ? { kind: 'appointment' as const, id: visit.appointmentId } : null,
+            visit.projectId ? { kind: 'project' as const, id: visit.projectId } : null,
+            visit.customerId ? { kind: 'customer' as const, id: visit.customerId } : null,
+          ].filter(Boolean) as FieldMapPoint['entityRefs'],
+          evidenceType: visit.type || 'field_visit',
+          prompt: `Open this field visit and show linked appointment, project, photos, notes, and timeline context: ${visit.title || visit.type}.`,
+        }))
       const card = buildFieldMapCardContract({
         title: 'Field command map',
         leads: result.leads,
-        points: activityPoints,
+        points: [...activityPoints, ...locationPingPoints, ...propertyPoints, ...appointmentPoints, ...fieldVisitPoints],
       })
       return { success: true, data: { ...result, card } }
     },

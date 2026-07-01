@@ -29,8 +29,10 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'labor-cost': ['project-context', 'job-cost', 'approval'],
   'commission': ['project-context', 'job-cost', 'approval'],
   'material-ordering': ['supplier', 'project-context', 'approval'],
-  'lead-intake': ['entity-resolver', 'appointment-scheduling', 'activity-timeline'],
-  'appointment-scheduling': ['entity-resolver', 'project-context', 'communication-routing'],
+  'field-map': ['lead-intake', 'field-copilot', 'activity-timeline'],
+  'field-copilot': ['field-map', 'project-context', 'entity-resolver'],
+  'lead-intake': ['entity-resolver', 'field-map', 'activity-timeline', 'appointment-scheduling'],
+  'appointment-scheduling': ['entity-resolver', 'project-context', 'communication-routing', 'field-map'],
   'photo-evidence': ['file-attachment', 'project-context', 'activity-timeline'],
   'roof-report': ['photo-evidence', 'project-context', 'approval'],
   'communication-routing': ['role-permissions', 'approval'],
@@ -49,6 +51,7 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   'document-type-routing': 'Route documents from user intent, visible extracted content, structure, and context — not filenames alone.',
   'entity-resolver': 'Resolve the customer, project, lead, or property before record-changing actions.',
   'file-attachment': 'Attach files/photos using real IDs and the correct company/customer/project/report context.',
+  'field-map': 'Keep map pins, GPS pings, property memory, appointments, photos, and field activity tied to the same saved location truth.',
   'integration-provider': 'Check provider readiness before claiming live outside-world access.',
   'photo-evidence': 'Preserve photo section, GPS, damage type, and report usage context.',
   'project-context': 'Confirm the customer/project before attaching, saving, or updating records.',
@@ -76,6 +79,7 @@ const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
   'company-phone-number': 'List/search company phone numbers first. Provisioning a Twilio number is cost-bearing and owner/admin approval-gated; do not claim outbound SMS is ready until Twilio/A2P setup is ready.',
   'production-coordinator': 'Check project status, material readiness, financial/job-cost completeness, and approvals before saying a job is ready to build.',
   'supplier-invoice': 'Classify supplier invoices/delivery tickets as project-level cost or delivery evidence. Do not import them into company pricing unless the user explicitly confirms reusable price-list intent.',
+  'field-map': 'Use get_canvassing_map and saved field evidence first. Update the lead/pin/property trail for map edits, and do not convert pins into customers/jobs without confirmation.',
 }
 
 const GENERIC_PRIMARY_SKILLS = new Set(['command-center', 'intent-routing', 'failure-handling'])
@@ -104,6 +108,7 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (upload?.route === 'project_scope') return 'save-scope'
   if (upload) return 'upload-classifier'
 
+  if (/(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)/.test(text)) return 'field-map'
   if (/(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)/.test(text)) return 'project-closeout'
   if (/(ready to build|build ready|ready for production|production ready)/.test(text)) return 'production-coordinator'
   if (/(job\s*cost|project financial|margin|gross profit|profit|cost to build|what did we make)/.test(text)) return 'job-cost'

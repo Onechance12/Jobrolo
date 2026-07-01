@@ -118,16 +118,38 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)\b/.test(text)) {
+    return buildIntent({
+      id: 'field_map',
+      mode: 'workflow',
+      confidence: 0.92,
+      primarySkill: 'field-map',
+      supportingSkills: ['lead-intake', 'field-copilot', 'activity-timeline'],
+      workflowName: 'Field map',
+      sticky: true,
+      allowedTools: ['get_canvassing_map', 'create_canvassing_lead_at_location', 'log_canvassing_activity', 'update_canvassing_lead', 'resolve_field_location', 'record_field_observation_at_location', 'research_property_now'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'send_external_message'],
+      requiredContext: ['leadId or GPS/location for updates when applicable'],
+      nextStep: 'call_tool',
+      summary: 'Field map lane: use saved map pins, GPS evidence, property memory, door outcomes, appointments, and field observations as one truth surface.',
+      laneRules: [
+        'A property can have many saved coordinates; do not collapse them into one vague address point.',
+        'Map edits should update the lead/pin/activity trail while keeping the user in map context.',
+        'Do not convert a pin to a customer/job or send external messages unless explicitly confirmed.',
+      ],
+    })
+  }
+
   if (/\b(new lead|create a lead|create lead|lead came in|phone call|called about|text came in|door knock|d2d|referral|met .* at|potential customer|leak call|online lead)\b/.test(text)) {
     return buildIntent({
       id: 'lead_intake',
       mode: 'workflow',
       confidence: 0.9,
       primarySkill: 'lead-intake',
-      supportingSkills: ['entity-resolver', 'appointment-scheduling', 'activity-timeline'],
+      supportingSkills: ['entity-resolver', 'field-map', 'activity-timeline', 'appointment-scheduling'],
       workflowName: 'Lead intake',
       sticky: true,
-      allowedTools: ['start_field_inspection_lead', 'create_customer', 'create_project_for_customer', 'consult_orchestrator'],
+      allowedTools: ['start_field_inspection_lead', 'create_canvassing_lead_at_location', 'update_canvassing_lead', 'log_canvassing_activity', 'create_customer', 'create_project_for_customer', 'consult_orchestrator'],
       blockedTools: ['create_roof_report', 'import_price_sheet_items'],
       requiredContext: ['lead source/contact/address/next step when available'],
       nextStep: 'call_tool',
@@ -171,16 +193,17 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       mode: 'workflow',
       confidence: 0.88,
       primarySkill: 'appointment-scheduling',
-      supportingSkills: ['entity-resolver', 'project-context', 'communication-routing'],
+      supportingSkills: ['entity-resolver', 'project-context', 'communication-routing', 'field-map'],
       workflowName: 'Appointment scheduling',
       sticky: false,
-      allowedTools: ['list_schedule', 'show_calendar', 'create_appointment', 'update_project_schedule', 'consult_orchestrator'],
+      allowedTools: ['list_schedule', 'show_calendar', 'create_appointment', 'update_project_schedule', 'resolve_field_location', 'get_canvassing_map', 'consult_orchestrator'],
       blockedTools: ['start_field_inspection_lead'],
       requiredContext: ['date/time/person/project or request to view calendar'],
       nextStep: 'call_tool',
       summary: 'Appointment lane: schedule or review calendar items without confusing future appointments with active field inspections.',
       laneRules: [
         'If creating an appointment, resolve date/time and customer/project/lead.',
+        'Only show appointments on the map from a saved location ping or resolved address; do not invent coordinates.',
         'If showing schedule, use saved appointments/calendar records.',
         'External calendar invites or notifications require explicit approval.',
       ],

@@ -64,6 +64,12 @@ function activitySummary(type: string, summary?: string | null) {
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
+function locationFromLead(lead: { latitude?: number | null; longitude?: number | null }) {
+  if (typeof lead.latitude !== 'number' || typeof lead.longitude !== 'number') return null
+  if (!Number.isFinite(lead.latitude) || !Number.isFinite(lead.longitude)) return null
+  return { lat: lead.latitude, lng: lead.longitude }
+}
+
 function cleanFieldText(value?: string | null) {
   const cleaned = value
     ?.trim()
@@ -245,22 +251,99 @@ export async function updateCanvassingLead(ctx: TenantContext, leadId: string, i
   const existing = await db.canvassingLead.findFirst({ where: { id: leadId, contractorId: ctx.contractorId } })
   if (!existing) return null
   const loc = normalizeLocation(input.location)
+  const effectiveLoc = loc ?? locationFromLead(existing)
+  const cleanedNotes = input.notes === undefined ? undefined : cleanFieldText(input.notes)
+  const cleanedAddress = input.address === undefined ? undefined : cleanFieldText(input.address)
+  const cleanedHomeownerName = input.homeownerName === undefined ? undefined : cleanFieldText(input.homeownerName)
+  const cleanedPhone = input.phone === undefined ? undefined : cleanFieldText(input.phone)
   const lead = await db.canvassingLead.update({
     where: { id: existing.id },
     data: {
       sessionId: input.sessionId ?? undefined,
-      address: input.address === undefined ? undefined : cleanFieldText(input.address),
-      homeownerName: input.homeownerName === undefined ? undefined : cleanFieldText(input.homeownerName),
-      phone: input.phone === undefined ? undefined : cleanFieldText(input.phone),
-      notes: input.notes === undefined ? undefined : cleanFieldText(input.notes),
+      address: cleanedAddress,
+      homeownerName: cleanedHomeownerName,
+      phone: cleanedPhone,
+      notes: cleanedNotes,
       status: input.status ?? undefined,
       latitude: loc?.lat,
       longitude: loc?.lng,
       metadataJson: input.metadata ? JSON.stringify({ ...safeJson(existing.metadataJson, {}), ...input.metadata }) : undefined,
     },
   })
+
+  const propertyMemory = await upsertPropertyMemory(ctx, {
+    primaryLeadId: lead.id,
+    customerId: lead.customerId,
+    projectId: lead.projectId,
+    address: lead.address,
+    homeownerName: lead.homeownerName,
+    phone: lead.phone,
+    status: lead.status === 'converted'
+      ? 'converted'
+      : lead.status === 'follow_up'
+        ? 'follow_up'
+        : ['no_soliciting', 'do_not_knock'].includes(lead.status)
+          ? 'do_not_contact'
+          : 'watch',
+    notes: lead.notes,
+    location: effectiveLoc ? {
+      lat: effectiveLoc.lat,
+      lng: effectiveLoc.lng,
+      accuracyMeters: loc?.accuracyMeters ?? undefined,
+      source: loc?.source ?? 'canvassing_lead_update',
+    } : undefined,
+    dataSource: {
+      source: 'canvassing_lead_update',
+      leadId: lead.id,
+      sessionId: lead.sessionId ?? null,
+      status: lead.status,
+    },
+  }).catch(() => null)
+
+  if (loc) {
+    await db.fieldLocationPing.create({
+      data: {
+        contractorId: ctx.contractorId,
+        userId: ctx.user?.id,
+        canvassingLeadId: lead.id,
+        projectId: lead.projectId ?? undefined,
+        customerId: lead.customerId ?? undefined,
+        latitude: loc.lat,
+        longitude: loc.lng,
+        accuracyMeters: loc.accuracyMeters ?? undefined,
+        source: loc.source ?? 'canvassing_lead_update',
+        metadataJson: JSON.stringify({ leadId: lead.id, sessionId: lead.sessionId ?? null, status: lead.status }),
+      },
+    }).catch(() => null)
+  }
+
+  if (propertyMemory && cleanedNotes && cleanedNotes !== existing.notes) {
+    await recordPropertyObservation(ctx, {
+      propertyMemoryId: propertyMemory.id,
+      canvassingLeadId: lead.id,
+      sessionId: lead.sessionId,
+      type: 'note',
+      title: 'Field pin note',
+      summary: cleanedNotes,
+      location: effectiveLoc ? {
+        lat: effectiveLoc.lat,
+        lng: effectiveLoc.lng,
+        accuracyMeters: loc?.accuracyMeters ?? undefined,
+        source: loc?.source ?? 'canvassing_lead_update',
+      } : undefined,
+      metadata: { leadId: lead.id, source: 'canvassing_lead_update' },
+    }).catch(() => null)
+  }
+
   if (input.status && input.status !== existing.status) {
-    await logCanvassingActivity(ctx, { leadId: lead.id, sessionId: lead.sessionId, type: input.status, summary: `Lead marked ${input.status.replace(/_/g, ' ')}`, location: input.location })
+    await logCanvassingActivity(ctx, {
+      leadId: lead.id,
+      sessionId: lead.sessionId,
+      type: input.status,
+      summary: `Lead marked ${input.status.replace(/_/g, ' ')}`,
+      notes: cleanedNotes,
+      location: loc ? input.location : effectiveLoc ? { lat: effectiveLoc.lat, lng: effectiveLoc.lng, source: 'canvassing_lead_update' } : undefined,
+    })
   }
   return lead
 }
@@ -291,7 +374,7 @@ export async function logCanvassingActivity(ctx: TenantContext, input: LogCanvas
   }
 
   if (lead) {
-    const doorOutcomes = new Set(['knock', 'knocked', 'no_answer', 'spoke', 'interested', 'inspection_set', 'follow_up', 'not_interested', 'renter', 'no_soliciting', 'do_not_knock'])
+    const doorOutcomes = new Set(['knock', 'knocked', 'no_answer', 'spoke', 'conversation', 'interested', 'inspection_set', 'follow_up', 'not_interested', 'renter', 'no_soliciting', 'do_not_knock'])
     const normalizedType = input.status || input.type
     if (doorOutcomes.has(normalizedType)) {
       await recordDoorAttempt(ctx, {
@@ -396,24 +479,43 @@ export async function getCanvassingMap(ctx: TenantContext, options: { sessionId?
       : { notIn: ['converted', 'archived'] }
   }
 
-  const [sessions, leads, activities] = await Promise.all([
+  const [sessions, leads, activities, locationPings, propertyMemories, appointments, fieldVisits] = await Promise.all([
     db.canvassingSession.findMany({ where: { contractorId: ctx.contractorId, status: { in: ['active', 'paused'] } }, orderBy: { startedAt: 'desc' }, take: 50 }),
     db.canvassingLead.findMany({ where: leadWhere as any, orderBy: { updatedAt: 'desc' }, take }),
     db.canvassingActivity.findMany({ where: { contractorId: ctx.contractorId, ...(options.sessionId ? { sessionId: options.sessionId } : {}) }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    db.fieldLocationPing.findMany({ where: { contractorId: ctx.contractorId }, orderBy: { capturedAt: 'desc' }, take: 150 }),
+    db.propertyMemory.findMany({ where: { contractorId: ctx.contractorId, latitude: { not: null }, longitude: { not: null } }, orderBy: { updatedAt: 'desc' }, take: 150 }),
+    db.appointment.findMany({ where: { contractorId: ctx.contractorId, status: { not: 'cancelled' } }, orderBy: { startTime: 'asc' }, take: 75 }),
+    db.fieldVisit.findMany({ where: { contractorId: ctx.contractorId, latitude: { not: null }, longitude: { not: null } }, orderBy: { updatedAt: 'desc' }, take: 100 }),
   ])
 
-  const bounds = computeBounds(leads.filter(l => typeof l.latitude === 'number' && typeof l.longitude === 'number').map(l => ({ lat: l.latitude!, lng: l.longitude! })))
+  const mapPoints = [
+    ...leads.filter(l => typeof l.latitude === 'number' && typeof l.longitude === 'number').map(l => ({ lat: l.latitude!, lng: l.longitude! })),
+    ...activities.filter(a => typeof a.latitude === 'number' && typeof a.longitude === 'number').map(a => ({ lat: a.latitude!, lng: a.longitude! })),
+    ...locationPings.map(p => ({ lat: p.latitude, lng: p.longitude })),
+    ...propertyMemories.filter(p => typeof p.latitude === 'number' && typeof p.longitude === 'number').map(p => ({ lat: p.latitude!, lng: p.longitude! })),
+    ...fieldVisits.filter(v => typeof v.latitude === 'number' && typeof v.longitude === 'number').map(v => ({ lat: v.latitude!, lng: v.longitude! })),
+  ]
+  const bounds = computeBounds(mapPoints)
   const counts = leads.reduce<Record<string, number>>((acc, lead) => { acc[lead.status] = (acc[lead.status] ?? 0) + 1; return acc }, {})
 
   return {
     sessions,
     leads,
     activities,
+    locationPings,
+    propertyMemories,
+    appointments,
+    fieldVisits,
     bounds,
     counts,
     summary: {
       activeSessions: sessions.length,
       leadCount: leads.length,
+      locationPingCount: locationPings.length,
+      propertyMemoryCount: propertyMemories.length,
+      appointmentCount: appointments.length,
+      fieldVisitCount: fieldVisits.length,
       knocked: counts.knocked ?? 0,
       interested: counts.interested ?? 0,
       followUp: counts.follow_up ?? 0,

@@ -31,6 +31,8 @@ const PRE_AI_LOCAL_ACTION_TOOLS = new Set([
   'record_tester_feedback',
   'get_canvassing_map',
   'create_canvassing_lead_at_location',
+  'update_canvassing_lead',
+  'log_canvassing_activity',
   'start_field_inspection_lead',
   'create_scope_from_document',
   'link_document_to_customer',
@@ -86,6 +88,41 @@ function extractLeadParts(text: string) {
   name = stripTrailingNoise(name)
   address = address ? stripTrailingNoise(address.replace(/\b(?:phone|cell|number)\b[\s\S]*$/i, '')) : null
   return name ? { name, address, phone } : null
+}
+
+function extractLeadId(text: string) {
+  return cleanText(text).match(/\blead\s*id\s*:\s*([a-z0-9_-]+)/i)?.[1]?.trim()
+    ?? cleanText(text).match(/\b(?:lead|pin)\s+([a-z][a-z0-9_-]{8,})\b/i)?.[1]?.trim()
+    ?? null
+}
+
+function statusFromMapPinText(text: string) {
+  const lower = cleanText(text).toLowerCase()
+  if (/\bno\s+answer\b/.test(lower)) return 'no_answer'
+  if (/\b(conversation|spoke|talked|brief conversation)\b/.test(lower)) return 'conversation'
+  if (/\bnot\s+interested\b/.test(lower)) return 'not_interested'
+  if (/\binspection\b/.test(lower)) return 'inspection_set'
+  if (/\brenter|renters\b/.test(lower)) return 'renter'
+  if (/\bno\s+soliciting\b/.test(lower)) return 'no_soliciting'
+  if (/\bdo\s+not\s+knock|don't\s+knock\b/.test(lower)) return 'do_not_knock'
+  if (/\bfollow[- ]?up\b/.test(lower)) return 'follow_up'
+  if (/\bknocked\b/.test(lower)) return 'knocked'
+  if (/\bnew\s+roof\b/.test(lower)) return 'new_roof'
+  return null
+}
+
+function noteFromMapPinText(text: string) {
+  const clean = cleanText(text)
+  const afterNote = clean.match(/\b(?:note|notes|save note|add note)\s*(?:is|:|-)?\s*(.+)$/i)?.[1]?.trim()
+  if (afterNote) return stripTrailingNoise(afterNote)
+  const stripped = clean
+    .replace(/\blead\s*id\s*:\s*[a-z0-9_-]+/ig, ' ')
+    .replace(/\b(?:field map pin|map pin|field pin|saved field map pin|dropped pin)\b/ig, ' ')
+    .replace(/\b(?:mark|update|edit|save|add|as|status|to)\b/ig, ' ')
+    .replace(/\b(?:no answer|conversation|spoke|talked|brief conversation|not interested|inspection|renter|renters|no soliciting|do not knock|don't knock|follow[- ]?up|knocked|new roof)\b/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped.length >= 8 ? stripTrailingNoise(stripped) : null
 }
 
 function extractCustomerName(text: string) {
@@ -150,6 +187,38 @@ export function compileLocalAction(text: string, context: LocalActionContext = {
         },
       },
       blockedTools: ['create_canvassing_lead_at_location', 'start_canvassing_session', 'create_customer', 'create_project_for_customer'],
+    })
+  }
+
+  const mapLeadId = extractLeadId(clean)
+  const isMapPinEdit = Boolean(mapLeadId) && /\b(field map pin|map pin|field pin|saved field map pin|lead id|save note|add note|mark|update|edit)\b/i.test(clean)
+  if (isMapPinEdit && mapLeadId) {
+    const status = statusFromMapPinText(clean)
+    const notes = noteFromMapPinText(clean)
+    if (!status && !notes) {
+      return needsContext({
+        id: 'update-map-pin',
+        reason: 'Map pin update identified a lead but no status or note was supplied.',
+        confidence: 0.82,
+        requiresApproval: false,
+        missingContext: ['status or note'],
+        userPrompt: 'What status or note should I save to this map pin?',
+      })
+    }
+    return ready({
+      id: 'update-map-pin',
+      reason: 'User asked to update a saved field map pin/lead.',
+      confidence: 0.9,
+      requiresApproval: false,
+      toolCall: {
+        name: 'update_canvassing_lead',
+        args: {
+          leadId: mapLeadId,
+          ...(status ? { status } : {}),
+          ...(notes ? { notes } : {}),
+        },
+      },
+      blockedTools: ['create_customer', 'create_project_for_customer', 'send_external_message'],
     })
   }
 
@@ -460,6 +529,10 @@ export function formatLocalActionFinalText(candidate: LocalActionCandidate, resu
 
   if (candidate.id === 'show-field-map') {
     return 'Loaded the field map card from saved Jobrolo map records. No lead, canvassing run, customer, or project was created.'
+  }
+
+  if (candidate.id === 'update-map-pin') {
+    return 'Updated the saved field map pin/lead from local Jobrolo records and kept it tied to the property activity trail.'
   }
 
   if (candidate.id === 'attach-upload-to-customer') {

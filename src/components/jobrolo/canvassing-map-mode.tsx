@@ -443,7 +443,7 @@ function CanvassingMapModeClient() {
     await createLeadAt(target, 'field_map_tap')
   }
 
-  async function updateLeadStatus(lead: FieldLead, status: string) {
+  async function updateLeadStatus(lead: FieldLead, status: string, notes?: string) {
     setSaving(true)
     setError(null)
     try {
@@ -455,6 +455,7 @@ function CanvassingMapModeClient() {
           type: status,
           status,
           summary: `Marked ${status.replace(/_/g, ' ')} from field map.`,
+          notes: notes?.trim() || undefined,
           location: isValidLocation(location) ? { lat: location.lat, lng: location.lng, accuracyMeters: location.accuracyMeters, source: 'field_map_status' } : undefined,
         }),
       })
@@ -663,7 +664,7 @@ function CanvassingMapModeClient() {
             saving={saving}
             hasLocation={isValidLocation(location)}
             onClose={() => setSelectedLeadId(null)}
-            onStatus={status => { void updateLeadStatus(selectedLead, status) }}
+            onStatus={(status, notes) => { void updateLeadStatus(selectedLead, status, notes) }}
             onAttachLocation={() => { void attachCurrentLocation(selectedLead) }}
             onArchive={() => { void archiveLead(selectedLead) }}
             onSaveNotes={notes => { void updateLeadNotes(selectedLead, notes) }}
@@ -1172,7 +1173,7 @@ function LeadCard({
   saving: boolean
   hasLocation: boolean
   onClose: () => void
-  onStatus: (status: string) => void
+  onStatus: (status: string, notes?: string) => void
   onAttachLocation: () => void
   onArchive: () => void
   onSaveNotes: (notes: string) => void
@@ -1192,8 +1193,9 @@ function LeadCard({
   const researchPrompt = `Research this field map pin/property. Lead ID: ${lead.id}. Address: ${lead.address || 'unknown'}. Tell me what is missing before converting it into a customer, job, or follow-up.`
 
   function handleStatusSelect(status: string) {
-    setNotesDraft(current => mergeStatusNote(current, status))
-    onStatus(status)
+    const nextNotes = mergeStatusNote(notesDraft, status)
+    setNotesDraft(nextNotes)
+    onStatus(status, nextNotes)
   }
 
   function stageMapPrompt(prompt: string, label: string) {

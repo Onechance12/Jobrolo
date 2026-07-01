@@ -91,8 +91,15 @@ export function assertMultiSkillOrchestrationContracts() {
 
   const lead = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a lead for Natalie Pearson at 486 North Charles St. Phone 777-661-0334.' }))
   assert(lead.primarySkill === 'lead-intake', `Lead primary should be lead-intake, got ${lead.primarySkill}`)
-  assert(lead.supportingSkills.includes('appointment-scheduling'), 'Lead intake should consult scheduling for next-step context')
+  assert(lead.supportingSkills.includes('field-map'), 'Lead intake should consult field-map for map/door/GPS leads')
   assert(lead.supportingSkills.includes('activity-timeline'), 'Lead intake should consult timeline/activity context')
+
+  const fieldMap = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Edit map pin lead ID: cmr23g4zd000otq2c3fuy5wes. Mark no answer and save a follow-up note.' }))
+  assert(fieldMap.primarySkill === 'field-map', `Field map primary should be field-map, got ${fieldMap.primarySkill}`)
+  assert(fieldMap.supportingSkills.includes('lead-intake'), 'Field map should consult lead intake for pin/lead context')
+  assert(fieldMap.supportingSkills.includes('activity-timeline'), 'Field map should consult timeline/activity context')
+  assert(fieldMap.blockedTools.includes('create_customer'), 'Field map should block direct customer creation before conversion')
+  assert(fieldMap.allowedTools.includes('update_canvassing_lead'), 'Field map should allow updating saved lead/pin records')
 
   const appointment = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' }))
   assert(appointment.primarySkill === 'appointment-scheduling', `Appointment primary should be appointment-scheduling, got ${appointment.primarySkill}`)

@@ -231,6 +231,7 @@ export type JobroloIntentId =
   | 'upload_routing'
   | 'field_inspection'
   | 'field_observation'
+  | 'field_map'
   | 'lead_intake'
   | 'appointment_scheduling'
   | 'photo_evidence'

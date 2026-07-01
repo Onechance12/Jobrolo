@@ -51,6 +51,7 @@ const RUNTIME_CRITICAL_SKILLS = [
   'labor-cost',
   'commission',
   'insurance-claim',
+  'field-map',
   'field-copilot',
   'photo-evidence',
   'roof-report',
