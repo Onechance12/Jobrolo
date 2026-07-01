@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, X } from 'lucide-react'
 
@@ -21,6 +21,13 @@ type FieldLead = {
   latitude?: number | null
   longitude?: number | null
   updatedAt?: string | null
+}
+
+declare global {
+  interface Window {
+    google?: any
+    __jobroloGoogleMapsPromise?: Promise<any>
+  }
 }
 
 type FieldMapPayload = {
@@ -71,6 +78,23 @@ const PROPERTY_OUTCOMES = [
   { status: 'other_roofer', label: 'Other roofer' },
 ]
 
+const STATUS_MARKER_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
+  new: { fill: '#3b82f6', stroke: '#dbeafe', glow: 'rgba(59,130,246,.55)' },
+  knocked: { fill: '#64748b', stroke: '#f8fafc', glow: 'rgba(148,163,184,.45)' },
+  no_answer: { fill: '#52525b', stroke: '#fafafa', glow: 'rgba(161,161,170,.45)' },
+  interested: { fill: '#10b981', stroke: '#d1fae5', glow: 'rgba(16,185,129,.6)' },
+  follow_up: { fill: '#f59e0b', stroke: '#fef3c7', glow: 'rgba(245,158,11,.55)' },
+  not_interested: { fill: '#f43f5e', stroke: '#ffe4e6', glow: 'rgba(244,63,94,.55)' },
+  converted: { fill: '#8b5cf6', stroke: '#ede9fe', glow: 'rgba(139,92,246,.6)' },
+  inspection_set: { fill: '#06b6d4', stroke: '#cffafe', glow: 'rgba(6,182,212,.6)' },
+  renter: { fill: '#f97316', stroke: '#ffedd5', glow: 'rgba(249,115,22,.55)' },
+  no_soliciting: { fill: '#dc2626', stroke: '#fee2e2', glow: 'rgba(220,38,38,.6)' },
+  do_not_knock: { fill: '#450a0a', stroke: '#fee2e2', glow: 'rgba(220,38,38,.65)' },
+  new_roof: { fill: '#0ea5e9', stroke: '#e0f2fe', glow: 'rgba(14,165,233,.55)' },
+  other_roofer: { fill: '#d946ef', stroke: '#fae8ff', glow: 'rgba(217,70,239,.55)' },
+  bad_fit: { fill: '#78716c', stroke: '#fafaf9', glow: 'rgba(168,162,158,.45)' },
+}
+
 function isValidLocation(loc: BrowserLocation | null): loc is BrowserLocation {
   return !!loc
     && Number.isFinite(loc.lat)
@@ -111,6 +135,10 @@ function statusMeta(status?: string | null) {
   return STATUS_META[String(status || 'new').toLowerCase()] ?? STATUS_META.new
 }
 
+function statusMarkerColor(status?: string | null) {
+  return STATUS_MARKER_COLORS[String(status || 'new').toLowerCase()] ?? STATUS_MARKER_COLORS.new
+}
+
 function labelForLead(lead: FieldLead) {
   return lead.homeownerName || lead.address || lead.notes || 'Dropped lead'
 }
@@ -146,6 +174,35 @@ function promptInMainChat(prompt: string) {
   window.location.href = `/?prompt=${encoded}`
 }
 
+function loadGoogleMaps(apiKey: string) {
+  if (typeof window === 'undefined') return Promise.reject(new Error('Browser unavailable.'))
+  if (window.google?.maps) return Promise.resolve(window.google)
+  if (window.__jobroloGoogleMapsPromise) return window.__jobroloGoogleMapsPromise
+
+  window.__jobroloGoogleMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-jobrolo-google-maps="true"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.google))
+      existing.addEventListener('error', () => reject(new Error('Google Maps failed to load.')))
+      return
+    }
+
+    const script = document.createElement('script')
+    script.dataset.jobroloGoogleMaps = 'true'
+    script.async = true
+    script.defer = true
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`
+    script.onload = () => {
+      if (window.google?.maps) resolve(window.google)
+      else reject(new Error('Google Maps loaded without map runtime.'))
+    }
+    script.onerror = () => reject(new Error('Google Maps failed to load.'))
+    document.head.appendChild(script)
+  })
+
+  return window.__jobroloGoogleMapsPromise
+}
+
 export function CanvassingMapMode() {
   const [location, setLocation] = useState<BrowserLocation | null>(null)
   const [locating, setLocating] = useState(false)
@@ -158,6 +215,7 @@ export function CanvassingMapMode() {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [showLeads, setShowLeads] = useState(true)
   const [dropMode, setDropMode] = useState(false)
+  const [googleMapUnavailable, setGoogleMapUnavailable] = useState(false)
 
   const leads = useMemo(() => mapData?.leads ?? [], [mapData?.leads])
   const pinnedLeads = useMemo(() => leads.filter(leadHasPin), [leads])
@@ -213,6 +271,8 @@ export function CanvassingMapMode() {
     })
   }, [loadMapData, locateMe])
 
+  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ''
+  const useGoogleMap = Boolean(googleMapsApiKey && isValidLocation(location) && !googleMapUnavailable)
   const mapUrl = useMemo(() => isValidLocation(location) ? `${openStreetMapEmbedUrl(location)}&refresh=${mapRefreshKey}` : null, [location, mapRefreshKey])
   const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
   const visiblePins = useMemo(() => isValidLocation(location)
@@ -220,6 +280,11 @@ export function CanvassingMapMode() {
       .map(lead => ({ lead, pos: pinPosition(lead, location) }))
       .filter((item): item is { lead: FieldLead; pos: NonNullable<ReturnType<typeof pinPosition>> } => Boolean(item.pos))
     : [], [pinnedLeads, location])
+
+  const handleGoogleMapUnavailable = useCallback(() => {
+    setGoogleMapUnavailable(true)
+    setError('Google Maps is unavailable, so Jobrolo switched to the fallback map.')
+  }, [])
 
   function prependLead(lead: FieldLead) {
     setMapData(prev => ({
@@ -274,6 +339,12 @@ export function CanvassingMapMode() {
       return
     }
     const target = locationFromMapPoint(clientX, clientY, rect, location)
+    setDropMode(false)
+    await createLeadAt(target, 'field_map_tap')
+  }
+
+  async function dropLeadAtLocation(target: BrowserLocation) {
+    if (!isValidLocation(target)) return
     setDropMode(false)
     await createLeadAt(target, 'field_map_tap')
   }
@@ -367,14 +438,28 @@ export function CanvassingMapMode() {
         {mapUrl ? (
           <>
             <div className="absolute inset-0">
-              <iframe
-                key={`field-map-${mapRefreshKey}`}
-                title="Current field location map"
-                src={mapUrl}
-                className="h-full w-full border-0 saturate-[.95]"
-                loading="eager"
-                referrerPolicy="no-referrer"
-              />
+              {useGoogleMap && isValidLocation(location) ? (
+                <GoogleFieldMap
+                  apiKey={googleMapsApiKey}
+                  center={location}
+                  leads={pinnedLeads}
+                  selectedLeadId={selectedLeadId}
+                  dropMode={dropMode}
+                  refreshKey={mapRefreshKey}
+                  onSelectLead={setSelectedLeadId}
+                  onMapTap={dropLeadAtLocation}
+                  onUnavailable={handleGoogleMapUnavailable}
+                />
+              ) : (
+                <iframe
+                  key={`field-map-${mapRefreshKey}`}
+                  title="Current field location map"
+                  src={mapUrl}
+                  className="h-full w-full border-0 saturate-[.95]"
+                  loading="eager"
+                  referrerPolicy="no-referrer"
+                />
+              )}
             </div>
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,.04)_0,transparent_34%,rgba(2,6,23,.16)_70%,rgba(2,6,23,.42)_100%)]" />
             <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
@@ -388,7 +473,7 @@ export function CanvassingMapMode() {
                 Jobrolo overlay
               </div>
             </div>
-            {dropMode ? (
+            {dropMode && !useGoogleMap ? (
               <button
                 type="button"
                 aria-label="Tap map to drop lead"
@@ -410,7 +495,7 @@ export function CanvassingMapMode() {
               <div className="h-5 w-5 rounded-full border-2 border-white bg-blue-500 shadow-[0_0_24px_rgba(59,130,246,.9)]" />
               <div className="mx-auto mt-1 h-8 w-px bg-blue-500/70" />
             </div>
-            {visiblePins.map(({ lead, pos }) => {
+            {!useGoogleMap && visiblePins.map(({ lead, pos }) => {
               const meta = statusMeta(lead.status)
               const selected = selectedLeadId === lead.id
               return (
@@ -587,6 +672,211 @@ function MapStat({ label, value }: { label: string; value: number }) {
     <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-2">
       <div className="text-sm font-semibold leading-none text-white">{value}</div>
       <div className="mt-1 truncate text-[10px] uppercase tracking-wide text-white/45">{label}</div>
+    </div>
+  )
+}
+
+const GOOGLE_FIELD_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#151a25' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
+  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#e2e8f0' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#113326' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#86efac' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#263244' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0f172a' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#dbeafe' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1e3a8a' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#172554' }] },
+  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#bfdbfe' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#082f49' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#7dd3fc' }] },
+]
+
+function GoogleFieldMap({
+  apiKey,
+  center,
+  leads,
+  selectedLeadId,
+  dropMode,
+  refreshKey,
+  onSelectLead,
+  onMapTap,
+  onUnavailable,
+}: {
+  apiKey: string
+  center: BrowserLocation
+  leads: FieldLead[]
+  selectedLeadId: string | null
+  dropMode: boolean
+  refreshKey: number
+  onSelectLead: (leadId: string) => void
+  onMapTap: (location: BrowserLocation) => void
+  onUnavailable: () => void
+}) {
+  const mapElementRef = useRef<HTMLDivElement | null>(null)
+  const googleRef = useRef<any>(null)
+  const mapRef = useRef<any>(null)
+  const markerRefs = useRef<any[]>([])
+  const currentMarkerRef = useRef<any>(null)
+  const accuracyCircleRef = useRef<any>(null)
+  const clickListenerRef = useRef<any>(null)
+  const lastRefreshKeyRef = useRef<number | null>(null)
+  const [mapReadyVersion, setMapReadyVersion] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function bootMap() {
+      if (!mapElementRef.current) return
+      try {
+        const google = await loadGoogleMaps(apiKey)
+        if (cancelled || !mapElementRef.current) return
+        googleRef.current = google
+        mapRef.current = new google.maps.Map(mapElementRef.current, {
+          center: { lat: center.lat, lng: center.lng },
+          zoom: 18,
+          minZoom: 15,
+          maxZoom: 21,
+          mapTypeId: google.maps.MapTypeId.ROADMAP,
+          clickableIcons: false,
+          disableDefaultUI: true,
+          zoomControl: true,
+          gestureHandling: 'greedy',
+          styles: GOOGLE_FIELD_MAP_STYLE,
+          backgroundColor: '#020617',
+        })
+        lastRefreshKeyRef.current = refreshKey
+        setMapReadyVersion(version => version + 1)
+      } catch {
+        if (!cancelled) onUnavailable()
+      }
+    }
+
+    void bootMap()
+
+    return () => {
+      cancelled = true
+      clickListenerRef.current?.remove?.()
+      markerRefs.current.forEach(marker => marker.setMap?.(null))
+      currentMarkerRef.current?.setMap?.(null)
+      accuracyCircleRef.current?.setMap?.(null)
+      markerRefs.current = []
+      mapRef.current = null
+    }
+  }, [apiKey, center.lat, center.lng, onUnavailable, refreshKey])
+
+  useEffect(() => {
+    const google = googleRef.current
+    const map = mapRef.current
+    if (!google || !map) return
+
+    const position = { lat: center.lat, lng: center.lng }
+    if (lastRefreshKeyRef.current !== refreshKey) {
+      map.panTo(position)
+      map.setZoom(Math.max(map.getZoom?.() ?? 18, 18))
+      lastRefreshKeyRef.current = refreshKey
+    }
+
+    if (!currentMarkerRef.current) {
+      currentMarkerRef.current = new google.maps.Marker({
+        map,
+        position,
+        title: 'Current position',
+        zIndex: 999,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 9,
+          fillColor: '#06b6d4',
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 3,
+        },
+      })
+    } else {
+      currentMarkerRef.current.setPosition(position)
+    }
+
+    if (!accuracyCircleRef.current) {
+      accuracyCircleRef.current = new google.maps.Circle({
+        map,
+        center: position,
+        radius: Math.max(8, center.accuracyMeters ?? 20),
+        strokeColor: '#22d3ee',
+        strokeOpacity: 0.45,
+        strokeWeight: 1,
+        fillColor: '#06b6d4',
+        fillOpacity: 0.08,
+      })
+    } else {
+      accuracyCircleRef.current.setCenter(position)
+      accuracyCircleRef.current.setRadius(Math.max(8, center.accuracyMeters ?? 20))
+    }
+  }, [center.accuracyMeters, center.lat, center.lng, mapReadyVersion, refreshKey])
+
+  useEffect(() => {
+    const google = googleRef.current
+    const map = mapRef.current
+    if (!google || !map) return
+
+    markerRefs.current.forEach(marker => marker.setMap?.(null))
+    markerRefs.current = leads.map(lead => {
+      const color = statusMarkerColor(lead.status)
+      const selected = lead.id === selectedLeadId
+      const marker = new google.maps.Marker({
+        map,
+        position: { lat: lead.latitude, lng: lead.longitude },
+        title: labelForLead(lead),
+        zIndex: selected ? 700 : 500,
+        optimized: false,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: selected ? 11 : 8,
+          fillColor: color.fill,
+          fillOpacity: 1,
+          strokeColor: selected ? '#ffffff' : color.stroke,
+          strokeWeight: selected ? 4 : 2,
+        },
+        label: selected
+          ? { text: '•', color: '#ffffff', fontSize: '18px', fontWeight: '900' }
+          : undefined,
+      })
+      marker.addListener('click', () => onSelectLead(lead.id))
+      return marker
+    })
+  }, [leads, mapReadyVersion, onSelectLead, selectedLeadId])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    clickListenerRef.current?.remove?.()
+    clickListenerRef.current = null
+    if (!dropMode) return
+
+    clickListenerRef.current = map.addListener('click', (event: any) => {
+      const latLng = event?.latLng
+      if (!latLng) return
+      onMapTap({
+        lat: latLng.lat(),
+        lng: latLng.lng(),
+        accuracyMeters: center.accuracyMeters,
+      })
+    })
+  }, [center.accuracyMeters, dropMode, mapReadyVersion, onMapTap])
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-slate-950">
+      <div ref={mapElementRef} className="h-full w-full" />
+      {dropMode ? (
+        <div className="pointer-events-none absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full border border-cyan-300/35 bg-slate-950/90 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-2xl backdrop-blur">
+          Tap the property to drop a lead
+        </div>
+      ) : null}
+      <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-full border border-emerald-300/25 bg-slate-950/75 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100/85 backdrop-blur">
+        Google field layer
+      </div>
     </div>
   )
 }
