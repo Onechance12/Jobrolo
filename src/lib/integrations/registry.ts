@@ -22,17 +22,17 @@ function configuredStatus(definition: IntegrationDefinition): IntegrationReadine
 
 export const INTEGRATIONS: IntegrationDefinition[] = [
   {
-    id: 'jobnimbus_readonly',
-    label: 'JobNimbus read-only migration/audit',
+    id: 'external_claim_crm_import',
+    label: 'External claim CRM migration/audit',
     category: 'external_crm',
     status: 'planned',
     capabilities: ['external_file_read', 'claim_file_import'],
     authModel: 'env_api_key',
     risk: 'read_only',
-    ownerFacingUse: 'Read JobNimbus claim/contact files during controlled migrations or audits, then convert them into Jobrolo claim packets for review.',
-    currentFallback: 'Use exported JobNimbus reports/CSV/JSON packets and run the Jobrolo adapter in dry-run mode before importing anything.',
+    ownerFacingUse: 'Read exported claim/contact files from another CRM during controlled migrations or audits, then convert them into Jobrolo claim packets for review.',
+    currentFallback: 'Use exported CRM reports/CSV/JSON packets and run the Jobrolo claim adapter in dry-run mode before importing anything.',
     safetyRules: [
-      'Jobrolo must not write back to JobNimbus from this integration.',
+      'Jobrolo must not write back to the external CRM from this integration.',
       'Do not import raw notes into homeowner/shared chats without role visibility review.',
       'External CRM data should become Jobrolo truth only through an explicit approved import path.',
     ],

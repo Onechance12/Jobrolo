@@ -18,11 +18,11 @@ export function assertIntegrationRegistryContracts() {
   assert(Boolean(openai), 'OpenAI integration should be registered')
   assert(openai!.capabilities.includes('web_search'), 'OpenAI should advertise web_search capability')
 
-  const jobnimbus = getIntegrationReadiness('jobnimbus_readonly')
-  assert(Boolean(jobnimbus), 'JobNimbus read-only integration should be registered')
-  assert(jobnimbus!.status === 'planned', 'JobNimbus should remain planned until real import workflow is approved')
-  assert(jobnimbus!.capabilities.includes('claim_file_import'), 'JobNimbus should advertise claim file import capability')
-  assert(jobnimbus!.safetyRules.some(rule => /not write back/i.test(rule)), 'JobNimbus integration should explicitly forbid writeback')
+  const externalClaimCrm = getIntegrationReadiness('external_claim_crm_import')
+  assert(Boolean(externalClaimCrm), 'External claim CRM integration should be registered')
+  assert(externalClaimCrm!.status === 'planned', 'External claim CRM import should remain planned until real import workflow is approved')
+  assert(externalClaimCrm!.capabilities.includes('claim_file_import'), 'External claim CRM should advertise claim file import capability')
+  assert(externalClaimCrm!.safetyRules.some(rule => /not write back/i.test(rule)), 'External claim CRM integration should explicitly forbid writeback')
 
   const abc = getIntegrationReadiness('abc_supply')
   assert(Boolean(abc), 'ABC Supply integration should be registered')

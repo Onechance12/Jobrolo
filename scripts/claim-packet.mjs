@@ -58,16 +58,16 @@ const EXAMPLES = {
 
 function usage() {
   console.log(`Usage:
-  npm run jobnimbus:packet -- --example ready_for_appraisal
-  npm run jobnimbus:packet -- --example two_confirmations --summary
-  npm run jobnimbus:packet -- --input /path/to/jobnimbus-claim.json
+  npm run claim:packet -- --example ready_for_appraisal
+  npm run claim:packet -- --example two_confirmations --summary
+  npm run claim:packet -- --input /path/to/external-claim.json
 
 Input shape:
-  JobNimbus-like claim/contact JSON with customerName, address, status, carrier,
+  External CRM claim/contact JSON with customerName, address, status, carrier,
   claimNumber, policyNumber, dateOfLoss, notes, openTasks, files, and payments.
 
 Safety:
-  This command is local dry-run only. It does not call JobNimbus, Jobrolo, OpenAI, or production APIs.
+  This command is local dry-run only. It does not call external CRMs, Jobrolo, OpenAI, or production APIs.
 `)
 }
 
