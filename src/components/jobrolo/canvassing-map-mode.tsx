@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, X } from 'lucide-react'
+import { Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, Trash2, X } from 'lucide-react'
 
 type BrowserLocation = {
   lat: number
@@ -142,6 +142,15 @@ function labelForLead(lead: FieldLead) {
   return lead.homeownerName || lead.address || lead.notes || 'Dropped lead'
 }
 
+function shortLabelForLead(lead: FieldLead) {
+  if (lead.homeownerName) return lead.homeownerName
+  if (lead.address) return lead.address
+  if (lead.notes?.toLowerCase().includes('inspection photos')) return 'Inspection photos'
+  if (lead.notes?.toLowerCase().includes('map tap')) return 'Dropped map pin'
+  if (lead.notes?.toLowerCase().includes('current gps')) return 'Dropped GPS pin'
+  return 'Field pin'
+}
+
 function leadHasPin(lead: FieldLead) {
   return typeof lead.latitude === 'number' && typeof lead.longitude === 'number'
 }
@@ -149,6 +158,9 @@ function leadHasPin(lead: FieldLead) {
 function promptInMainChat(prompt: string) {
   if (typeof window === 'undefined') return
   const encoded = encodeURIComponent(prompt)
+  try {
+    window.sessionStorage.setItem('jobroloPendingPrompt', prompt)
+  } catch {}
   window.location.href = `/?prompt=${encoded}`
 }
 
@@ -242,7 +254,7 @@ function CanvassingMapModeClient() {
   const [mapData, setMapData] = useState<FieldMapPayload | null>(null)
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [showLeads, setShowLeads] = useState(true)
-  const [dropMode, setDropMode] = useState(false)
+  const [dropMode, setDropMode] = useState(true)
   const [googleMapUnavailable, setGoogleMapUnavailable] = useState(false)
 
   const leads = useMemo(() => mapData?.leads ?? [], [mapData?.leads])
@@ -370,7 +382,6 @@ function CanvassingMapModeClient() {
 
   async function dropLeadAtLocation(target: BrowserLocation) {
     if (!isValidLocation(target)) return
-    setDropMode(false)
     await createLeadAt(target, 'field_map_tap')
   }
 
@@ -393,6 +404,28 @@ function CanvassingMapModeClient() {
       await loadMapData()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update lead.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function archiveLead(lead: FieldLead) {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/canvassing/leads/${lead.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+      if (!res.ok) throw new Error('Could not remove this pin from the map.')
+      setMapData(prev => ({
+        ...(prev ?? {}),
+        leads: (prev?.leads ?? []).filter(existing => existing.id !== lead.id),
+      }))
+      setSelectedLeadId(null)
+      await loadMapData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove this pin from the map.')
     } finally {
       setSaving(false)
     }
@@ -553,6 +586,7 @@ function CanvassingMapModeClient() {
             onClose={() => setSelectedLeadId(null)}
             onStatus={status => { void updateLeadStatus(selectedLead, status) }}
             onAttachLocation={() => { void attachCurrentLocation(selectedLead) }}
+            onArchive={() => { void archiveLead(selectedLead) }}
             onPrompt={promptInMainChat}
           />
         ) : null}
@@ -587,7 +621,7 @@ function CanvassingMapModeClient() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{labelForLead(lead)}</div>
+                        <div className="truncate text-sm font-semibold text-white">{shortLabelForLead(lead)}</div>
                         <div className="truncate text-xs text-white/50">{lead.address || lead.phone || 'No address yet'}</div>
                       </div>
                       <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
@@ -606,7 +640,7 @@ function CanvassingMapModeClient() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{labelForLead(lead)}</div>
+                        <div className="truncate text-sm font-semibold text-white">{shortLabelForLead(lead)}</div>
                         <div className="truncate text-xs text-amber-100/65">{lead.address || lead.phone || 'Needs map location'}</div>
                       </div>
                       <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
@@ -636,13 +670,13 @@ function CanvassingMapModeClient() {
             <Button
               size="sm"
               variant="secondary"
-              className={`rounded-full px-3 text-white ${dropMode ? 'bg-cyan-500/25 ring-1 ring-cyan-300/40 hover:bg-cyan-500/30' : 'bg-white/10 hover:bg-white/15'}`}
-              onClick={() => setDropMode(value => !value)}
+              className="rounded-full bg-cyan-500/20 px-3 text-cyan-50 ring-1 ring-cyan-300/35 hover:bg-cyan-500/30"
+              onClick={() => setDropMode(true)}
               disabled={saving || locating || !isValidLocation(location) || !useGoogleMap}
-              title={useGoogleMap ? 'Tap the Google field map to drop a lead.' : 'Tap-to-drop needs the Google Maps provider.'}
+              title={useGoogleMap ? 'Tap anywhere on the Google field map to drop a lead.' : 'Tap-to-drop needs the Google Maps provider.'}
             >
               <MapPin className="mr-1.5 h-4 w-4" />
-              {dropMode ? 'Cancel tap' : 'Tap map'}
+              Tap anywhere
             </Button>
             {!showLeads ? (
               <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" onClick={() => setShowLeads(true)}>
@@ -756,23 +790,27 @@ function MapStat({ label, value }: { label: string; value: number }) {
 }
 
 const GOOGLE_FIELD_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#151a25' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#e2e8f0' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#113326' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#86efac' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#263244' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#dbeafe' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1e3a8a' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#172554' }] },
-  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#bfdbfe' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#082f49' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#7dd3fc' }] },
+  { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ]
+
+function displayPositionForLead(lead: FieldLead, allLeads: FieldLead[]) {
+  const lat = typeof lead.latitude === 'number' ? lead.latitude : 0
+  const lng = typeof lead.longitude === 'number' ? lead.longitude : 0
+  const key = `${lat.toFixed(6)},${lng.toFixed(6)}`
+  const group = allLeads.filter(item => (
+    typeof item.latitude === 'number'
+    && typeof item.longitude === 'number'
+    && `${item.latitude.toFixed(6)},${item.longitude.toFixed(6)}` === key
+  ))
+  if (group.length <= 1) return { lat, lng }
+  const groupIndex = Math.max(0, group.findIndex(item => item.id === lead.id))
+  const angle = (Math.PI * 2 * groupIndex) / group.length
+  const radiusMeters = Math.min(10, 3 + group.length)
+  const latOffset = (Math.cos(angle) * radiusMeters) / 111_320
+  const lngOffset = (Math.sin(angle) * radiusMeters) / (111_320 * Math.cos((lat * Math.PI) / 180))
+  return { lat: lat + latOffset, lng: lng + lngOffset }
+}
 
 function GoogleFieldMap({
   apiKey,
@@ -818,10 +856,10 @@ function GoogleFieldMap({
         googleRef.current = google
         mapRef.current = new google.maps.Map(mapElementRef.current, {
           center: { lat: center.lat, lng: center.lng },
-          zoom: 18,
-          minZoom: 15,
+          zoom: 20,
+          minZoom: 16,
           maxZoom: 21,
-          mapTypeId: google.maps.MapTypeId.ROADMAP,
+          mapTypeId: google.maps.MapTypeId.SATELLITE,
           clickableIcons: false,
           disableDefaultUI: true,
           zoomControl: true,
@@ -916,10 +954,11 @@ function GoogleFieldMap({
     markerRefs.current = leads.map(lead => {
       const color = statusMarkerColor(lead.status)
       const selected = lead.id === selectedLeadId
+      const position = displayPositionForLead(lead, leads)
       const marker = new google.maps.Marker({
         map,
-        position: { lat: lead.latitude, lng: lead.longitude },
-        title: labelForLead(lead),
+        position,
+        title: shortLabelForLead(lead),
         zIndex: selected ? 700 : 500,
         optimized: false,
         icon: {
@@ -960,13 +999,8 @@ function GoogleFieldMap({
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-950">
       <div ref={mapElementRef} className="h-full w-full" />
-      {dropMode ? (
-        <div className="pointer-events-none absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full border border-cyan-300/35 bg-slate-950/90 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-2xl backdrop-blur">
-          Tap the property to drop a lead
-        </div>
-      ) : null}
       <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-full border border-emerald-300/25 bg-slate-950/75 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100/85 backdrop-blur">
-        Google field layer
+        Tap map to drop
       </div>
     </div>
   )
@@ -979,6 +1013,7 @@ function LeadCard({
   onClose,
   onStatus,
   onAttachLocation,
+  onArchive,
   onPrompt,
 }: {
   lead: FieldLead
@@ -987,11 +1022,15 @@ function LeadCard({
   onClose: () => void
   onStatus: (status: string) => void
   onAttachLocation: () => void
+  onArchive: () => void
   onPrompt: (prompt: string) => void
 }) {
   const meta = statusMeta(lead.status)
-  const label = labelForLead(lead)
+  const label = shortLabelForLead(lead)
   const hasPin = leadHasPin(lead)
+  const details = lead.address || lead.phone || lead.notes || 'No address yet'
+  const currentStatus = String(lead.status || 'new').toLowerCase()
+  const primaryOutcomes = PRIMARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl">
       <div className="flex items-start justify-between gap-3">
@@ -1000,7 +1039,7 @@ function LeadCard({
             <Home className="h-4 w-4 text-emerald-200" />
             <h2 className="truncate text-base font-semibold">{label}</h2>
           </div>
-          <div className="mt-1 truncate text-xs text-white/50">{lead.address || lead.phone || lead.notes || 'Dropped from field map'}</div>
+          <div className="mt-1 line-clamp-2 text-xs text-white/50">{details}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1 text-white/45 hover:bg-white/10 hover:text-white">
           <X className="h-4 w-4" />
@@ -1008,7 +1047,12 @@ function LeadCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2.5 py-1 text-xs ${meta.color}`}>{meta.label}</span>
-        {PRIMARY_OUTCOMES.map(outcome => (
+        {hasPin ? (
+          <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">
+            GPS saved
+          </span>
+        ) : null}
+        {primaryOutcomes.map(outcome => (
           <button
             key={outcome.status}
             type="button"
@@ -1048,15 +1092,25 @@ function LeadCard({
         </button>
       ) : null}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Update this field lead: ${label}. Add homeowner, phone, address, notes, and next step from chat.`)}>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Edit this field map pin from chat. Lead ID: ${lead.id}. Current label: ${label}. Add or correct homeowner, phone, address, door outcome, notes, and next step.`)}>
           <MessageCircle className="mr-1.5 h-4 w-4" />
           Edit in chat
         </Button>
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Research this field lead/property and tell me what is missing before we convert it: ${label}.`)}>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Research this field map pin/property. Lead ID: ${lead.id}. Tell me what is missing before converting it into a customer, job, or follow-up.`)}>
           <Search className="mr-1.5 h-4 w-4" />
           Research
         </Button>
       </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mt-2 w-full rounded-full border border-red-300/20 bg-red-500/10 text-red-100 hover:bg-red-500/15"
+        onClick={onArchive}
+        disabled={saving}
+      >
+        {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
+        Remove this pin from map
+      </Button>
     </div>
   )
 }

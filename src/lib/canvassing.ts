@@ -390,7 +390,11 @@ export async function getCanvassingMap(ctx: TenantContext, options: { sessionId?
   const leadWhere: Record<string, unknown> = { contractorId: ctx.contractorId }
   if (options.sessionId) leadWhere.sessionId = options.sessionId
   if (options.status) leadWhere.status = options.status
-  if (!options.includeConverted && !options.status) leadWhere.status = { not: 'converted' }
+  if (!options.status) {
+    leadWhere.status = options.includeConverted
+      ? { not: 'archived' }
+      : { notIn: ['converted', 'archived'] }
+  }
 
   const [sessions, leads, activities] = await Promise.all([
     db.canvassingSession.findMany({ where: { contractorId: ctx.contractorId, status: { in: ['active', 'paused'] } }, orderBy: { startedAt: 'desc' }, take: 50 }),

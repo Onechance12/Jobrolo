@@ -30,3 +30,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!lead) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json({ lead })
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const ctx = await requireContext(req).catch(e => e)
+  if (ctx instanceof Error) return NextResponse.json({ error: ctx.message }, { status: 401 })
+  const { id } = await params
+  const existing = await db.canvassingLead.findFirst({ where: { id, contractorId: ctx.contractorId } })
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const lead = await updateCanvassingLead(ctx, id, {
+    status: 'archived',
+    metadata: {
+      archivedFromMap: true,
+      archivedAt: new Date().toISOString(),
+    },
+  })
+  return NextResponse.json({ lead, archived: true })
+}

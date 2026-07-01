@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const leads = await db.canvassingLead.findMany({
     where: {
       contractorId: ctx.contractorId,
-      ...(sp.get('status') ? { status: sp.get('status')! } : {}),
+      ...(sp.get('status') ? { status: sp.get('status')! } : { status: { not: 'archived' } }),
       ...(sp.get('sessionId') ? { sessionId: sp.get('sessionId')! } : {}),
     },
     orderBy: { updatedAt: 'desc' },

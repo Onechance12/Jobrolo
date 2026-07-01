@@ -233,6 +233,25 @@ export default function Page() {
   }, [initialLoading, loadActionItems])
 
   useEffect(() => {
+    if (initialLoading) return
+    let prompt = ''
+    try {
+      prompt = window.sessionStorage.getItem('jobroloPendingPrompt') || ''
+      if (prompt) window.sessionStorage.removeItem('jobroloPendingPrompt')
+    } catch {}
+    const params = new URLSearchParams(window.location.search)
+    const urlPrompt = params.get('prompt')
+    if (!prompt && urlPrompt) prompt = urlPrompt
+    if (!prompt) return
+    params.delete('prompt')
+    const nextSearch = params.toString()
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`)
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('jobrolo:insert-prompt', { detail: { text: prompt } }))
+    }, 200)
+  }, [initialLoading])
+
+  useEffect(() => {
     if (!conversationId || initialLoading) return
     let cancelled = false
     ;(async () => {
