@@ -44,8 +44,6 @@ type FieldMapPayload = {
   counts?: Record<string, number>
 }
 
-const MAP_SPAN = 0.006
-
 const STATUS_META: Record<string, { label: string; color: string; pin: string }> = {
   new: { label: 'New', color: 'border-blue-400/35 bg-blue-500/15 text-blue-100', pin: 'border-blue-200 bg-blue-500 shadow-blue-500/40' },
   knocked: { label: 'Knocked', color: 'border-slate-300/30 bg-slate-400/15 text-slate-100', pin: 'border-slate-100 bg-slate-500 shadow-slate-400/35' },
@@ -105,14 +103,6 @@ function isValidLocation(loc: BrowserLocation | null): loc is BrowserLocation {
     && loc.lng <= 180
 }
 
-function openStreetMapEmbedUrl(loc: BrowserLocation) {
-  const left = loc.lng - MAP_SPAN
-  const right = loc.lng + MAP_SPAN
-  const top = loc.lat + MAP_SPAN
-  const bottom = loc.lat - MAP_SPAN
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik`
-}
-
 function externalMapUrl(loc: BrowserLocation) {
   return `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`
 }
@@ -145,27 +135,6 @@ function labelForLead(lead: FieldLead) {
 
 function leadHasPin(lead: FieldLead) {
   return typeof lead.latitude === 'number' && typeof lead.longitude === 'number'
-}
-
-function pinPosition(lead: FieldLead, center: BrowserLocation) {
-  if (typeof lead.latitude !== 'number' || typeof lead.longitude !== 'number') return null
-  const x = ((lead.longitude - (center.lng - MAP_SPAN)) / (MAP_SPAN * 2)) * 100
-  const y = (((center.lat + MAP_SPAN) - lead.latitude) / (MAP_SPAN * 2)) * 100
-  return {
-    left: `${Math.min(Math.max(x, 5), 95)}%`,
-    top: `${Math.min(Math.max(y, 8), 92)}%`,
-    offscreen: x < 0 || x > 100 || y < 0 || y > 100,
-  }
-}
-
-function locationFromMapPoint(clientX: number, clientY: number, rect: DOMRect, center: BrowserLocation): BrowserLocation {
-  const x = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1)
-  const y = Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1)
-  return {
-    lat: center.lat + MAP_SPAN - (y * MAP_SPAN * 2),
-    lng: center.lng - MAP_SPAN + (x * MAP_SPAN * 2),
-    accuracyMeters: center.accuracyMeters,
-  }
 }
 
 function promptInMainChat(prompt: string) {
@@ -272,18 +241,13 @@ export function CanvassingMapMode() {
   }, [loadMapData, locateMe])
 
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ''
-  const useGoogleMap = Boolean(googleMapsApiKey && isValidLocation(location) && !googleMapUnavailable)
-  const mapUrl = useMemo(() => isValidLocation(location) ? `${openStreetMapEmbedUrl(location)}&refresh=${mapRefreshKey}` : null, [location, mapRefreshKey])
+  const hasMapLocation = isValidLocation(location)
+  const useGoogleMap = Boolean(googleMapsApiKey && hasMapLocation && !googleMapUnavailable)
   const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
-  const visiblePins = useMemo(() => isValidLocation(location)
-    ? pinnedLeads
-      .map(lead => ({ lead, pos: pinPosition(lead, location) }))
-      .filter((item): item is { lead: FieldLead; pos: NonNullable<ReturnType<typeof pinPosition>> } => Boolean(item.pos))
-    : [], [pinnedLeads, location])
 
   const handleGoogleMapUnavailable = useCallback(() => {
     setGoogleMapUnavailable(true)
-    setError('Google Maps is unavailable, so Jobrolo switched to the fallback map.')
+    setError('Google Maps is unavailable. Jobrolo can still save GPS pins, but tap-to-drop needs the Google map provider.')
   }, [])
 
   function prependLead(lead: FieldLead) {
@@ -331,16 +295,6 @@ export function CanvassingMapMode() {
       return
     }
     await createLeadAt(location, 'field_map_drop')
-  }
-
-  async function dropLeadFromMapTap(clientX: number, clientY: number, rect: DOMRect) {
-    if (!isValidLocation(location)) {
-      await locateMe()
-      return
-    }
-    const target = locationFromMapPoint(clientX, clientY, rect, location)
-    setDropMode(false)
-    await createLeadAt(target, 'field_map_tap')
   }
 
   async function dropLeadAtLocation(target: BrowserLocation) {
@@ -401,7 +355,7 @@ export function CanvassingMapMode() {
   }
 
   const summary = mapData?.summary
-  const waitingForInitialLocation = !mapUrl && !locationAttempted && !error
+  const waitingForInitialLocation = !hasMapLocation && !locationAttempted && !error
 
   return (
     <main className="fixed inset-0 z-50 flex min-h-dvh flex-col overflow-hidden bg-slate-950 text-white">
@@ -435,10 +389,10 @@ export function CanvassingMapMode() {
       </div>
 
       <div className="relative flex-1 pt-[calc(126px_+_env(safe-area-inset-top))]">
-        {mapUrl ? (
+        {hasMapLocation && isValidLocation(location) ? (
           <>
             <div className="absolute inset-0">
-              {useGoogleMap && isValidLocation(location) ? (
+              {useGoogleMap ? (
                 <GoogleFieldMap
                   apiKey={googleMapsApiKey}
                   center={location}
@@ -451,13 +405,16 @@ export function CanvassingMapMode() {
                   onUnavailable={handleGoogleMapUnavailable}
                 />
               ) : (
-                <iframe
-                  key={`field-map-${mapRefreshKey}`}
-                  title="Current field location map"
-                  src={mapUrl}
-                  className="h-full w-full border-0 saturate-[.95]"
-                  loading="eager"
-                  referrerPolicy="no-referrer"
+                <JobroloMapProviderFallback
+                  location={location}
+                  pinnedLeads={pinnedLeads}
+                  unpinnedLeads={unpinnedLeads}
+                  googleMapsConfigured={Boolean(googleMapsApiKey)}
+                  googleMapUnavailable={googleMapUnavailable}
+                  locating={locating}
+                  saving={saving}
+                  onLocate={locateMe}
+                  onDropHere={dropLeadHere}
                 />
               )}
             </div>
@@ -473,44 +430,17 @@ export function CanvassingMapMode() {
                 Jobrolo overlay
               </div>
             </div>
-            {dropMode && !useGoogleMap ? (
-              <button
-                type="button"
-                aria-label="Tap map to drop lead"
-                className="absolute inset-0 z-[15] cursor-crosshair bg-cyan-950/10"
-                onClick={event => {
-                  void dropLeadFromMapTap(
-                    event.clientX,
-                    event.clientY,
-                    event.currentTarget.getBoundingClientRect(),
-                  )
-                }}
-              >
-                <span className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full border border-cyan-300/35 bg-slate-950/90 px-4 py-2 text-xs font-semibold text-cyan-100 shadow-2xl backdrop-blur">
-                  Tap the property to drop a lead
-                </span>
-              </button>
+            {!useGoogleMap && dropMode ? (
+              <div className="absolute left-1/2 top-5 z-[15] max-w-[92vw] -translate-x-1/2 rounded-2xl border border-amber-300/35 bg-slate-950/95 px-4 py-2 text-center text-xs font-semibold text-amber-100 shadow-2xl backdrop-blur">
+                Tap-to-drop needs Google Maps. Use Drop here for your current GPS until the map provider is configured.
+              </div>
             ) : null}
-            <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+            {!useGoogleMap ? (
+              <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
               <div className="h-5 w-5 rounded-full border-2 border-white bg-blue-500 shadow-[0_0_24px_rgba(59,130,246,.9)]" />
               <div className="mx-auto mt-1 h-8 w-px bg-blue-500/70" />
-            </div>
-            {!useGoogleMap && visiblePins.map(({ lead, pos }) => {
-              const meta = statusMeta(lead.status)
-              const selected = selectedLeadId === lead.id
-              return (
-                <button
-                  key={lead.id}
-                  type="button"
-                  onClick={() => setSelectedLeadId(lead.id)}
-                  className={`absolute z-10 -translate-x-1/2 -translate-y-full rounded-full border-2 shadow-2xl transition ${meta.pin} ${selected ? 'scale-125 ring-4 ring-white/40' : 'hover:scale-110'} ${pos.offscreen ? 'opacity-60' : ''}`}
-                  style={{ left: pos.left, top: pos.top }}
-                  title={labelForLead(lead)}
-                >
-                  <span className="block h-4 w-4 rounded-full" />
-                </button>
-              )
-            })}
+              </div>
+            ) : null}
           </>
         ) : waitingForInitialLocation ? (
           <div className="flex h-full items-center justify-center px-6 text-center">
@@ -641,7 +571,8 @@ export function CanvassingMapMode() {
               variant="secondary"
               className={`rounded-full px-3 text-white ${dropMode ? 'bg-cyan-500/25 ring-1 ring-cyan-300/40 hover:bg-cyan-500/30' : 'bg-white/10 hover:bg-white/15'}`}
               onClick={() => setDropMode(value => !value)}
-              disabled={saving || locating || !isValidLocation(location)}
+              disabled={saving || locating || !isValidLocation(location) || !useGoogleMap}
+              title={useGoogleMap ? 'Tap the Google field map to drop a lead.' : 'Tap-to-drop needs the Google Maps provider.'}
             >
               <MapPin className="mr-1.5 h-4 w-4" />
               {dropMode ? 'Cancel tap' : 'Tap map'}
@@ -664,6 +595,79 @@ export function CanvassingMapMode() {
         </div>
       </div>
     </main>
+  )
+}
+
+function JobroloMapProviderFallback({
+  location,
+  pinnedLeads,
+  unpinnedLeads,
+  googleMapsConfigured,
+  googleMapUnavailable,
+  locating,
+  saving,
+  onLocate,
+  onDropHere,
+}: {
+  location: BrowserLocation
+  pinnedLeads: FieldLead[]
+  unpinnedLeads: FieldLead[]
+  googleMapsConfigured: boolean
+  googleMapUnavailable: boolean
+  locating: boolean
+  saving: boolean
+  onLocate: () => void
+  onDropHere: () => void
+}) {
+  const providerMessage = googleMapsConfigured && googleMapUnavailable
+    ? 'Google Maps did not load. Check the browser key, referrer restrictions, billing, and enabled Maps JavaScript API.'
+    : 'Google Maps is not configured for this environment. Jobrolo is showing the field data layer without a street-map provider.'
+
+  return (
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_45%,rgba(14,165,233,.18),rgba(2,6,23,.96)_58%,#020617_100%)] px-5">
+      <div className="absolute inset-0 opacity-[.22] [background-image:linear-gradient(rgba(45,212,191,.55)_1px,transparent_1px),linear-gradient(90deg,rgba(45,212,191,.55)_1px,transparent_1px)] [background-size:54px_54px]" />
+      <div className="absolute left-1/2 top-1/2 h-[38rem] w-[38rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/10" />
+      <div className="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/18 shadow-[0_0_80px_rgba(34,211,238,.08)]" />
+      <div className="relative w-full max-w-xl rounded-[2rem] border border-cyan-300/20 bg-slate-950/82 p-4 shadow-2xl shadow-cyan-950/40 backdrop-blur-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-100/65">Jobrolo map surface</div>
+            <h2 className="mt-1 text-xl font-semibold text-white">Map provider needed for street placement</h2>
+          </div>
+          <div className="rounded-full border border-cyan-300/25 bg-cyan-500/10 p-2 text-cyan-100">
+            <MapPin className="h-5 w-5" />
+          </div>
+        </div>
+
+        <p className="mt-3 rounded-2xl border border-amber-300/25 bg-amber-500/10 p-3 text-sm leading-relaxed text-amber-50/90">
+          {providerMessage}
+        </p>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">Current GPS</div>
+            <div className="mt-1 font-mono text-xs text-white/75">{location.lat.toFixed(6)}, {location.lng.toFixed(6)}</div>
+            <div className="mt-1 text-xs text-white/45">{location.accuracyMeters ? `±${Math.round(location.accuracyMeters)}m accuracy` : 'Accuracy unknown'}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">Saved field data</div>
+            <div className="mt-1 text-white/75">{pinnedLeads.length} pinned · {unpinnedLeads.length} need GPS</div>
+            <div className="mt-1 text-xs text-white/45">Records are still saved; only street-map placement is paused.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" className="rounded-full" onClick={onLocate} disabled={locating}>
+            {locating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Crosshair className="mr-1.5 h-4 w-4" />}
+            Refresh GPS
+          </Button>
+          <Button size="sm" variant="secondary" className="rounded-full bg-emerald-500/15 text-emerald-50 hover:bg-emerald-500/25" onClick={onDropHere} disabled={saving || locating}>
+            {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
+            Drop GPS lead
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -29,7 +29,7 @@ export const DEFAULT_COMMAND_SHORTCUTS: CommandShortcut[] = [
   { id: 'company-info', label: 'Company profile', prompt: 'Show my saved company profile.', icon: 'building' },
   { id: 'update-company', label: 'Update company info', prompt: 'Make edits to company profile: ', icon: 'building' },
   { id: 'research-website', label: 'Research', prompt: 'Research my company online and suggest missing company profile updates. Show what is new before saving. Website or company name: ', icon: 'globe' },
-  { id: 'open-map', label: 'Open map', prompt: 'Open map.', icon: 'field' },
+  { id: 'open-map', label: 'Open map', prompt: 'Open the Jobrolo field command map. Show saved pins, nearby leads, GPS evidence, and field actions without creating a new lead or session.', icon: 'field' },
   { id: 'field', label: 'Field check-in', prompt: 'Help me in the field where I am right now. If I am at a job, brief me and help me log the visit. If I just landed an inspection, use my location, research the property if configured, confirm the owner/address with me, then start the inspection photo workflow.', icon: 'field' },
   { id: 'canvassing-run', label: 'Canvassing run', prompt: 'Start a canvassing run. Ask me what street or territory, what kind of run I want, and keep it chat-native unless I ask for the map.', icon: 'field' },
   { id: 'create-client', label: 'Create client', prompt: 'Create a client named ', icon: 'client' },

@@ -503,7 +503,7 @@ export function ChatInput({ onSend, onStop, disabled, isWorking, placeholder, mo
 }
 
 const FIELD_QUICK_PROMPTS: CommandShortcut[] = [
-  { id: 'field-open-map', label: 'Open map', prompt: 'Open map.', icon: 'field' },
+  { id: 'field-open-map', label: 'Open map', prompt: 'Open the Jobrolo field command map. Show saved pins, nearby leads, GPS evidence, and field actions without creating a new lead or session.', icon: 'field' },
   makeCommandShortcut('Start inspection', 'I landed an inspection here. Use my location, research the property if configured, and start an inspection photo workflow.', 'field'),
   makeCommandShortcut('Photo checklist', 'Give me the first inspection photo checklist for this property: front elevation, all elevations, roof slopes, damage, soft metals, interior, attic, detached structures, and documents.', 'field'),
   makeCommandShortcut('Roof photos', 'Start roof photo capture. Ask me for roof overview, slopes/facets, penetrations, ridges, valleys, gutters, vents, and damage photos by section.', 'field'),
