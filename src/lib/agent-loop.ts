@@ -68,7 +68,7 @@ export interface AgentLoopResult {
 }
 
 const MAX_RETRIES = 2
-const MAX_TESTER_FEEDBACK_CONTENT = 7600
+const MAX_TESTER_FEEDBACK_CONTENT = 6800
 const TOOL_NAMES = new Set(getToolDefinitions().map(t => t.name))
 const EXECUTABLE_ACTION_TYPES = new Set(['cross_post', 'memory', 'task', 'task_update', 'note'])
 
@@ -317,12 +317,12 @@ function recentPlainMessages(messages: ChatMessage[], limit = 6) {
   return out.join('\n')
 }
 
-function recentVisibleChatTurns(messages: ChatMessage[], limit = 24) {
+function recentVisibleChatTurns(messages: ChatMessage[], limit = 16) {
   const out: Array<{ role: 'user' | 'assistant'; text: string }> = []
   for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
     const message = messages[i]
     if ((message.role !== 'user' && message.role !== 'assistant') || isInternalAgentInstruction(message.content)) continue
-    const text = plainMessageText(message.content).slice(0, 4000)
+    const text = plainMessageText(message.content).slice(0, 1400)
     if (!text) continue
     out.unshift({ role: message.role, text })
   }

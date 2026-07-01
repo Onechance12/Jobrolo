@@ -165,6 +165,65 @@ function promptInMainChat(prompt: string) {
   window.location.href = `/?prompt=${encoded}`
 }
 
+function stagePromptForMainChat(prompt: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem('jobroloPendingPrompt', prompt)
+    window.sessionStorage.setItem('jobroloPendingPromptSource', 'field_map')
+  } catch {}
+}
+
+const GENERIC_FIELD_PIN_NOTES = new Set([
+  'Dropped from map tap. Add homeowner, door result, and notes.',
+  'Dropped from current GPS. Add homeowner, door result, and notes.',
+  'Dropped from map tap. Add homeowner, address, and door result from chat.',
+  'Dropped from current GPS. Add homeowner, address, and door result from chat.',
+])
+
+function shouldReplaceFieldPinNote(note: string) {
+  const clean = note.trim()
+  return !clean || GENERIC_FIELD_PIN_NOTES.has(clean)
+}
+
+function noteTemplateForStatus(status: string) {
+  switch (status) {
+    case 'no_answer':
+      return 'No answer at the door. Follow-up needed.'
+    case 'conversation':
+      return 'Had a conversation at the door. Add who answered, what they said, and the next step.'
+    case 'not_interested':
+      return 'Not interested at this time. Add reason if they gave one.'
+    case 'inspection_set':
+      return 'Inspection conversation started. Add appointment time, homeowner details, and what they want inspected.'
+    case 'renter':
+      return 'Renter answered. Need homeowner or property owner contact before follow-up.'
+    case 'no_soliciting':
+      return 'No soliciting sign observed. Do not knock again unless instructed.'
+    case 'knocked':
+      return 'Knocked the door. Add result, who answered, or whether follow-up is needed.'
+    case 'interested':
+      return 'Interested. Add homeowner details, concern, and next step.'
+    case 'follow_up':
+      return 'Follow up needed. Add when, who to contact, and why.'
+    case 'do_not_knock':
+      return 'Do not knock. Keep this property suppressed from door attempts.'
+    case 'new_roof':
+      return 'New roof observed. Likely not an immediate prospect unless they request other work.'
+    case 'other_roofer':
+      return 'Homeowner mentioned another roofer or existing roofing relationship. Add details.'
+    default:
+      return `Marked ${status.replace(/_/g, ' ')}. Add field notes and next step.`
+  }
+}
+
+function mergeStatusNote(current: string, status: string) {
+  const template = noteTemplateForStatus(status)
+  const clean = current.trim()
+  if (shouldReplaceFieldPinNote(clean)) return template
+  if (clean.toLowerCase().includes(template.toLowerCase())) return clean
+  return `${clean}\n\n${template}`
+}
+
 function loadGoogleMaps(apiKey: string) {
   if (window.google?.maps) return Promise.resolve(window.google)
   if (window.__jobroloGoogleMapsPromise) return window.__jobroloGoogleMapsPromise
@@ -608,7 +667,7 @@ function CanvassingMapModeClient() {
             onAttachLocation={() => { void attachCurrentLocation(selectedLead) }}
             onArchive={() => { void archiveLead(selectedLead) }}
             onSaveNotes={notes => { void updateLeadNotes(selectedLead, notes) }}
-            onPrompt={promptInMainChat}
+            onStagePrompt={stagePromptForMainChat}
           />
         ) : null}
 
@@ -617,6 +676,13 @@ function CanvassingMapModeClient() {
             selectedLead={selectedLead}
             onClose={() => setMapChatOpen(false)}
             onPrompt={promptInMainChat}
+            onStagePrompt={stagePromptForMainChat}
+            onSavePinNote={async note => {
+              if (!selectedLead) return
+              const existing = (selectedLead.notes ?? '').trim()
+              const next = [existing, note.trim()].filter(Boolean).join('\n\n')
+              await updateLeadNotes(selectedLead, next)
+            }}
             onExitMap={exitMapMode}
           />
         ) : null}
@@ -999,25 +1065,45 @@ function MapChatCard({
   selectedLead,
   onClose,
   onPrompt,
+  onStagePrompt,
+  onSavePinNote,
   onExitMap,
 }: {
   selectedLead: FieldLead | null
   onClose: () => void
   onPrompt: (prompt: string) => void
+  onStagePrompt: (prompt: string) => void
+  onSavePinNote: (note: string) => Promise<void>
   onExitMap: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
+  const [savedNote, setSavedNote] = useState(false)
+  const [stagedPrompt, setStagedPrompt] = useState(false)
   const context = selectedLead
     ? `Lead ID: ${selectedLead.id}. Address: ${selectedLead.address || 'unknown'}. Status: ${selectedLead.status || 'new'}.`
     : 'No field pin selected.'
   const composedPrompt = `${draft.trim()}\n\nMap context: ${context}`.trim()
+
+  async function saveNoteInMap() {
+    if (!selectedLead || !draft.trim()) return
+    setSavingNote(true)
+    setSavedNote(false)
+    try {
+      await onSavePinNote(draft.trim())
+      setDraft('')
+      setSavedNote(true)
+    } finally {
+      setSavingNote(false)
+    }
+  }
 
   return (
     <div className="rounded-[1.7rem] border border-cyan-300/15 bg-slate-950/94 p-3 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/60">Map chat</div>
-          <div className="text-sm font-semibold text-white">Talk through this area without losing the map.</div>
+          <div className="text-sm font-semibold text-white">Add context without leaving the map.</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1 text-white/45 hover:bg-white/10 hover:text-white">
           <X className="h-4 w-4" />
@@ -1027,21 +1113,44 @@ function MapChatCard({
         value={draft}
         onChange={event => setDraft(event.target.value)}
         rows={2}
-        placeholder="Ask about this pin, add context, or tell Jobrolo what to update..."
+        placeholder={selectedLead ? 'Add note: homeowner, roof condition, gate code, follow-up, or anything useful...' : 'Select or drop a pin first, then add notes here...'}
         className="mt-3 min-h-16 w-full resize-none rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none placeholder:text-white/35"
       />
+      {savedNote ? <div className="mt-2 text-xs text-emerald-100/75">Saved to this field pin.</div> : null}
+      {stagedPrompt ? <div className="mt-2 text-xs text-cyan-100/75">Prompt staged. Exit map when you want to continue in the main chat.</div> : null}
       <div className="mt-2 flex flex-wrap gap-2">
         <Button
           size="sm"
           className="rounded-full"
+          disabled={!selectedLead || !draft.trim() || savingNote}
+          onClick={() => { void saveNoteInMap() }}
+        >
+          {savingNote ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-1.5 h-4 w-4" />}
+          Save pin note
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="rounded-full bg-white/10 text-white hover:bg-white/15"
+          disabled={!draft.trim()}
+          onClick={() => {
+            onStagePrompt(composedPrompt)
+            setStagedPrompt(true)
+          }}
+        >
+          Stage for Jobrolo
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="rounded-full bg-white/10 text-white hover:bg-white/15"
           disabled={!draft.trim()}
           onClick={() => onPrompt(composedPrompt)}
         >
-          <MessageCircle className="mr-1.5 h-4 w-4" />
-          Send to Jobrolo
+          Open chat
         </Button>
         <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={onExitMap}>
-          Open full chat
+          Exit map
         </Button>
       </div>
     </div>
@@ -1057,7 +1166,7 @@ function LeadCard({
   onAttachLocation,
   onArchive,
   onSaveNotes,
-  onPrompt,
+  onStagePrompt,
 }: {
   lead: FieldLead
   saving: boolean
@@ -1067,10 +1176,11 @@ function LeadCard({
   onAttachLocation: () => void
   onArchive: () => void
   onSaveNotes: (notes: string) => void
-  onPrompt: (prompt: string) => void
+  onStagePrompt: (prompt: string) => void
 }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const [notesDraft, setNotesDraft] = useState(lead.notes ?? '')
+  const [stagedAction, setStagedAction] = useState<string | null>(null)
   const meta = statusMeta(lead.status)
   const label = shortLabelForLead(lead)
   const hasPin = leadHasPin(lead)
@@ -1078,6 +1188,18 @@ function LeadCard({
   const currentStatus = String(lead.status || 'new').toLowerCase()
   const primaryOutcomes = PRIMARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
   const secondaryOutcomes = SECONDARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
+  const editPrompt = `Edit this saved field map pin. Lead ID: ${lead.id}. Address: ${lead.address || 'unknown'}. Current status: ${lead.status || 'new'}. Ask me for the exact homeowner, phone, notes, next step, or conversion details, then update this lead with update_canvassing_lead when I provide them.`
+  const researchPrompt = `Research this field map pin/property. Lead ID: ${lead.id}. Address: ${lead.address || 'unknown'}. Tell me what is missing before converting it into a customer, job, or follow-up.`
+
+  function handleStatusSelect(status: string) {
+    setNotesDraft(current => mergeStatusNote(current, status))
+    onStatus(status)
+  }
+
+  function stageMapPrompt(prompt: string, label: string) {
+    onStagePrompt(prompt)
+    setStagedAction(label)
+  }
 
   return (
     <div className="rounded-[1.7rem] border border-white/10 bg-slate-950/94 p-3 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
@@ -1105,7 +1227,7 @@ function LeadCard({
           <button
             key={outcome.status}
             type="button"
-            onClick={() => onStatus(outcome.status)}
+            onClick={() => handleStatusSelect(outcome.status)}
             disabled={saving}
             className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white/90 hover:bg-white/10"
           >
@@ -1130,7 +1252,7 @@ function LeadCard({
               <button
                 key={outcome.status}
                 type="button"
-                onClick={() => onStatus(outcome.status)}
+                onClick={() => handleStatusSelect(outcome.status)}
                 disabled={saving}
                 className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${outcomeMeta.color}`}
               >
@@ -1161,6 +1283,11 @@ function LeadCard({
           </Button>
         </div>
       </div>
+      {stagedAction ? (
+        <div className="mt-2 rounded-2xl border border-cyan-300/15 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-50/80">
+          {stagedAction} staged for Jobrolo. Stay on the map, or exit when you want to continue the conversation.
+        </div>
+      ) : null}
 
       {!hasPin ? (
         <button
@@ -1174,11 +1301,11 @@ function LeadCard({
         </button>
       ) : null}
       <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Work this field map pin. Lead ID: ${lead.id}. Address: ${lead.address || 'unknown'}. Current status: ${lead.status || 'new'}. Help me update homeowner, phone, notes, next step, or convert it when ready.`)}>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => stageMapPrompt(editPrompt, 'Edit prompt')}>
           <MessageCircle className="mr-1.5 h-4 w-4" />
-          Ask
+          Edit
         </Button>
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Research this field map pin/property. Lead ID: ${lead.id}. Tell me what is missing before converting it into a customer, job, or follow-up.`)}>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => stageMapPrompt(researchPrompt, 'Research prompt')}>
           <Search className="mr-1.5 h-4 w-4" />
           Research
         </Button>
