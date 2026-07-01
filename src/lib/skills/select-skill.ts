@@ -117,10 +117,15 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('user-profile', 0.9, 'User profile/avatar routing request.'))
   }
 
-  if (/(saved database records|customer file|client file|job packet|show.*(files|photos)|what clients|saved clients)/.test(text)) {
+  if (/(saved database records|customer file|client file|job\s+(file\s+)?packet|project\s+(file\s+)?packet|show.*(files|photos)|what clients|saved clients)/.test(text)) {
     pushUnique(selections, select('entity-resolver', 0.9, 'Saved record/customer/project retrieval request.'))
     pushUnique(selections, select('project-context', 0.82, 'Project/customer file context may be needed.'))
     pushUnique(selections, select('file-attachment', 0.8, 'File/photo display or attachment context may be needed.'))
+  }
+
+  if (/\b(show|pull|view|open|display|list|review)\b[\s\S]{0,90}\b(job|project)\b[\s\S]{0,40}\b(file|packet|documents?|docs?|files?|photos?)\b/.test(text)) {
+    pushUnique(selections, select('project-context', 0.9, 'Active project/job file packet request.'))
+    pushUnique(selections, select('file-attachment', 0.86, 'Job file packet needs document/photo/file context.'))
   }
 
   if (/(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)/.test(text)) {
@@ -146,8 +151,14 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('appointment-scheduling', 0.88, 'Calendar/appointment workflow intent.'))
   }
 
-  if (/(create project|create job|new project|job number|project number)/.test(text)) {
+  if (/(create project|create job|new project|new job|create a project|create a job|job number|project number)/.test(text)) {
     pushUnique(selections, select('project-creation', 0.86, 'Project creation intent.'))
+  }
+
+  if (/\b(save|create|import|attach|review)\b[\s\S]{0,80}\b(scope|scope of loss|xactimate|estimate)\b/.test(text)) {
+    pushUnique(selections, select('save-scope', 0.9, 'Uploaded scope/estimate save workflow intent.'))
+    pushUnique(selections, select('document-type-routing', 0.8, 'Scope save needs document type routing.'))
+    pushUnique(selections, select('project-context', 0.78, 'Scope save needs customer/project context.'))
   }
 
   if (/(cash\s+quote|cash\s+bid|\bbid\b|proposal|create quote|create a quote)/.test(text)) {

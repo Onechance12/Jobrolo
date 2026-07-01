@@ -111,6 +111,10 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (upload?.route === 'project_scope') return 'save-scope'
   if (upload) return 'upload-classifier'
 
+  if (/\b(save|create|import|attach|review)\b[\s\S]{0,80}\b(scope|scope of loss|xactimate|estimate)\b/.test(text)) return 'save-scope'
+  if (/\b(create|start|open|make|add|set up)\s+(a\s+|new\s+|the\s+)?(project|job)\b/.test(text)) return 'project-creation'
+  if (/\b(show|pull|view|open|display|list|review)\b[\s\S]{0,90}\b(job|project)\b[\s\S]{0,40}\b(file|packet|documents?|docs?|files?|photos?)\b/.test(text)) return 'project-context'
+
   if (/(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)/.test(text)) return 'field-map'
   if (/(public adjuster|pa file|pa review|claim file|thresher|appraisal|umpire|carrier appraiser|appraisal inspection|appraisal meeting|awaiting acv|appraisal acv|payment control|two confirmations|carrier negotiation|policy number|claim number|date of loss|carrier da|carrier adjuster|denial|underpayment)/.test(text)) return 'insurance-claim'
   if (/(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)/.test(text)) return 'project-closeout'
@@ -193,7 +197,7 @@ export function orchestrateSkills(
     ...supportingSkills.map(skillId => buildConsult(skillId, 'supporting', selections.find(selection => selection.skill.id === skillId)?.confidence ?? 0.72)),
   ]
 
-  const allowedTools = unique([
+  const rawAllowedTools = unique([
     ...(context.requestIntent?.allowedTools ?? []),
     ...allSkillIds.flatMap(skillId => getSkillById(skillId)?.allowedTools ?? []),
   ])
@@ -201,6 +205,8 @@ export function orchestrateSkills(
     ...(context.requestIntent?.blockedTools ?? []),
     ...allSkillIds.flatMap(skillId => getSkillById(skillId)?.forbiddenTools ?? []),
   ])
+  const blockedToolSet = new Set(blockedTools)
+  const allowedTools = rawAllowedTools.filter(toolName => !blockedToolSet.has(toolName))
   const requiredContext = unique(consults.flatMap(consult => consult.requiredContext ?? []))
   const approvalNeeded = consults.some(consult => consult.approvalNeeded) || RISK_RANK[riskLevel] >= RISK_RANK.high
   const summary = summarize(primarySkill, supportingSkills, context)

@@ -124,7 +124,7 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
       mode: 'workflow',
       confidence: 0.94,
       primarySkill: 'bid-quote',
-      supportingSkills: ['entity-resolver', 'project-context', 'price-list', 'file-attachment', 'approval'],
+      supportingSkills: ['entity-resolver', 'price-list', 'job-cost', 'project-context', 'file-attachment', 'approval'],
       workflowName: 'Cash quote / bid',
       sticky: true,
       allowedTools: ['get_customer_file', 'list_customers', 'get_project_document_packet', 'get_document_content', 'review_price_sheet_items', 'consult_orchestrator'],
@@ -481,6 +481,71 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
         'Resolve user role, company/workspace, and scope before changing access.',
         'Customers, partners, crews, and subs only see explicitly shared content.',
         'Permission changes require owner/admin authority and approval.',
+      ],
+    })
+  }
+
+  if (/\b(create|start|open|make|add|set up)\s+(a\s+|new\s+|the\s+)?(project|job)\b/.test(text)) {
+    return buildIntent({
+      id: 'project_creation',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'project-creation',
+      supportingSkills: ['entity-resolver', 'project-context', 'approval'],
+      workflowName: 'Project/job creation',
+      sticky: false,
+      allowedTools: ['list_customers', 'get_customer_file', 'create_project_for_customer', 'create_project_from_document', 'consult_orchestrator'],
+      blockedTools: ['import_price_sheet_items', 'create_roof_report'],
+      requiredContext: ['resolved customer or clear customer name'],
+      nextStep: 'call_tool',
+      summary: 'Project creation lane: resolve the customer first, then create the job/project with real saved IDs.',
+      laneRules: [
+        'Do not treat project creation as a generic project list/read request.',
+        'Resolve or create the customer before creating the project.',
+        'Do not create a roof report, inspection, or price import unless the user asks for that workflow.',
+      ],
+    })
+  }
+
+  if (/\b(save|create|import|attach|review)\b[\s\S]{0,80}\b(scope|scope of loss|xactimate|estimate)\b/.test(text)) {
+    return buildIntent({
+      id: 'scope_save',
+      mode: 'workflow',
+      confidence: 0.9,
+      primarySkill: 'save-scope',
+      supportingSkills: ['document-type-routing', 'project-context', 'approval'],
+      workflowName: 'Scope/estimate save',
+      sticky: false,
+      allowedTools: ['get_document_content', 'get_customer_file', 'get_project_document_packet', 'create_scope_from_document', 'consult_orchestrator'],
+      blockedTools: ['create_scope_from_text', 'import_price_sheet_items', 'update_contractor_profile'],
+      requiredContext: ['document ID or extracted document content', 'customer/project context'],
+      nextStep: context.documentIds?.length ? 'call_tool' : 'ask_clarification',
+      summary: 'Scope save lane: save uploaded scopes/estimates from document IDs and project context, never from filenames.',
+      laneRules: [
+        'Never pass a PDF/image filename, upload path, or document ID as raw scope text.',
+        'Use create_scope_from_document when a document ID exists.',
+        'If extraction is pending or the project is unclear, ask one clear question.',
+      ],
+    })
+  }
+
+  if (/\b(create|start|open|make)\b[\s\S]{0,50}\b(crew|sub|subcontractor|roofing crew|gutter crew|window crew)\b[\s\S]{0,30}\b(chat|thread|room)\b/.test(text) || /\b(crew|subcontractor|roofing crew|gutter crew|window crew)\s+chat\b/.test(text)) {
+    return buildIntent({
+      id: 'crew_chat',
+      mode: 'workflow',
+      confidence: 0.88,
+      primarySkill: 'crew-subcontractor',
+      supportingSkills: ['project-context', 'role-permissions', 'approval'],
+      workflowName: 'Crew/subcontractor chat',
+      sticky: false,
+      allowedTools: ['get_customer_file', 'get_project_document_packet', 'create_project_chat', 'invite_user_to_chat', 'consult_orchestrator'],
+      requiredContext: ['project/job or customer'],
+      nextStep: 'call_tool',
+      summary: 'Crew chat lane: create a job-scoped crew/subcontractor chat and return the chat card/link actions.',
+      laneRules: [
+        'Resolve the project/customer before creating the chat.',
+        'Keep crew/sub visibility job-scoped.',
+        'Return open, copy link, and invite actions after creation.',
       ],
     })
   }

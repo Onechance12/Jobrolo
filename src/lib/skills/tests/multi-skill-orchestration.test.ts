@@ -93,6 +93,25 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(lead.primarySkill === 'lead-intake', `Lead primary should be lead-intake, got ${lead.primarySkill}`)
   assert(lead.supportingSkills.includes('field-map'), 'Lead intake should consult field-map for map/door/GPS leads')
   assert(lead.supportingSkills.includes('activity-timeline'), 'Lead intake should consult timeline/activity context')
+  assert(!lead.allowedTools.some(toolName => lead.blockedTools.includes(toolName)), 'Lead intake allowed tools should exclude blocked tools')
+
+  const projectCreate = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a project for Timothy Disen.' }))
+  assert(projectCreate.primarySkill === 'project-creation', `Project creation primary should be project-creation, got ${projectCreate.primarySkill}`)
+  assert(projectCreate.allowedTools.includes('create_project_for_customer'), 'Project creation should allow create_project_for_customer')
+
+  const jobPacket = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Show this job file packet.', activeProjectId: 'project_123' }))
+  assert(jobPacket.primarySkill === 'project-context', `Job file packet primary should be project-context, got ${jobPacket.primarySkill}`)
+  assert(jobPacket.supportingSkills.includes('file-attachment'), 'Job file packet should consult file-attachment')
+  assert(jobPacket.allowedTools.includes('get_project_document_packet'), 'Job file packet should allow get_project_document_packet')
+
+  const saveScopeFromChat = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Save this as a scope of loss for Timothy Disen.', documentIds: ['doc_123'] }))
+  assert(saveScopeFromChat.primarySkill === 'save-scope', `Scope save primary should be save-scope, got ${saveScopeFromChat.primarySkill}`)
+  assert(saveScopeFromChat.supportingSkills.includes('project-context'), 'Scope save should consult project-context')
+  assert(saveScopeFromChat.allowedTools.includes('create_scope_from_document'), 'Scope save should allow create_scope_from_document')
+
+  const crewChat = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Create a roofing crew chat for Timothy Disen.' }))
+  assert(crewChat.primarySkill === 'crew-subcontractor', `Crew chat primary should be crew-subcontractor, got ${crewChat.primarySkill}`)
+  assert(crewChat.allowedTools.includes('create_project_chat'), 'Crew chat should allow create_project_chat')
 
   const fieldMap = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Edit map pin lead ID: cmr23g4zd000otq2c3fuy5wes. Mark no answer and save a follow-up note.' }))
   assert(fieldMap.primarySkill === 'field-map', `Field map primary should be field-map, got ${fieldMap.primarySkill}`)
@@ -100,6 +119,7 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(fieldMap.supportingSkills.includes('activity-timeline'), 'Field map should consult timeline/activity context')
   assert(fieldMap.blockedTools.includes('create_customer'), 'Field map should block direct customer creation before conversion')
   assert(fieldMap.allowedTools.includes('update_canvassing_lead'), 'Field map should allow updating saved lead/pin records')
+  assert(!fieldMap.allowedTools.some(toolName => fieldMap.blockedTools.includes(toolName)), 'Field map allowed tools should exclude blocked tools')
 
   const appointment = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Schedule an inspection with Natalie tomorrow at 3.' }))
   assert(appointment.primarySkill === 'appointment-scheduling', `Appointment primary should be appointment-scheduling, got ${appointment.primarySkill}`)
