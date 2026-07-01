@@ -37,6 +37,8 @@ export function assertCodyPacketContracts() {
   assert(isCodyBlockOpenText('Cody Cody Cody upload approval does nothing') === true, 'triple Cody should open Cody review mode')
   assert(isCodyBlockOpenText('Cody help me debug uploads') === false, 'single Cody should not open Cody review mode')
   assert(isCodyBlockCloseText('end Cody') === true, 'end Cody should close Cody review mode')
+  assert(isCodyBlockCloseText('End coey') === true, 'common Cody close typo should close Cody review mode')
+  assert(isCodyBlockCloseText('done codi') === true, 'alternate Cody close typo should close Cody review mode')
   assert(codyBlockOpeningContent('Cody Cody Cody: help me debug uploads') === 'help me debug uploads', 'Cody block opening content should strip opener')
 
   const packet = buildCodyPacket({

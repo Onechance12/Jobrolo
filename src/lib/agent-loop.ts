@@ -68,6 +68,7 @@ export interface AgentLoopResult {
 }
 
 const MAX_RETRIES = 2
+const MAX_TESTER_FEEDBACK_CONTENT = 7600
 const TOOL_NAMES = new Set(getToolDefinitions().map(t => t.name))
 const EXECUTABLE_ACTION_TYPES = new Set(['cross_post', 'memory', 'task', 'task_update', 'note'])
 
@@ -852,9 +853,33 @@ function testerFeedbackFromText(text: string): TesterFeedbackArgs | null {
   }
 }
 
+function compactTesterFeedbackContent(content: string) {
+  const clean = content.replace(/\s+\n/g, '\n').replace(/\n{4,}/g, '\n\n\n').trim()
+  if (clean.length <= MAX_TESTER_FEEDBACK_CONTENT) return clean
+  return `${clean.slice(0, MAX_TESTER_FEEDBACK_CONTENT - 260).trim()}
+
+[Cody note truncated by Jobrolo before saving because the session exceeded the feedback limit. Full recent chat context is still included separately when available.]`
+}
+
+function fallbackCodyCloseContent(messages: ChatMessage[]) {
+  const turns = recentVisibleChatTurns(messages)
+    .filter(turn => turn.text && !isCodyBlockCloseText(turn.text))
+    .slice(-18)
+    .map(turn => `${turn.role}: ${turn.text}`)
+    .join('\n')
+
+  return compactTesterFeedbackContent(`Cody close command was received, but the Cody opening marker was outside the available chat context or session state was out of sync.
+
+Package the recent visible conversation as a Cody/Codex review packet instead of routing "End Cody" through normal Jobrolo operations.
+
+Recent visible conversation:
+${turns || '(No recent visible turns available.)'}`)
+}
+
 function withTesterFeedbackDebugContext(feedback: TesterFeedbackArgs, messages: ChatMessage[], opts?: Pick<AgentLoopOptions, 'conversationId' | 'workspaceId' | 'chatId' | 'channelType' | 'documentIds' | 'userId' | 'userRole'>): TesterFeedbackArgs {
   return {
     ...feedback,
+    content: compactTesterFeedbackContent(feedback.content),
     debugContext: {
       recentMessages: recentVisibleChatTurns(messages),
       ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
@@ -1568,15 +1593,41 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const codyBlockAtStart = codyBlockState(messages)
   if (latestUserAtStart && isCodyBlockCloseText(latestUserTextAtStart)) {
     if (!codyBlockAtStart.closing) {
-      const finalText = 'Cody is not open right now. Start a Cody review with “Cody Cody Cody”, describe the issue, then say “End Cody” when you want me to package it for Codex.'
+      const content = fallbackCodyCloseContent(messages)
+      const feedbackArgs = withTesterFeedbackDebugContext({
+        content,
+        source: 'note_to_cody',
+        area: inferCodyArea(content, 'general'),
+        severity: inferCodySeverity(content, 'normal'),
+      }, messages, opts)
+      const result = await executeTool('record_tester_feedback', feedbackArgs as Record<string, unknown>, opts.contractorId, {
+        conversationId: opts.conversationId,
+        workspaceId: opts.workspaceId,
+        chatId: opts.chatId,
+        channelType: opts.channelType,
+        userId: opts.userId,
+        userRole: opts.userRole,
+        documentIds: opts.documentIds,
+      })
+      const finalText = result.success
+        ? 'Cody session captured from the recent chat context. I did not run normal Jobrolo tools from that close command.'
+        : `I recognized the Cody close command, but the note did not save. ${result.error ? `Error: ${result.error}` : 'Please use “Cody Cody note: …” with the issue details.'}`
+      const iteration: AgentIteration = {
+        iteration: 0,
+        text: finalText,
+        toolCalls: [{ name: 'record_tester_feedback', args: feedbackArgs }],
+        toolResults: [{ name: 'record_tester_feedback', success: result.success, data: result.data, error: result.error }],
+        final: true,
+      }
+      opts.onIteration?.(iteration)
       return {
         final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
-        iterations: [{ iteration: 0, text: finalText, toolCalls: [], final: true }],
-        totalToolCalls: 0,
+        iterations: [iteration],
+        totalToolCalls: 1,
       }
     }
 
-    const content = codyBlockAtStart.content || 'Cody review session closed without additional details.'
+    const content = compactTesterFeedbackContent(codyBlockAtStart.content || 'Cody review session closed without additional details.')
     const feedbackArgs = withTesterFeedbackDebugContext({
       content,
       source: 'note_to_cody',
@@ -1607,6 +1658,21 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
       iterations: [iteration],
       totalToolCalls: 1,
+    }
+  }
+  if (codyBlockAtStart.active && !codyBlockAtStart.closing) {
+    const openingContent = codyBlockOpeningContent(latestUserTextAtStart)
+    const finalText = isCodyBlockOpenText(latestUserTextAtStart)
+      ? openingContent
+        ? 'Cody is open. I’m tracking this issue locally. Keep adding details, or say “End Cody” when you want me to package it for Codex.'
+        : 'Cody is open. Describe what broke, what you expected, and what actually happened. Say “End Cody” when you want me to package it for Codex.'
+      : 'Added that to the Cody review thread. Keep adding details, or say “End Cody” when you want me to package it for Codex.'
+    const iteration: AgentIteration = { iteration: 0, text: finalText, toolCalls: [], final: true }
+    opts.onIteration?.(iteration)
+    return {
+      final: { text: finalText, contextType: null, contextData: null, actions: [], tool_calls: [], attachments: [], final: true },
+      iterations: [iteration],
+      totalToolCalls: 0,
     }
   }
   const closingCodyFeedback = codyBlockAtStart.closing

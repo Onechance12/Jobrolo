@@ -218,7 +218,7 @@ export function isCodyBlockOpenText(text: string) {
 }
 
 export function isCodyBlockCloseText(text: string) {
-  return /^\s*end\s+cody\b/i.test(text.trim())
+  return /^\s*(?:end|close|finish|done|stop)\s+(?:cody|coey|codie|codi)\b/i.test(text.trim())
 }
 
 export function codyBlockOpeningContent(text: string) {
