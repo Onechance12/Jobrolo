@@ -7,6 +7,7 @@ export type IntegrationCategory =
   | 'communications'
   | 'calendar'
   | 'accounting'
+  | 'external_crm'
 
 export type IntegrationStatus = 'available' | 'configured' | 'missing_config' | 'planned' | 'unsupported'
 
@@ -28,6 +29,8 @@ export type IntegrationCapability =
   | 'social_research'
   | 'notification_send'
   | 'calendar_sync'
+  | 'external_file_read'
+  | 'claim_file_import'
 
 export type IntegrationRisk = 'read_only' | 'writes_internal' | 'external_send' | 'external_purchase' | 'financial'
 
