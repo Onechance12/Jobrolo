@@ -27,6 +27,9 @@ declare global {
   interface Window {
     google?: any
     __jobroloGoogleMapsPromise?: Promise<any>
+    __jobroloGoogleMapsLoaded?: () => void
+    __jobroloGoogleMapsRejected?: (message?: string) => void
+    gm_authFailure?: () => void
   }
 }
 
@@ -93,6 +96,12 @@ const STATUS_MARKER_COLORS: Record<string, { fill: string; stroke: string; glow:
   bad_fit: { fill: '#78716c', stroke: '#fafaf9', glow: 'rgba(168,162,158,.45)' },
 }
 
+const DEFAULT_FIELD_MAP_CENTER: BrowserLocation = {
+  lat: 32.9575,
+  lng: -97.2575,
+  accuracyMeters: null,
+}
+
 function isValidLocation(loc: BrowserLocation | null): loc is BrowserLocation {
   return !!loc
     && Number.isFinite(loc.lat)
@@ -144,15 +153,44 @@ function promptInMainChat(prompt: string) {
 }
 
 function loadGoogleMaps(apiKey: string) {
-  if (typeof window === 'undefined') return Promise.reject(new Error('Browser unavailable.'))
   if (window.google?.maps) return Promise.resolve(window.google)
   if (window.__jobroloGoogleMapsPromise) return window.__jobroloGoogleMapsPromise
 
   window.__jobroloGoogleMapsPromise = new Promise((resolve, reject) => {
+    let settled = false
+    let attempts = 0
+    const maxRuntimeChecks = 80
+    const finish = () => {
+      if (settled) return
+      if (window.google?.maps) {
+        settled = true
+        resolve(window.google)
+        return
+      }
+      attempts += 1
+      if (attempts >= maxRuntimeChecks) {
+        fail('Google Maps loaded, but the map runtime was not available.')
+        return
+      }
+      window.setTimeout(finish, 50)
+    }
+    const fail = (message = 'Google Maps failed to load.') => {
+      if (settled) return
+      settled = true
+      window.__jobroloGoogleMapsPromise = undefined
+      const existing = document.querySelector<HTMLScriptElement>('script[data-jobrolo-google-maps="true"]')
+      existing?.remove()
+      reject(new Error(message))
+    }
+
+    window.__jobroloGoogleMapsLoaded = finish
+    window.__jobroloGoogleMapsRejected = fail
+    window.gm_authFailure = () => fail('Google Maps rejected this browser or API key. Check API restrictions, billing, and allowed referrers.')
+
     const existing = document.querySelector<HTMLScriptElement>('script[data-jobrolo-google-maps="true"]')
     if (existing) {
-      existing.addEventListener('load', () => resolve(window.google))
-      existing.addEventListener('error', () => reject(new Error('Google Maps failed to load.')))
+      existing.addEventListener('load', finish, { once: true })
+      existing.addEventListener('error', () => fail(), { once: true })
       return
     }
 
@@ -160,19 +198,40 @@ function loadGoogleMaps(apiKey: string) {
     script.dataset.jobroloGoogleMaps = 'true'
     script.async = true
     script.defer = true
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`
-    script.onload = () => {
-      if (window.google?.maps) resolve(window.google)
-      else reject(new Error('Google Maps loaded without map runtime.'))
-    }
-    script.onerror = () => reject(new Error('Google Maps failed to load.'))
+    script.referrerPolicy = 'origin'
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&callback=__jobroloGoogleMapsLoaded&loading=async`
+    script.onload = () => window.setTimeout(finish, 50)
+    script.onerror = () => fail()
     document.head.appendChild(script)
+    window.setTimeout(() => fail('Google Maps timed out while loading.'), 15000)
   })
 
   return window.__jobroloGoogleMapsPromise
 }
 
 export function CanvassingMapMode() {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return (
+      <main className="fixed inset-0 z-50 flex min-h-dvh items-center justify-center bg-slate-950 px-6 text-center text-white">
+        <div className="max-w-sm rounded-3xl border border-cyan-300/15 bg-cyan-500/10 p-5 shadow-2xl backdrop-blur">
+          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-cyan-200" />
+          <h1 className="text-lg font-semibold">Opening field map</h1>
+          <p className="mt-2 text-sm text-white/65">Loading Jobrolo’s live map, saved pins, and GPS tools.</p>
+        </div>
+      </main>
+    )
+  }
+
+  return <CanvassingMapModeClient />
+}
+
+function CanvassingMapModeClient() {
   const [location, setLocation] = useState<BrowserLocation | null>(null)
   const [locating, setLocating] = useState(false)
   const [locationAttempted, setLocationAttempted] = useState(false)
@@ -242,12 +301,24 @@ export function CanvassingMapMode() {
 
   const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? ''
   const hasMapLocation = isValidLocation(location)
-  const useGoogleMap = Boolean(googleMapsApiKey && hasMapLocation && !googleMapUnavailable)
+  const firstPinnedLead = pinnedLeads.find(leadHasPin)
+  const mapCenter = hasMapLocation
+    ? location
+    : firstPinnedLead
+      ? { lat: firstPinnedLead.latitude!, lng: firstPinnedLead.longitude!, accuracyMeters: null }
+      : DEFAULT_FIELD_MAP_CENTER
+  const useGoogleMap = Boolean(googleMapsApiKey && !googleMapUnavailable)
   const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
 
-  const handleGoogleMapUnavailable = useCallback(() => {
+  const handleGoogleMapUnavailable = useCallback((message?: string) => {
     setGoogleMapUnavailable(true)
-    setError('Google Maps is unavailable. Jobrolo can still save GPS pins, but tap-to-drop needs the Google map provider.')
+    setError(message || 'Google Maps is unavailable. Jobrolo can still save GPS pins, but tap-to-drop needs the Google map provider.')
+  }, [])
+
+  const retryGoogleMap = useCallback(() => {
+    setError(null)
+    setGoogleMapUnavailable(false)
+    setMapRefreshKey(key => key + 1)
   }, [])
 
   function prependLead(lead: FieldLead) {
@@ -373,6 +444,12 @@ export function CanvassingMapMode() {
               {locating ? <Loader2 className="h-4 w-4 animate-spin sm:mr-1.5" /> : <Crosshair className="h-4 w-4 sm:mr-1.5" />}
               <span className="hidden sm:inline">Locate</span>
             </Button>
+            {googleMapUnavailable ? (
+              <Button size="sm" variant="secondary" className="rounded-full bg-cyan-500/15 px-3 text-cyan-50 hover:bg-cyan-500/25" onClick={retryGoogleMap}>
+                <RefreshCw className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Map</span>
+              </Button>
+            ) : null}
             <Button size="sm" className="rounded-full px-3" onClick={exitMapMode}>
               <MessageCircle className="h-4 w-4 sm:mr-1.5" />
               <span className="hidden sm:inline">Chat</span>
@@ -389,13 +466,14 @@ export function CanvassingMapMode() {
       </div>
 
       <div className="relative flex-1 pt-[calc(126px_+_env(safe-area-inset-top))]">
-        {hasMapLocation && isValidLocation(location) ? (
+        {useGoogleMap || hasMapLocation ? (
           <>
             <div className="absolute inset-0">
               {useGoogleMap ? (
                 <GoogleFieldMap
                   apiKey={googleMapsApiKey}
-                  center={location}
+                  center={mapCenter}
+                  currentLocation={location}
                   leads={pinnedLeads}
                   selectedLeadId={selectedLeadId}
                   dropMode={dropMode}
@@ -406,7 +484,7 @@ export function CanvassingMapMode() {
                 />
               ) : (
                 <JobroloMapProviderFallback
-                  location={location}
+                  location={location ?? mapCenter}
                   pinnedLeads={pinnedLeads}
                   unpinnedLeads={unpinnedLeads}
                   googleMapsConfigured={Boolean(googleMapsApiKey)}
@@ -414,21 +492,10 @@ export function CanvassingMapMode() {
                   locating={locating}
                   saving={saving}
                   onLocate={locateMe}
+                  onRetryMap={retryGoogleMap}
                   onDropHere={dropLeadHere}
                 />
               )}
-            </div>
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,.04)_0,transparent_34%,rgba(2,6,23,.16)_70%,rgba(2,6,23,.42)_100%)]" />
-            <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
-              <div className="absolute inset-0 opacity-[.24] [background-image:linear-gradient(rgba(125,211,252,.72)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,.72)_1px,transparent_1px)] [background-size:64px_64px]" />
-              <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/35 shadow-[0_0_44px_rgba(34,211,238,.14)]" />
-              <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/22" />
-              <div className="absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/14" />
-              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-cyan-200/18" />
-              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-cyan-200/18" />
-              <div className="absolute right-3 top-3 rounded-full border border-cyan-300/25 bg-slate-950/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/85 backdrop-blur">
-                Jobrolo overlay
-              </div>
             </div>
             {!useGoogleMap && dropMode ? (
               <div className="absolute left-1/2 top-5 z-[15] max-w-[92vw] -translate-x-1/2 rounded-2xl border border-amber-300/35 bg-slate-950/95 px-4 py-2 text-center text-xs font-semibold text-amber-100 shadow-2xl backdrop-blur">
@@ -607,6 +674,7 @@ function JobroloMapProviderFallback({
   locating,
   saving,
   onLocate,
+  onRetryMap,
   onDropHere,
 }: {
   location: BrowserLocation
@@ -617,6 +685,7 @@ function JobroloMapProviderFallback({
   locating: boolean
   saving: boolean
   onLocate: () => void
+  onRetryMap: () => void
   onDropHere: () => void
 }) {
   const providerMessage = googleMapsConfigured && googleMapUnavailable
@@ -661,6 +730,12 @@ function JobroloMapProviderFallback({
             {locating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Crosshair className="mr-1.5 h-4 w-4" />}
             Refresh GPS
           </Button>
+          {googleMapsConfigured ? (
+            <Button size="sm" variant="secondary" className="rounded-full bg-cyan-500/15 text-cyan-50 hover:bg-cyan-500/25" onClick={onRetryMap}>
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+              Retry map
+            </Button>
+          ) : null}
           <Button size="sm" variant="secondary" className="rounded-full bg-emerald-500/15 text-emerald-50 hover:bg-emerald-500/25" onClick={onDropHere} disabled={saving || locating}>
             {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
             Drop GPS lead
@@ -702,6 +777,7 @@ const GOOGLE_FIELD_MAP_STYLE = [
 function GoogleFieldMap({
   apiKey,
   center,
+  currentLocation,
   leads,
   selectedLeadId,
   dropMode,
@@ -712,13 +788,14 @@ function GoogleFieldMap({
 }: {
   apiKey: string
   center: BrowserLocation
+  currentLocation: BrowserLocation | null
   leads: FieldLead[]
   selectedLeadId: string | null
   dropMode: boolean
   refreshKey: number
   onSelectLead: (leadId: string) => void
   onMapTap: (location: BrowserLocation) => void
-  onUnavailable: () => void
+  onUnavailable: (message?: string) => void
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const googleRef = useRef<any>(null)
@@ -754,8 +831,8 @@ function GoogleFieldMap({
         })
         lastRefreshKeyRef.current = refreshKey
         setMapReadyVersion(version => version + 1)
-      } catch {
-        if (!cancelled) onUnavailable()
+      } catch (err) {
+        if (!cancelled) onUnavailable(err instanceof Error ? err.message : undefined)
       }
     }
 
@@ -770,7 +847,7 @@ function GoogleFieldMap({
       markerRefs.current = []
       mapRef.current = null
     }
-  }, [apiKey, center.lat, center.lng, onUnavailable, refreshKey])
+  }, [apiKey, onUnavailable])
 
   useEffect(() => {
     const google = googleRef.current
@@ -782,7 +859,17 @@ function GoogleFieldMap({
       map.panTo(position)
       map.setZoom(Math.max(map.getZoom?.() ?? 18, 18))
       lastRefreshKeyRef.current = refreshKey
+    } else if (!currentLocation) {
+      map.setCenter(position)
     }
+  }, [center.lat, center.lng, currentLocation, mapReadyVersion, refreshKey])
+
+  useEffect(() => {
+    const google = googleRef.current
+    const map = mapRef.current
+    if (!google || !map || !currentLocation) return
+
+    const position = { lat: currentLocation.lat, lng: currentLocation.lng }
 
     if (!currentMarkerRef.current) {
       currentMarkerRef.current = new google.maps.Marker({
@@ -807,7 +894,7 @@ function GoogleFieldMap({
       accuracyCircleRef.current = new google.maps.Circle({
         map,
         center: position,
-        radius: Math.max(8, center.accuracyMeters ?? 20),
+        radius: Math.max(8, currentLocation.accuracyMeters ?? 20),
         strokeColor: '#22d3ee',
         strokeOpacity: 0.45,
         strokeWeight: 1,
@@ -816,9 +903,9 @@ function GoogleFieldMap({
       })
     } else {
       accuracyCircleRef.current.setCenter(position)
-      accuracyCircleRef.current.setRadius(Math.max(8, center.accuracyMeters ?? 20))
+      accuracyCircleRef.current.setRadius(Math.max(8, currentLocation.accuracyMeters ?? 20))
     }
-  }, [center.accuracyMeters, center.lat, center.lng, mapReadyVersion, refreshKey])
+  }, [currentLocation, mapReadyVersion])
 
   useEffect(() => {
     const google = googleRef.current
@@ -865,10 +952,10 @@ function GoogleFieldMap({
       onMapTap({
         lat: latLng.lat(),
         lng: latLng.lng(),
-        accuracyMeters: center.accuracyMeters,
+        accuracyMeters: currentLocation?.accuracyMeters ?? null,
       })
     })
-  }, [center.accuracyMeters, dropMode, mapReadyVersion, onMapTap])
+  }, [currentLocation?.accuracyMeters, dropMode, mapReadyVersion, onMapTap])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-950">

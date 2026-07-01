@@ -20,6 +20,9 @@ export function PwaRegister() {
       if (cancelled) return
       navigator.serviceWorker
         .register(SERVICE_WORKER_PATH)
+        .then(registration => {
+          registration.update().catch(() => undefined)
+        })
         .catch(err => {
           console.warn('[pwa] service worker registration failed:', err)
         })

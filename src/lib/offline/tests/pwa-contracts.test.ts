@@ -26,7 +26,7 @@ export function assertPwaContracts() {
 
   const serviceWorker = readProjectFile('public/sw.js')
   const requiredSnippets = [
-    "const CACHE_VERSION = 'jobrolo-pwa-v3'",
+    "const CACHE_VERSION = 'jobrolo-pwa-v4'",
     "const SHELL_ASSETS = [",
     'const APP_SHELL_ROUTES = new Set',
     "'/offline'",

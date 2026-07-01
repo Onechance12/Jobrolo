@@ -7,7 +7,7 @@
  * - falls back to /offline when a route has never been cached on this device
  */
 
-const CACHE_VERSION = 'jobrolo-pwa-v3'
+const CACHE_VERSION = 'jobrolo-pwa-v4'
 const SHELL_CACHE = `${CACHE_VERSION}:shell`
 const STATIC_CACHE = `${CACHE_VERSION}:static`
 const ROUTE_CACHE = `${CACHE_VERSION}:routes`
@@ -158,7 +158,7 @@ self.addEventListener('fetch', event => {
   }
 
   if (isStaticAssetRequest(request, url)) {
-    const isImmutableNextAsset = url.pathname.startsWith('/_next/static/')
-    event.respondWith(isImmutableNextAsset ? cacheFirstStatic(request) : staleWhileRevalidateStatic(request))
+    const shouldPreferCachedAsset = request.destination === 'font'
+    event.respondWith(shouldPreferCachedAsset ? cacheFirstStatic(request) : staleWhileRevalidateStatic(request))
   }
 })
