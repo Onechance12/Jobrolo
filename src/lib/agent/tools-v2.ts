@@ -24,7 +24,7 @@ import { createTemplateUploadFromDocument, analyzeTemplateUpload, getTemplateRev
 import { getFieldBriefing, executeFieldAction, resolveFieldEntity, listCopilotInbox, decideActionRequest } from '@/lib/field-copilot'
 import { createUnsignedDocumentPdf, getSignedDocumentArtifacts } from '@/lib/final-documents'
 import { getRoofReportWorkspace, generateRoofReportSummary, finalizeRoofReport, createRoofReportPdf, reviewRoofReportCandidatePhotos, updateRoofReportPhotoSelection, bulkAddPhotosToRoofReport, shareRoofReport } from '@/lib/roof-reports'
-import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, convertCanvassingLead } from '@/lib/canvassing'
+import { getCanvassingMap, startCanvassingSession, createCanvassingLead, logCanvassingActivity, updateCanvassingLead, convertCanvassingLead } from '@/lib/canvassing'
 import { buildFieldMapCardContract, type FieldMapPoint } from '@/lib/field-map/contracts'
 import { getPropertyMemoryContext, upsertPropertyMemory, recordPropertyObservation, recordDoorAttempt, recordFieldObservation, createCanvassingGamePlan } from '@/lib/property-memory'
 import { researchPropertyNow, getPropertyResearchRun, confirmPropertyResearchCandidate, getStreetResearchRuns } from '@/lib/property-research'
@@ -6098,6 +6098,53 @@ export const TOOLS: ToolDef[] = [
     execute: async (args, contractorId, ctx) => {
       const result = await logCanvassingActivity(await buildTrustedToolTenantContext(contractorId, ctx), args)
       return { success: true, data: result }
+    },
+  },
+  {
+    name: 'update_canvassing_lead',
+    description: 'Update an existing field map/canvassing lead by database leadId. Use when the user says to edit a map pin/field lead, add homeowner/address/phone/notes/status, or when a map card inserted a prompt containing "Lead ID: ...". Do not use this to create a customer/project; conversion uses convert_canvassing_lead_to_project.',
+    schema: z.object({
+      leadId: z.string().min(1),
+      homeownerName: z.string().optional(),
+      address: z.string().optional(),
+      phone: z.string().optional(),
+      notes: z.string().optional(),
+      status: z.string().optional(),
+      location: z.object({
+        lat: z.number().optional(),
+        lng: z.number().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        accuracyMeters: z.number().optional(),
+        source: z.string().optional(),
+      }).optional(),
+      metadata: z.record(z.string(), z.any()).optional(),
+    }),
+    allowedChannels: ['main', 'sales', 'management'],
+    execute: async (args, contractorId, ctx) => {
+      const { leadId, metadata, ...updates } = args as {
+        leadId: string
+        homeownerName?: string
+        address?: string
+        phone?: string
+        notes?: string
+        status?: string
+        location?: {
+          lat?: number
+          lng?: number
+          latitude?: number
+          longitude?: number
+          accuracyMeters?: number
+          source?: string
+        }
+        metadata?: Record<string, unknown>
+      }
+      const lead = await updateCanvassingLead(await buildTrustedToolTenantContext(contractorId, ctx), leadId, {
+        ...updates,
+        metadata: { ...(metadata ?? {}), updatedFromChat: true },
+      })
+      if (!lead) return { success: false, data: null, error: 'Canvassing lead not found' }
+      return { success: true, data: { lead } }
     },
   },
   {

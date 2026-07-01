@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, Trash2, X } from 'lucide-react'
+import { ChevronDown, Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, Trash2, X } from 'lucide-react'
 
 type BrowserLocation = {
   lat: number
@@ -136,10 +136,6 @@ function statusMeta(status?: string | null) {
 
 function statusMarkerColor(status?: string | null) {
   return STATUS_MARKER_COLORS[String(status || 'new').toLowerCase()] ?? STATUS_MARKER_COLORS.new
-}
-
-function labelForLead(lead: FieldLead) {
-  return lead.homeownerName || lead.address || lead.notes || 'Dropped lead'
 }
 
 function shortLabelForLead(lead: FieldLead) {
@@ -466,11 +462,11 @@ function CanvassingMapModeClient() {
       <div className="absolute inset-x-0 top-0 z-20 border-b border-white/10 bg-slate-950/90 px-3 pb-2.5 pt-[calc(1rem_+_env(safe-area-inset-top))] shadow-2xl backdrop-blur-xl sm:px-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/75">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-200/75">
               <Route className="h-3.5 w-3.5" />
               Field command map
             </div>
-            <h1 className="truncate text-base font-semibold leading-tight sm:text-lg">Doors, leads + field pins</h1>
+            <h1 className="truncate text-[15px] font-semibold leading-tight sm:text-lg">Doors, leads + field pins</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" onClick={locateMe} disabled={locating}>
@@ -490,7 +486,7 @@ function CanvassingMapModeClient() {
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[11px]">
+        <div className="mt-2 grid grid-cols-4 gap-2 text-center text-[11px]">
           <MapStat label="Pinned" value={pinnedLeads.length} />
           <MapStat label="Need GPS" value={unpinnedLeads.length} />
           <MapStat label="Follow-up" value={summary?.followUp ?? 0} />
@@ -501,7 +497,7 @@ function CanvassingMapModeClient() {
       <div className="relative flex-1 pt-[calc(126px_+_env(safe-area-inset-top))]">
         {useGoogleMap || hasMapLocation ? (
           <>
-            <div className="absolute inset-0">
+            <div className="absolute inset-x-0 bottom-0 top-[calc(126px_+_env(safe-area-inset-top))]">
               {useGoogleMap ? (
                 <GoogleFieldMap
                   apiKey={googleMapsApiKey}
@@ -591,7 +587,7 @@ function CanvassingMapModeClient() {
           />
         ) : null}
 
-        {showLeads ? (
+        {showLeads && !selectedLead ? (
           <div className="max-h-[32dvh] overflow-hidden rounded-3xl border border-white/10 bg-slate-950/90 shadow-2xl backdrop-blur-xl">
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
               <div>
@@ -1025,6 +1021,7 @@ function LeadCard({
   onArchive: () => void
   onPrompt: (prompt: string) => void
 }) {
+  const [moreOpen, setMoreOpen] = useState(false)
   const meta = statusMeta(lead.status)
   const label = shortLabelForLead(lead)
   const hasPin = leadHasPin(lead)
@@ -1032,23 +1029,24 @@ function LeadCard({
   const currentStatus = String(lead.status || 'new').toLowerCase()
   const primaryOutcomes = PRIMARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-[1.7rem] border border-white/10 bg-slate-950/92 p-2.5 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
+      <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Home className="h-4 w-4 text-emerald-200" />
-            <h2 className="truncate text-base font-semibold">{label}</h2>
+            <h2 className="truncate text-sm font-semibold">{label}</h2>
+            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${meta.color}`}>{meta.label}</span>
           </div>
-          <div className="mt-1 line-clamp-2 text-xs text-white/50">{details}</div>
+          <div className="mt-0.5 truncate text-[11px] text-white/48">{details}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1 text-white/45 hover:bg-white/10 hover:text-white">
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <span className={`rounded-full border px-2.5 py-1 text-xs ${meta.color}`}>{meta.label}</span>
+
+      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
         {hasPin ? (
-          <span className="rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">
+          <span className="shrink-0 rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">
             GPS saved
           </span>
         ) : null}
@@ -1058,41 +1056,52 @@ function LeadCard({
             type="button"
             onClick={() => onStatus(outcome.status)}
             disabled={saving}
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+            className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
           >
             {outcome.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setMoreOpen(open => !open)}
+          className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75 hover:bg-white/10"
+        >
+          More <ChevronDown className={`ml-1 inline h-3.5 w-3.5 transition ${moreOpen ? 'rotate-180' : ''}`} />
+        </button>
       </div>
-      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-        {PROPERTY_OUTCOMES.map(outcome => {
-          const outcomeMeta = statusMeta(outcome.status)
-          return (
-            <button
-              key={outcome.status}
-              type="button"
-              onClick={() => onStatus(outcome.status)}
-              disabled={saving}
-              className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${outcomeMeta.color}`}
-            >
-              {outcome.label}
-            </button>
-          )
-        })}
-      </div>
+
+      {moreOpen ? (
+        <div className="mt-1.5 flex gap-1.5 overflow-x-auto rounded-2xl border border-white/8 bg-white/[0.035] p-1.5">
+          {PROPERTY_OUTCOMES.map(outcome => {
+            const outcomeMeta = statusMeta(outcome.status)
+            return (
+              <button
+                key={outcome.status}
+                type="button"
+                onClick={() => onStatus(outcome.status)}
+                disabled={saving}
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${outcomeMeta.color}`}
+              >
+                {outcome.label}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
       {!hasPin ? (
         <button
           type="button"
           onClick={onAttachLocation}
           disabled={saving || !hasLocation}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-500/15 disabled:opacity-50"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-500/15 disabled:opacity-50"
         >
           <Link2 className="h-4 w-4" />
           Attach this lead to my current GPS pin
         </button>
       ) : null}
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Edit this field map pin from chat. Lead ID: ${lead.id}. Current label: ${label}. Add or correct homeowner, phone, address, door outcome, notes, and next step.`)}>
+      <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Edit this field map pin using update_canvassing_lead. Lead ID: ${lead.id}. Current label: ${label}. Add or correct homeowner, phone, address, door outcome, notes, and next step.`)}>
           <MessageCircle className="mr-1.5 h-4 w-4" />
           Edit in chat
         </Button>
@@ -1100,17 +1109,17 @@ function LeadCard({
           <Search className="mr-1.5 h-4 w-4" />
           Research
         </Button>
+        <Button
+          size="icon"
+          variant="secondary"
+          className="h-9 w-10 rounded-full border border-red-300/20 bg-red-500/10 text-red-100 hover:bg-red-500/15"
+          onClick={onArchive}
+          disabled={saving}
+          title="Remove this pin from the visible map"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        </Button>
       </div>
-      <Button
-        size="sm"
-        variant="secondary"
-        className="mt-2 w-full rounded-full border border-red-300/20 bg-red-500/10 text-red-100 hover:bg-red-500/15"
-        onClick={onArchive}
-        disabled={saving}
-      >
-        {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
-        Remove this pin from map
-      </Button>
     </div>
   )
 }
