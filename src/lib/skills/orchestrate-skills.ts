@@ -35,6 +35,7 @@ const WORKFLOW_SUPPORTS: Record<string, string[]> = {
   'appointment-scheduling': ['entity-resolver', 'project-context', 'communication-routing', 'field-map'],
   'photo-evidence': ['file-attachment', 'project-context', 'activity-timeline'],
   'roof-report': ['photo-evidence', 'project-context', 'approval'],
+  'insurance-claim': ['project-context', 'activity-timeline', 'communication-routing', 'role-permissions'],
   'communication-routing': ['role-permissions', 'approval'],
   'company-phone-number': ['communication-routing', 'integration-provider', 'approval', 'role-permissions'],
   'role-permissions': ['approval'],
@@ -52,6 +53,7 @@ const SUPPORT_FINDINGS: Record<string, string> = {
   'entity-resolver': 'Resolve the customer, project, lead, or property before record-changing actions.',
   'file-attachment': 'Attach files/photos using real IDs and the correct company/customer/project/report context.',
   'field-map': 'Keep map pins, GPS pings, property memory, appointments, photos, and field activity tied to the same saved location truth.',
+  'insurance-claim': 'Keep claim facts, estimate/scope facts, appraisal status, payment control, and supplement opportunities separated.',
   'integration-provider': 'Check provider readiness before claiming live outside-world access.',
   'photo-evidence': 'Preserve photo section, GPS, damage type, and report usage context.',
   'project-context': 'Confirm the customer/project before attaching, saving, or updating records.',
@@ -77,6 +79,7 @@ const PRIMARY_RECOMMENDATIONS: Record<string, string> = {
   'labor-cost': 'Resolve the project and source evidence, then treat labor/subcontractor amounts as internal job-cost truth. Separate quoted, approved, invoiced, and paid states.',
   'material-ordering': 'Use saved supplier/order/delivery evidence first. If supplier APIs are not configured, say so and offer a manual check instead of pretending live status.',
   'company-phone-number': 'List/search company phone numbers first. Provisioning a Twilio number is cost-bearing and owner/admin approval-gated; do not claim outbound SMS is ready until Twilio/A2P setup is ready.',
+  'insurance-claim': 'Use the public-adjuster/insurance claim operating model when PA/appraisal/payment-control terms appear. Coordinate homeowner, contractor, carrier adjuster, and trade collaboration through scoped shared chats, and do not give legal or coverage conclusions.',
   'production-coordinator': 'Check project status, material readiness, financial/job-cost completeness, and approvals before saying a job is ready to build.',
   'supplier-invoice': 'Classify supplier invoices/delivery tickets as project-level cost or delivery evidence. Do not import them into company pricing unless the user explicitly confirms reusable price-list intent.',
   'field-map': 'Use get_canvassing_map and saved field evidence first. Update the lead/pin/property trail for map edits, and do not convert pins into customers/jobs without confirmation.',
@@ -109,6 +112,7 @@ function findPrimarySkill(context: SkillRoutingContext, selectedIds: string[]): 
   if (upload) return 'upload-classifier'
 
   if (/(field map|map pin|field pin|dropped pin|drop pin|tap map|nearby pins|door outcome|gps pin|canvass map|territory map|save note.*pin|edit.*pin|mark.*lead)/.test(text)) return 'field-map'
+  if (/(public adjuster|pa file|pa review|claim file|thresher|appraisal|umpire|carrier appraiser|appraisal inspection|appraisal meeting|awaiting acv|appraisal acv|payment control|two confirmations|carrier negotiation|policy number|claim number|date of loss|carrier da|carrier adjuster|denial|underpayment)/.test(text)) return 'insurance-claim'
   if (/(closeout|close out|close the job|close this job|job complete|completed job|final invoice|warranty packet|closeout packet|final walkthrough|ready to close)/.test(text)) return 'project-closeout'
   if (/(ready to build|build ready|ready for production|production ready)/.test(text)) return 'production-coordinator'
   if (/(job\s*cost|project financial|margin|gross profit|profit|cost to build|what did we make)/.test(text)) return 'job-cost'

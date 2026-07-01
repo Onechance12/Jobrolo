@@ -95,6 +95,29 @@ export function resolveJobroloIntent(context: SkillRoutingContext): JobroloReque
     })
   }
 
+  if (/\b(public adjuster|pa file|pa review|claim file|thresher|appraisal|umpire|carrier appraiser|appraisal inspection|appraisal meeting|awaiting acv|appraisal acv|payment control|two confirmations|carrier negotiation|policy number|claim number|date of loss|carrier da|carrier adjuster|mortgage check|mortgage company|denial|underpayment)\b/.test(text)) {
+    return buildIntent({
+      id: 'public_adjuster_claim',
+      mode: 'workflow',
+      confidence: 0.94,
+      primarySkill: 'insurance-claim',
+      supportingSkills: ['communication-routing', 'role-permissions', 'project-context', 'activity-timeline'],
+      workflowName: 'Public adjuster claim file',
+      sticky: true,
+      allowedTools: ['get_customer_file', 'get_project_document_packet', 'get_scope_breakdown', 'list_schedule', 'show_calendar', 'consult_orchestrator'],
+      blockedTools: ['create_customer', 'create_project_for_customer', 'send_external_message', 'finalize_roof_report'],
+      requiredContext: ['claim/customer/project or claim file context'],
+      nextStep: 'call_tool',
+      summary: 'Public adjuster claim-file lane: organize claim status, paperwork, estimate review, appraisal, payment control, and shared collaboration without becoming a separate app.',
+      laneRules: [
+        'Treat PA files as claim-first records that can collaborate with contractors, homeowners, carrier adjusters, and trades through scoped shared chats.',
+        'Track claim number, policy number, date of loss, carrier, carrier adjuster, documents, photos, appointment/appraisal status, payments, and missing paperwork as separate facts.',
+        'Do not give legal advice, coverage guarantees, or bad-faith conclusions; frame work as file organization, document review, and next-step support.',
+        'Never expose internal PA notes, pricing, or strategy to homeowner/contractor/carrier chats unless explicitly shared and approved.',
+      ],
+    })
+  }
+
   if (/\b(cash\s+quote|cash\s+bid|\bbid\b|quote|proposal)\b/.test(text) && /\b(create|make|build|draft|start|need|generate|prepare|write|put together|price|pricing|research)\b/.test(text)) {
     return buildIntent({
       id: 'cash_quote_bid',

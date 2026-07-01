@@ -232,6 +232,7 @@ export type JobroloIntentId =
   | 'field_inspection'
   | 'field_observation'
   | 'field_map'
+  | 'public_adjuster_claim'
   | 'lead_intake'
   | 'appointment_scheduling'
   | 'photo_evidence'

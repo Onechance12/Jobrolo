@@ -94,6 +94,13 @@ export function selectSkills(context: SkillRoutingContext): SkillSelection[] {
     pushUnique(selections, select('insurance-claim', 0.9, 'Insurance claim/supplement workflow intent.'))
   }
 
+  if (/(public adjuster|pa file|pa review|claim file|thresher|appraisal|umpire|carrier appraiser|appraisal inspection|appraisal meeting|awaiting acv|appraisal acv|payment control|two confirmations|carrier negotiation|policy number|claim number|date of loss|carrier da|carrier adjuster|denial|underpayment)/.test(text)) {
+    pushUnique(selections, select('insurance-claim', 0.94, 'Public adjuster claim-file workflow intent.'))
+    pushUnique(selections, select('activity-timeline', 0.82, 'PA claim files need saved task/status/timeline context.'))
+    pushUnique(selections, select('communication-routing', 0.8, 'PA files often need scoped homeowner/contractor/carrier shared communication.'))
+    pushUnique(selections, select('role-permissions', 0.78, 'PA shared chats require strict visibility boundaries.'))
+  }
+
   if (/(template|agreement|contract template|warranty template|terms template|reusable document|company document library)/.test(text)) {
     pushUnique(selections, select('template-intake', 0.88, 'Reusable company template/document library intent.'))
   }

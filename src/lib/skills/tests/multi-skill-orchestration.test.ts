@@ -128,6 +128,13 @@ export function assertMultiSkillOrchestrationContracts() {
   assert(companyPhone.approvalNeeded, 'Company phone provisioning should require approval before buying/provisioning numbers')
   assert(companyPhone.recommendedAction.includes('Provisioning'), 'Company phone orchestration should explain provisioning approval/risk')
 
+  const publicAdjusterClaim = orchestrateSkills(buildSkillRoutingContext({ latestText: 'PA file is ready for appraisal. Carrier appraiser assigned. Show claim gaps and what the homeowner/contractor shared chat can see.' }))
+  assert(publicAdjusterClaim.primarySkill === 'insurance-claim', `PA claim primary should be insurance-claim, got ${publicAdjusterClaim.primarySkill}`)
+  assert(publicAdjusterClaim.supportingSkills.includes('communication-routing'), 'PA claim should consult communication-routing for shared chats')
+  assert(publicAdjusterClaim.supportingSkills.includes('role-permissions'), 'PA claim should consult role-permissions for external visibility')
+  assert(publicAdjusterClaim.blockedTools.includes('send_external_message'), 'PA claim should block external sends without approval')
+  assert(publicAdjusterClaim.recommendedAction.includes('public-adjuster') || publicAdjusterClaim.recommendedAction.includes('claim'), 'PA claim orchestration should explain claim-file behavior')
+
   const permissions = orchestrateSkills(buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' }))
   assert(permissions.primarySkill === 'role-permissions', `Permissions primary should be role-permissions, got ${permissions.primarySkill}`)
   assert(permissions.supportingSkills.includes('communication-routing'), 'Permissions should consult communication-routing for shared-chat visibility')

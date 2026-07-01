@@ -4,6 +4,7 @@ import { renderBrainInstructions } from '../brain'
 import { buildActiveJobroloContext, renderActiveJobroloContext } from '../jobrolo-context'
 import { renderJobroloNextPaths, suggestJobroloNextPaths } from '../next-paths'
 import { getSelectedSkillCardContracts } from './card-contracts'
+import { getOperatingModelInstruction } from '../operating-models'
 
 // Runtime note: `allowedTools` and `forbiddenTools` are compact prompt guidance today.
 // Deterministic guards still live in the upload classifier, agent loop, and tools.
@@ -13,6 +14,23 @@ import { getSelectedSkillCardContracts } from './card-contracts'
 function ruleToText(rule: JobroloSkill['decisionRules'][number]): string {
   if (typeof rule === 'string') return rule
   return `If ${rule.if}, then ${rule.then}.`
+}
+
+function selectedOperatingModelInstruction(selections: SkillSelection[], context?: SkillRoutingContext): string {
+  const selectedIds = new Set(selections.map(selection => selection.skill.id))
+  const text = `${context?.normalizedText ?? ''} ${context?.latestText ?? ''}`.toLowerCase()
+  const isPublicAdjusterLane =
+    context?.requestIntent?.id === 'public_adjuster_claim'
+    || (
+      selectedIds.has('insurance-claim')
+      && /\b(public adjuster|pa file|pa review|appraisal|carrier appraiser|claim advocate|umpire|acv|payment control)\b/.test(text)
+    )
+
+  if (isPublicAdjusterLane) {
+    return getOperatingModelInstruction('public_adjuster')
+  }
+
+  return ''
 }
 
 export function renderSkillInstructions(selections: SkillSelection[], context?: SkillRoutingContext): string {
@@ -32,6 +50,11 @@ export function renderSkillInstructions(selections: SkillSelection[], context?: 
     if (intent.allowedTools?.length) lines.push(`Lane allowed tools: ${intent.allowedTools.join(', ')}`)
     if (intent.blockedTools?.length) lines.push(`Lane blocked tools: ${intent.blockedTools.join(', ')}`)
     if (intent.requiredContext?.length) lines.push(`Lane required context: ${intent.requiredContext.join(', ')}`)
+  }
+
+  const operatingModelInstruction = selectedOperatingModelInstruction(selections, context)
+  if (operatingModelInstruction) {
+    lines.push(`OPERATING MODEL\n${operatingModelInstruction}`)
   }
 
   if (context?.brain) {

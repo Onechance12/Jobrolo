@@ -1,5 +1,6 @@
 import { buildSkillRoutingContext, classifyUploadForSkills } from '../context'
 import { JOBROLO_SKILLS } from '../registry'
+import { renderSkillInstructions } from '../render-skill-instructions'
 import { selectSkills } from '../select-skill'
 
 function assert(condition: boolean, message: string) {
@@ -44,6 +45,7 @@ export const skillRoutingTestCases = [
   'project closeout routes into closeout/readiness lane',
   'integration provider requests route into provider lane',
   'company phone number setup routes into company communication lane',
+  'public adjuster appraisal routes into claim workflow with shared-chat boundaries',
   'role permission requests route into permission lane',
   'Cody activation stays in read-only QA lane',
   'brain stem detects learning without turning on training/development organ',
@@ -333,6 +335,19 @@ export function assertSkillRoutingContracts() {
   const growthSkills = selectSkills(growthContext).map((selection) => selection.skill.id)
   assert(growthSkills.includes('company-intelligence'), `Growth request should select company-intelligence, got ${growthSkills.join(', ')}`)
   assert(growthSkills.includes('company-profile'), 'Growth request should support company-profile for setup gaps')
+
+  const paContext = buildSkillRoutingContext({ latestText: 'This PA claim file is submitted for appraisal and the carrier appraiser was assigned. Show what the homeowner, contractor, and public adjuster shared chat should see.' })
+  assert(paContext.requestIntent?.id === 'public_adjuster_claim', `PA appraisal request should resolve to public_adjuster_claim intent, got ${paContext.requestIntent?.id}`)
+  assert(paContext.requestIntent?.primarySkill === 'insurance-claim', 'PA appraisal request should be owned by insurance-claim')
+  assert(Boolean(paContext.requestIntent?.blockedTools?.includes('send_external_message')), 'PA lane should not send external messages without approval')
+  const paSkills = selectSkills(paContext).map((selection) => selection.skill.id)
+  assert(paSkills.includes('insurance-claim'), `PA request should select insurance-claim, got ${paSkills.join(', ')}`)
+  assert(paSkills.includes('communication-routing'), 'PA request should include communication routing for shared chats')
+  assert(paSkills.includes('role-permissions'), 'PA request should include role permissions for visibility boundaries')
+  const paInstructions = renderSkillInstructions(selectSkills(paContext), paContext)
+  assert(paInstructions.includes('OPERATING MODEL'), 'PA request should inject compact operating-model guidance into runtime skill instructions')
+  assert(paInstructions.includes('Public Adjuster / Claim Advocate'), 'PA request should render the public adjuster operating model')
+  assert(paInstructions.includes('Shared truth: contact, property, claim'), 'PA operating model should explain shared claim truth primitives')
 
   const permissionContext = buildSkillRoutingContext({ latestText: 'Who can see this crew chat?' })
   assert(permissionContext.requestIntent?.id === 'role_permissions', `Permission request should resolve to role_permissions intent, got ${permissionContext.requestIntent?.id}`)

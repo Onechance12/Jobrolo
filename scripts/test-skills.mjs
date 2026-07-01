@@ -18,9 +18,11 @@ const { assertCardContracts } = jiti('./src/lib/cards/tests/card-contracts.test.
 const { assertFieldMapContracts } = jiti('./src/lib/field-map/tests/field-map-contracts.test.ts')
 const { assertOfflineFoundationContracts } = jiti('./src/lib/offline/tests/offline-foundation.test.ts')
 const { assertPwaContracts } = jiti('./src/lib/offline/tests/pwa-contracts.test.ts')
+const { assertOperatingModelContracts } = jiti('./src/lib/operating-models/tests/operating-models.test.ts')
 
 assertCardContracts()
 assertFieldMapContracts()
+assertOperatingModelContracts()
 assertOfflineFoundationContracts()
 assertPwaContracts()
 assertFoundationContextContracts()
