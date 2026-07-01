@@ -149,6 +149,7 @@ function promptInMainChat(prompt: string) {
 export function CanvassingMapMode() {
   const [location, setLocation] = useState<BrowserLocation | null>(null)
   const [locating, setLocating] = useState(false)
+  const [locationAttempted, setLocationAttempted] = useState(false)
   const [loadingMap, setLoadingMap] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -178,7 +179,9 @@ export function CanvassingMapMode() {
 
   const locateMe = useCallback(async () => {
     setError(null)
+    setLocationAttempted(false)
     if (!navigator.geolocation) {
+      setLocationAttempted(true)
       setError('GPS is not available in this browser.')
       return
     }
@@ -191,9 +194,11 @@ export function CanvassingMapMode() {
           accuracyMeters: pos.coords.accuracy,
         })
         setMapRefreshKey(key => key + 1)
+        setLocationAttempted(true)
         setLocating(false)
       },
       () => {
+        setLocationAttempted(true)
         setError('Location permission was denied or unavailable.')
         setLocating(false)
       },
@@ -325,17 +330,18 @@ export function CanvassingMapMode() {
   }
 
   const summary = mapData?.summary
+  const waitingForInitialLocation = !mapUrl && !locationAttempted && !error
 
   return (
     <main className="fixed inset-0 z-50 flex min-h-dvh flex-col overflow-hidden bg-slate-950 text-white">
-      <div className="absolute inset-x-0 top-0 z-20 border-b border-white/10 bg-slate-950/90 px-3 pb-3 pt-[calc(1.35rem_+_env(safe-area-inset-top))] shadow-2xl backdrop-blur-xl sm:px-4">
+      <div className="absolute inset-x-0 top-0 z-20 border-b border-white/10 bg-slate-950/90 px-3 pb-2.5 pt-[calc(1rem_+_env(safe-area-inset-top))] shadow-2xl backdrop-blur-xl sm:px-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/75">
               <Route className="h-3.5 w-3.5" />
               Field command map
             </div>
-            <h1 className="truncate text-lg font-semibold leading-tight">Doors, leads, and field pins</h1>
+            <h1 className="truncate text-base font-semibold leading-tight sm:text-lg">Doors, leads + field pins</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" onClick={locateMe} disabled={locating}>
@@ -357,7 +363,7 @@ export function CanvassingMapMode() {
         </div>
       </div>
 
-      <div className="relative flex-1 pt-[calc(138px_+_env(safe-area-inset-top))]">
+      <div className="relative flex-1 pt-[calc(126px_+_env(safe-area-inset-top))]">
         {mapUrl ? (
           <>
             <div className="absolute inset-0">
@@ -421,6 +427,17 @@ export function CanvassingMapMode() {
               )
             })}
           </>
+        ) : waitingForInitialLocation ? (
+          <div className="flex h-full items-center justify-center px-6 text-center">
+            <div className="max-w-sm rounded-3xl border border-cyan-300/15 bg-cyan-500/10 p-5 shadow-2xl backdrop-blur">
+              <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-cyan-200" />
+              <h2 className="text-lg font-semibold">Preparing field map</h2>
+              <p className="mt-2 text-sm text-white/65">
+                Getting GPS and loading saved pins. Jobrolo will keep map records separate from customers and jobs until you convert them.
+              </p>
+              {loadingMap ? <p className="mt-3 text-xs text-cyan-100/70">Loading saved field records…</p> : null}
+            </div>
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <div className="max-w-sm rounded-3xl border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur">
