@@ -1070,7 +1070,7 @@ model Appointment {
   notes           String?
   attendeesJson   String?  // JSON: homeowner, adjuster, rep, crew, carrier contacts
   createdById     String?
-  externalProvider String? // google, outlook, jobnimbus, manual
+  externalProvider String? // google, outlook, external_crm, manual
   externalEventId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

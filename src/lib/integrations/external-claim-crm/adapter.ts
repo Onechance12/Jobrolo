@@ -1,5 +1,5 @@
 import { classifyPublicAdjusterWorkflow } from '../../operating-models'
-import type { JobNimbusClaimInput, JobNimbusOpenTask, JobroloClaimPacket } from './types'
+import type { ExternalClaimCrmInput, ExternalClaimCrmOpenTask, JobroloClaimPacket } from './types'
 
 function normalizeText(value?: string | null) {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
@@ -22,14 +22,14 @@ function isPastDate(value?: string | null, now = new Date()) {
   return parsed.getTime() < today.getTime()
 }
 
-function overdueTasks(tasks?: JobNimbusOpenTask[] | null, now = new Date()) {
+function overdueTasks(tasks?: ExternalClaimCrmOpenTask[] | null, now = new Date()) {
   return (tasks ?? []).map(task => ({
     ...task,
     overdue: isPastDate(task.dueDate, now),
   }))
 }
 
-function noteTextForWorkflow(input: JobNimbusClaimInput) {
+function noteTextForWorkflow(input: ExternalClaimCrmInput) {
   return [
     input.status,
     input.recordType,
@@ -39,7 +39,7 @@ function noteTextForWorkflow(input: JobNimbusClaimInput) {
   ].filter(Boolean).join('\n')
 }
 
-function importWarningsFor(input: JobNimbusClaimInput, packetTasks: ReturnType<typeof overdueTasks>) {
+function importWarningsFor(input: ExternalClaimCrmInput, packetTasks: ReturnType<typeof overdueTasks>) {
   const warnings: string[] = []
   if (normalizeText(input.recordType).toLowerCase() && normalizeText(input.recordType).toLowerCase() !== 'insurance') {
     warnings.push(`Source record type is ${input.recordType}; confirm this belongs in the public-adjuster/claim workflow.`)
@@ -52,7 +52,7 @@ function importWarningsFor(input: JobNimbusClaimInput, packetTasks: ReturnType<t
   return warnings
 }
 
-function timelineHintsFor(input: JobNimbusClaimInput, packetTasks: ReturnType<typeof overdueTasks>) {
+function timelineHintsFor(input: ExternalClaimCrmInput, packetTasks: ReturnType<typeof overdueTasks>) {
   const hints: string[] = []
   if (input.lastActivityDate) hints.push(`Last source activity: ${input.lastActivityDate}.`)
   const status = normalizeText(input.status)
@@ -64,7 +64,7 @@ function timelineHintsFor(input: JobNimbusClaimInput, packetTasks: ReturnType<ty
   return hints
 }
 
-export function createJobroloClaimPacketFromJobNimbus(input: JobNimbusClaimInput, options?: { now?: Date }): JobroloClaimPacket {
+export function createJobroloClaimPacketFromExternalClaimCrm(input: ExternalClaimCrmInput, options?: { now?: Date }): JobroloClaimPacket {
   const packetTasks = overdueTasks(input.openTasks, options?.now)
   const overdueTasksCount = packetTasks.filter(task => task.overdue).length
   const notesText = noteTextForWorkflow(input)
@@ -88,7 +88,7 @@ export function createJobroloClaimPacketFromJobNimbus(input: JobNimbusClaimInput
   })
 
   return {
-    sourceSystem: 'jobnimbus',
+    sourceSystem: 'external_claim_crm',
     sourceRecordType: input.sourceRecordType ?? 'contact',
     sourceId: input.sourceId,
     operatingModelId: 'public_adjuster',
@@ -121,7 +121,7 @@ export function createJobroloClaimPacketFromJobNimbus(input: JobNimbusClaimInput
     timelineHints: timelineHintsFor(input, packetTasks),
     importWarnings: importWarningsFor(input, packetTasks),
     codexTestNotes: [
-      'Dry-run packet only. Do not mutate JobNimbus.',
+      'Dry-run packet only. Do not mutate the external CRM.',
       'Create Jobrolo customer/project/claim records only through approved Jobrolo import flow.',
       'Keep PA internal notes private unless explicitly shared.',
     ],

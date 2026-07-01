@@ -1,35 +1,35 @@
 import type { PublicAdjusterWorkflowResult } from '../../operating-models'
 
-export type JobNimbusSourceRecordType = 'contact' | 'job' | 'task' | 'document' | 'payment' | 'activity'
+export type ExternalClaimCrmSourceRecordType = 'contact' | 'job' | 'task' | 'document' | 'payment' | 'activity'
 
-export type JobNimbusAssignee = {
+export type ExternalClaimCrmAssignee = {
   name?: string | null
   email?: string | null
 }
 
-export type JobNimbusOpenTask = {
+export type ExternalClaimCrmOpenTask = {
   title: string
   dueDate?: string | null
-  assignee?: JobNimbusAssignee | null
+  assignee?: ExternalClaimCrmAssignee | null
 }
 
-export type JobNimbusFileReference = {
+export type ExternalClaimCrmFileReference = {
   id?: string | null
   name: string
   type?: string | null
   status?: string | null
 }
 
-export type JobNimbusPaymentReference = {
+export type ExternalClaimCrmPaymentReference = {
   id?: string | null
   amount?: number | null
   date?: string | null
   type?: string | null
 }
 
-export type JobNimbusClaimInput = {
-  sourceSystem?: 'jobnimbus'
-  sourceRecordType?: JobNimbusSourceRecordType
+export type ExternalClaimCrmInput = {
+  sourceSystem?: 'external_claim_crm'
+  sourceRecordType?: ExternalClaimCrmSourceRecordType
   sourceId?: string | null
   customerName: string
   address?: string | null
@@ -49,14 +49,14 @@ export type JobNimbusClaimInput = {
   daysInStatus?: number | null
   lastClientTouchDays?: number | null
   notes?: string[] | null
-  openTasks?: JobNimbusOpenTask[] | null
-  files?: JobNimbusFileReference[] | null
-  payments?: JobNimbusPaymentReference[] | null
+  openTasks?: ExternalClaimCrmOpenTask[] | null
+  files?: ExternalClaimCrmFileReference[] | null
+  payments?: ExternalClaimCrmPaymentReference[] | null
 }
 
 export type JobroloClaimPacket = {
-  sourceSystem: 'jobnimbus'
-  sourceRecordType: JobNimbusSourceRecordType
+  sourceSystem: 'external_claim_crm'
+  sourceRecordType: ExternalClaimCrmSourceRecordType
   sourceId?: string | null
   operatingModelId: 'public_adjuster'
   customer: {
@@ -81,9 +81,9 @@ export type JobroloClaimPacket = {
     sourceStatus?: string | null
     sourceRecordTypeName?: string | null
   }
-  tasks: Array<JobNimbusOpenTask & { overdue: boolean }>
-  documents: JobNimbusFileReference[]
-  payments: JobNimbusPaymentReference[]
+  tasks: Array<ExternalClaimCrmOpenTask & { overdue: boolean }>
+  documents: ExternalClaimCrmFileReference[]
+  payments: ExternalClaimCrmPaymentReference[]
   timelineHints: string[]
   importWarnings: string[]
   codexTestNotes: string[]

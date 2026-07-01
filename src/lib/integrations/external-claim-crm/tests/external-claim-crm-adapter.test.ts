@@ -1,5 +1,5 @@
-import { createJobroloClaimPacketFromJobNimbus, summarizeJobroloClaimPacket } from '../adapter'
-import type { JobNimbusClaimInput } from '../types'
+import { createJobroloClaimPacketFromExternalClaimCrm, summarizeJobroloClaimPacket } from '../adapter'
+import type { ExternalClaimCrmInput } from '../types'
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message)
@@ -7,10 +7,10 @@ function assert(condition: boolean, message: string) {
 
 const FIXED_NOW = new Date('2026-07-01T12:00:00.000Z')
 
-const submittedAwaitingConfirmation: JobNimbusClaimInput = {
-  sourceSystem: 'jobnimbus',
+const submittedAwaitingConfirmation: ExternalClaimCrmInput = {
+  sourceSystem: 'external_claim_crm',
   sourceRecordType: 'contact',
-  sourceId: 'jn-contact-two-confirmations',
+  sourceId: 'external-contact-two-confirmations',
   customerName: 'Test Homeowner A',
   address: '2414 Summit View St, Grand Prairie, TX, 75050',
   status: 'Submitted Awaiting Confirmation',
@@ -30,10 +30,10 @@ const submittedAwaitingConfirmation: JobNimbusClaimInput = {
   ],
 }
 
-const readyForAppraisal: JobNimbusClaimInput = {
-  sourceSystem: 'jobnimbus',
+const readyForAppraisal: ExternalClaimCrmInput = {
+  sourceSystem: 'external_claim_crm',
   sourceRecordType: 'contact',
-  sourceId: 'jn-contact-ready-appraisal',
+  sourceId: 'external-contact-ready-appraisal',
   customerName: 'Test Homeowner B',
   address: '4607 W Red Bird Ln, Dallas, TX, 75236',
   status: 'Ready for Appraisal',
@@ -56,10 +56,10 @@ const readyForAppraisal: JobNimbusClaimInput = {
   ],
 }
 
-const submittedForAppraisal: JobNimbusClaimInput = {
-  sourceSystem: 'jobnimbus',
+const submittedForAppraisal: ExternalClaimCrmInput = {
+  sourceSystem: 'external_claim_crm',
   sourceRecordType: 'contact',
-  sourceId: 'jn-contact-appraisal-submitted',
+  sourceId: 'external-contact-appraisal-submitted',
   customerName: 'Test Homeowner C',
   address: '1244 Echols Dr, Frisco, TX, 75036',
   status: 'Submitted for Appraisal',
@@ -77,22 +77,22 @@ const submittedForAppraisal: JobNimbusClaimInput = {
   openTasks: [],
 }
 
-export function assertJobNimbusAdapterContracts() {
-  const confirmationPacket = createJobroloClaimPacketFromJobNimbus(submittedAwaitingConfirmation, { now: FIXED_NOW })
-  assert(confirmationPacket.operatingModelId === 'public_adjuster', 'JobNimbus claims should become public-adjuster packets')
+export function assertExternalClaimCrmAdapterContracts() {
+  const confirmationPacket = createJobroloClaimPacketFromExternalClaimCrm(submittedAwaitingConfirmation, { now: FIXED_NOW })
+  assert(confirmationPacket.operatingModelId === 'public_adjuster', 'External claim CRM records should become public-adjuster packets')
   assert(confirmationPacket.workflow.phase === 'two_key_confirmations', `Submitted Awaiting Confirmation should route to two_key_confirmations, got ${confirmationPacket.workflow.phase}`)
   assert(confirmationPacket.workflow.lane === 'review', 'Two-confirmation file should be review lane')
   assert(confirmationPacket.workflow.ownerLane === 'office_admin', 'Two-confirmation file should be office-admin owned')
-  assert(confirmationPacket.tasks.some(task => task.overdue), 'Past-due JobNimbus task should be marked overdue in packet')
+  assert(confirmationPacket.tasks.some(task => task.overdue), 'Past-due external CRM task should be marked overdue in packet')
   assert(confirmationPacket.importWarnings.some(warning => /overdue/i.test(warning)), 'Packet should warn about overdue source tasks')
 
-  const appraisalPacket = createJobroloClaimPacketFromJobNimbus(readyForAppraisal, { now: FIXED_NOW })
+  const appraisalPacket = createJobroloClaimPacketFromExternalClaimCrm(readyForAppraisal, { now: FIXED_NOW })
   assert(appraisalPacket.workflow.phase === 'ready_for_appraisal', `Ready for Appraisal should route to ready_for_appraisal, got ${appraisalPacket.workflow.phase}`)
   assert(appraisalPacket.workflow.lane === 'appraisal', 'Ready for appraisal should be appraisal lane')
   assert(appraisalPacket.workflow.missingInfo.includes('date of loss'), 'Missing date of loss should stay visible')
   assert(appraisalPacket.workflow.recommendedNextAction.toLowerCase().includes('appraisal'), 'Ready appraisal file should recommend appraisal packet/checklist')
 
-  const submittedPacket = createJobroloClaimPacketFromJobNimbus(submittedForAppraisal, { now: FIXED_NOW })
+  const submittedPacket = createJobroloClaimPacketFromExternalClaimCrm(submittedForAppraisal, { now: FIXED_NOW })
   assert(submittedPacket.workflow.phase === 'appraisal_submitted', `Submitted for Appraisal should route to appraisal_submitted, got ${submittedPacket.workflow.phase}`)
   assert(submittedPacket.workflow.ownerLane === 'carrier_adjuster', 'Submitted appraisal should wait on carrier/appraisal response lane')
   assert(submittedPacket.timelineHints.some(hint => /Initial appraisal file/i.test(hint)), 'Source notes should become timeline hints, not raw shared messages')
@@ -103,12 +103,12 @@ export function assertJobNimbusAdapterContracts() {
   assert(summary.length < 900, 'Summary should stay compact for Codex/live QA')
 
   const noWritebackRule = confirmationPacket.codexTestNotes.join(' ')
-  assert(/Do not mutate JobNimbus/i.test(noWritebackRule), 'Packet should carry no-writeback safety note')
+  assert(/Do not mutate the external CRM/i.test(noWritebackRule), 'Packet should carry no-writeback safety note')
 
   return true
 }
 
-if (process.argv[1]?.endsWith('jobnimbus-adapter.test.ts')) {
-  assertJobNimbusAdapterContracts()
-  console.log('JobNimbus adapter contracts passed')
+if (process.argv[1]?.endsWith('external-claim-crm-adapter.test.ts')) {
+  assertExternalClaimCrmAdapterContracts()
+  console.log('External claim CRM adapter contracts passed')
 }

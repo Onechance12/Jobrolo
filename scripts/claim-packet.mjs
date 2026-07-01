@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const jiti = require('jiti')(process.cwd(), { interopDefault: true })
 
-const { createJobroloClaimPacketFromJobNimbus, summarizeJobroloClaimPacket } = jiti('./src/lib/integrations/jobnimbus/adapter.ts')
+const { createJobroloClaimPacketFromExternalClaimCrm, summarizeJobroloClaimPacket } = jiti('./src/lib/integrations/external-claim-crm/adapter.ts')
 
 function valueAfter(flag) {
   const index = process.argv.indexOf(flag)
@@ -20,7 +20,7 @@ function has(flag) {
 
 const EXAMPLES = {
   ready_for_appraisal: {
-    sourceSystem: 'jobnimbus',
+    sourceSystem: 'external_claim_crm',
     sourceRecordType: 'contact',
     sourceId: 'example-ready-for-appraisal',
     customerName: 'Example PA File',
@@ -38,7 +38,7 @@ const EXAMPLES = {
     openTasks: [{ title: 'Estimate Inspection', dueDate: '2026-05-22', assignee: { name: 'Appraisal Desk' } }],
   },
   two_confirmations: {
-    sourceSystem: 'jobnimbus',
+    sourceSystem: 'external_claim_crm',
     sourceRecordType: 'contact',
     sourceId: 'example-two-confirmations',
     customerName: 'Example Confirmation File',
@@ -95,6 +95,6 @@ if (has('--help')) {
   process.exit(0)
 }
 
-const packet = createJobroloClaimPacketFromJobNimbus(readInput(), { now: new Date('2026-07-01T12:00:00.000Z') })
+const packet = createJobroloClaimPacketFromExternalClaimCrm(readInput(), { now: new Date('2026-07-01T12:00:00.000Z') })
 if (has('--summary')) console.log(summarizeJobroloClaimPacket(packet))
 else console.log(JSON.stringify(packet, null, 2))

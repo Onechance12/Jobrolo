@@ -93,7 +93,7 @@ const QUESTION_BANKS: Record<string, Array<{ topic: string; question: string }>>
     { topic: 'customer_model', question: "Residential, commercial, or both?" },
     { topic: 'crew_model', question: "Do you have in-house crews, or do you use subcontractors?" },
     { topic: 'service_area', question: "What cities or counties do you serve?" },
-    { topic: 'software', question: "What software are you using now? (EagleView, Xactimate, AccuLynx, JobNimbus, etc.)" },
+    { topic: 'software', question: "What software are you using now? (EagleView, Xactimate, AccuLynx, another CRM, etc.)" },
     { topic: 'goals', question: "What's the #1 thing you want Jobrolo to help with?" },
   ],
   restoration: [
@@ -167,7 +167,7 @@ const TOPIC_KEYWORDS: Record<string, string[]> = {
   user_role: ['owner', 'admin', 'manager', 'project manager', 'sales', 'sales rep', 'crew', 'subcontractor', 'sub contractor', 'employee', 'office', 'customer', 'homeowner', 'client', 'dispatcher'],
   company_contact: ['phone', 'email', 'address', 'office', 'business address', 'mailing address', 'estimates', 'invoices', 'reports'],
   brand_assets: ['logo', 'brand', 'branding', 'skip logo', 'upload logo', 'later'],
-  software: ['acculynx', 'xactimate', 'jobnimbus', 'servicetitan', 'housecall', 'fieldedge', 'procore', 'buildertrend', 'coconstruct', 'accu lynx', 'eagleview', 'symbility', 'claimxperience', 'encircle', 'dash', 'horizon'],
+  software: ['acculynx', 'xactimate', 'servicetitan', 'housecall', 'fieldedge', 'procore', 'buildertrend', 'coconstruct', 'accu lynx', 'eagleview', 'symbility', 'claimxperience', 'encircle', 'dash', 'horizon'],
   crew_model: ['subcontractor', 'sub contractor', 'subs', 'in-house', 'in house', 'inhouse', 'w-2', 'w2', '1099', 'employees', 'employed'],
   customer_model: ['residential', 'commercial', 'homeowner', 'home owner', 'resi'],
   work_type: ['insurance', 'retail work', 'storm damage', 'storm restoration', 'carrier', 'adjuster', 'supplement', 'direct to consumer', 'out of pocket'],
