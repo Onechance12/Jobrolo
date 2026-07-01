@@ -51,6 +51,12 @@ export function assertLocalTruthContracts() {
   const actionCenter = buildLocalTruthToolCall('What needs attention right now? Show pending approvals, review items, failed work, and routed tasks.')
   assert(actionCenter?.name === 'get_copilot_inbox', `Action Center reads should route to get_copilot_inbox, got ${actionCenter?.name}`)
 
+  const actionItemDecision = buildLocalTruthToolCall('Review this action item and show me what I need to decide: New field inspection lead (cmr1cp4hn000vn02dwtznyti4)')
+  assert(actionItemDecision?.name === 'get_copilot_inbox', `Action item review should route to get_copilot_inbox, got ${actionItemDecision?.name}`)
+
+  const decisionList = buildLocalTruthToolCall('Show me what I need to decide.')
+  assert(decisionList?.name === 'get_copilot_inbox', `Decision list should route to get_copilot_inbox, got ${decisionList?.name}`)
+
   const approvalMutation = buildLocalTruthToolCall('Approve the pending roof report.')
   assert(!approvalMutation, 'Approval decisions should not route through local truth')
 

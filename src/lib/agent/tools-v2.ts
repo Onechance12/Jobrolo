@@ -1693,7 +1693,15 @@ export const TOOLS: ToolDef[] = [
     description: 'Save a durable Jobrolo agent lesson from a bug, tester note, owner correction, repeated workflow problem, “Cody Cody Cody” feedback, or Codex handoff note. Use this when feedback should change how Jobrolo behaves next time. This is separate from normal job/customer notes.',
     schema: z.object({
       agentName: z.string().max(80).optional(),
-      lessonType: z.enum(['success', 'failure', 'pattern', 'preference', 'correction']).optional(),
+      lessonType: z.preprocess((value) => {
+        if (typeof value !== 'string') return value
+        const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+        if (['bug', 'issue', 'problem', 'error', 'failed', 'tool_failure', 'failure_case'].includes(normalized)) return 'failure'
+        if (['learning', 'rule', 'workflow', 'repeat_pattern', 'routing_pattern'].includes(normalized)) return 'pattern'
+        if (['user_preference', 'preference_note'].includes(normalized)) return 'preference'
+        if (['fix', 'feedback', 'owner_correction', 'change_request'].includes(normalized)) return 'correction'
+        return normalized
+      }, z.enum(['success', 'failure', 'pattern', 'preference', 'correction'])).optional(),
       trigger: z.string().min(1).max(1000),
       action: z.string().min(1).max(1000),
       outcome: z.string().min(1).max(1000),

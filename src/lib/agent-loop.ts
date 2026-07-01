@@ -730,9 +730,29 @@ function isActionCenterRequest(text: string) {
   const lower = plainMessageText(text).toLowerCase()
   if (!lower) return false
   return (
-    /\b(what|show|list|pull|open|check)\b[\s\S]{0,90}\b(needs? attention|action needed|pending approvals?|review items?|failed work|routed tasks?|invites?|notifications?)\b/.test(lower) ||
-    /\b(needs? attention|action needed|what needs my approval|what do i need to approve|pending approvals?)\b/.test(lower)
+    /\b(what|show|list|pull|open|check|review)\b[\s\S]{0,120}\b(needs? attention|action needed|action items?|pending approvals?|review items?|failed work|routed tasks?|invites?|notifications?|inbox(?: items?)?|what i need to decide|decisions?)\b/.test(lower) ||
+    /\b(needs? attention|action needed|action items?|what needs my approval|what do i need to approve|what i need to decide|things i need to decide|pending approvals?)\b/.test(lower) ||
+    /\b(review|open|show)\b[\s\S]{0,80}\b(action item|inbox item|pending request|approval request)\b/.test(lower) ||
+    (/\bcmr[a-z0-9]+\b/.test(lower) && /\b(action item|inbox item|action needed|approval|review item|field inspection lead)\b/.test(lower))
   )
+}
+
+function isActionCenterFollowUpRequest(messages: ChatMessage[]) {
+  const latestUser = lastExternalUserMessage(messages)
+  if (!latestUser) return false
+  const latestText = plainMessageText(latestUser.message.content).toLowerCase().trim()
+  if (!/^(show me|show it|show them|list them|open it|details|show details|yes|yeah|yep|pull them|let'?s see|review them)[.!?\s]*$/.test(latestText)) return false
+
+  const recentContext: string[] = []
+  for (let i = latestUser.index - 1; i >= 0 && recentContext.length < 8; i -= 1) {
+    const message = messages[i]
+    if (!message || isInternalAgentInstruction(message.content)) continue
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    const text = plainMessageText(message.content)
+    if (text) recentContext.push(text)
+  }
+  const contextText = recentContext.join(' ').toLowerCase()
+  return /\b(inbox items?|action requests?|action needed|needs attention|pending approvals?|review items?|failed work|routed tasks?|what you need to decide)\b/.test(contextText)
 }
 
 function isCompanyIntelligenceRequest(text: string) {
@@ -859,11 +879,12 @@ function codyBlockState(messages: ChatMessage[]) {
     if (isCodyBlockCloseText(text)) lastCloseIndex = i
   }
 
-  if (lastOpenIndex === -1 || lastCloseIndex > lastOpenIndex) return { active: false, closing: false, content: '', turns: [] as Array<{ role: 'user' | 'assistant'; text: string }> }
-
   const latestUser = lastExternalUserMessage(messages)
   const latestText = latestUser ? plainMessageText(latestUser.message.content) : ''
   const closing = Boolean(latestUser && latestUser.index > lastOpenIndex && isCodyBlockCloseText(latestText))
+  if (lastOpenIndex === -1 || (lastCloseIndex > lastOpenIndex && !closing)) {
+    return { active: false, closing: false, content: '', turns: [] as Array<{ role: 'user' | 'assistant'; text: string }> }
+  }
   const turns: Array<{ role: 'user' | 'assistant'; text: string }> = []
   for (let i = lastOpenIndex; i < messages.length; i += 1) {
     const message = messages[i]
@@ -1318,7 +1339,7 @@ function buildDeterministicToolCall(messages: ChatMessage[], opts?: Pick<AgentLo
   }
   const testerFeedback = testerFeedbackFromText(userText)
   if (testerFeedback) return { name: 'record_tester_feedback', args: withTesterFeedbackDebugContext(testerFeedback, messages, opts) }
-  if (isActionCenterRequest(userText)) return { name: 'get_copilot_inbox', args: { limit: 12 } }
+  if (isActionCenterRequest(userText) || isActionCenterFollowUpRequest(messages)) return { name: 'get_copilot_inbox', args: { limit: 25 } }
   if (isIntegrationReadinessRequest(userText)) return buildIntegrationReadinessToolCall(userText)
   if (isCompanyProfileReadRequest(userText)) return { name: 'get_contractor_profile', args: {} }
   if (isCompanyProfileResearchRequest(userText)) {
@@ -1386,6 +1407,14 @@ Call record_tester_feedback now with:
 ${JSON.stringify(feedbackWithContext)}
 
 Do not save it as a normal customer/job note. Do not narrate that you will save it. Only say it was captured after the tool succeeds. Respond as JSON only.`
+  }
+  if (isActionCenterRequest(userText) || isActionCenterFollowUpRequest(messages)) {
+    return `The latest user request is asking to read Action Needed / inbox / pending decision items from saved Jobrolo records:
+"${userText.slice(0, 300)}"
+
+Call get_copilot_inbox now with limit 25.
+Do not answer "I'll check" or summarize from memory. Only answer after the tool result returns, and present the items as actionable records.
+Respond as JSON only.`
   }
   if (isFieldInspectionLeadRequest(userText)) return buildFieldInspectionLeadInstruction(userText)
   if (isLiveFieldObservationRequest(userText)) return buildFieldObservationInstruction(userText)

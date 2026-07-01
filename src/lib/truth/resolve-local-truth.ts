@@ -54,8 +54,10 @@ function isActionCenterReadRequest(text: string) {
   const lower = plainTruthText(text).toLowerCase()
   if (!lower || hasLocalTruthMutationIntent(lower)) return false
   return (
-    /\b(what|show|list|view|pull|display|check)\b[\s\S]{0,80}\b(needs?\s+attention|action needed|pending approvals?|review items?|failed work|routed tasks?|inbox|notifications?)\b/.test(lower) ||
-    /\b(needs?\s+attention|action needed|pending approvals?|review items?|failed work|routed tasks?)\b/.test(lower)
+    /\b(what|show|list|view|pull|display|check|review|open)\b[\s\S]{0,120}\b(needs?\s+attention|action needed|action items?|pending approvals?|review items?|failed work|routed tasks?|inbox(?: items?)?|notifications?|decisions?|what i need to decide)\b/.test(lower) ||
+    /\b(needs?\s+attention|action needed|action items?|pending approvals?|review items?|failed work|routed tasks?|what i need to decide|things i need to decide)\b/.test(lower) ||
+    /\b(review|open|show)\b[\s\S]{0,80}\b(action item|inbox item|pending request|approval request)\b/.test(lower) ||
+    (/\bcmr[a-z0-9]+\b/.test(lower) && /\b(action item|inbox item|action needed|approval|review item|field inspection lead)\b/.test(lower))
   )
 }
 
