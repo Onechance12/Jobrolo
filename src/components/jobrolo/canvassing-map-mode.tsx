@@ -790,24 +790,6 @@ const GOOGLE_FIELD_MAP_STYLE = [
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ]
 
-function displayPositionForLead(lead: FieldLead, allLeads: FieldLead[]) {
-  const lat = typeof lead.latitude === 'number' ? lead.latitude : 0
-  const lng = typeof lead.longitude === 'number' ? lead.longitude : 0
-  const key = `${lat.toFixed(6)},${lng.toFixed(6)}`
-  const group = allLeads.filter(item => (
-    typeof item.latitude === 'number'
-    && typeof item.longitude === 'number'
-    && `${item.latitude.toFixed(6)},${item.longitude.toFixed(6)}` === key
-  ))
-  if (group.length <= 1) return { lat, lng }
-  const groupIndex = Math.max(0, group.findIndex(item => item.id === lead.id))
-  const angle = (Math.PI * 2 * groupIndex) / group.length
-  const radiusMeters = Math.min(10, 3 + group.length)
-  const latOffset = (Math.cos(angle) * radiusMeters) / 111_320
-  const lngOffset = (Math.sin(angle) * radiusMeters) / (111_320 * Math.cos((lat * Math.PI) / 180))
-  return { lat: lat + latOffset, lng: lng + lngOffset }
-}
-
 function GoogleFieldMap({
   apiKey,
   center,
@@ -852,8 +834,8 @@ function GoogleFieldMap({
         googleRef.current = google
         mapRef.current = new google.maps.Map(mapElementRef.current, {
           center: { lat: center.lat, lng: center.lng },
-          zoom: 20,
-          minZoom: 16,
+          zoom: 19,
+          minZoom: 10,
           maxZoom: 21,
           mapTypeId: google.maps.MapTypeId.SATELLITE,
           clickableIcons: false,
@@ -891,7 +873,6 @@ function GoogleFieldMap({
     const position = { lat: center.lat, lng: center.lng }
     if (lastRefreshKeyRef.current !== refreshKey) {
       map.panTo(position)
-      map.setZoom(Math.max(map.getZoom?.() ?? 18, 18))
       lastRefreshKeyRef.current = refreshKey
     } else if (!currentLocation) {
       map.setCenter(position)
@@ -950,7 +931,7 @@ function GoogleFieldMap({
     markerRefs.current = leads.map(lead => {
       const color = statusMarkerColor(lead.status)
       const selected = lead.id === selectedLeadId
-      const position = displayPositionForLead(lead, leads)
+      const position = { lat: lead.latitude!, lng: lead.longitude! }
       const marker = new google.maps.Marker({
         map,
         position,
