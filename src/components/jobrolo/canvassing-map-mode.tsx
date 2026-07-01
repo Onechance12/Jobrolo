@@ -1,13 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, Crosshair, ExternalLink, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, Trash2, X } from 'lucide-react'
+import { Crosshair, Home, Link2, Loader2, MapPin, MessageCircle, Navigation, Plus, RefreshCw, Route, Search, Trash2, X } from 'lucide-react'
 
 type BrowserLocation = {
   lat: number
   lng: number
   accuracyMeters?: number | null
+}
+
+type MapDropLocation = BrowserLocation & {
+  address?: string | null
 }
 
 type FieldLead = {
@@ -51,6 +55,7 @@ const STATUS_META: Record<string, { label: string; color: string; pin: string }>
   new: { label: 'New', color: 'border-blue-400/35 bg-blue-500/15 text-blue-100', pin: 'border-blue-200 bg-blue-500 shadow-blue-500/40' },
   knocked: { label: 'Knocked', color: 'border-slate-300/30 bg-slate-400/15 text-slate-100', pin: 'border-slate-100 bg-slate-500 shadow-slate-400/35' },
   no_answer: { label: 'No answer', color: 'border-zinc-300/30 bg-zinc-400/15 text-zinc-100', pin: 'border-zinc-100 bg-zinc-600 shadow-zinc-400/35' },
+  conversation: { label: 'Conversation', color: 'border-teal-300/35 bg-teal-500/15 text-teal-100', pin: 'border-teal-100 bg-teal-500 shadow-teal-500/45' },
   interested: { label: 'Interested', color: 'border-emerald-300/35 bg-emerald-500/15 text-emerald-100', pin: 'border-emerald-100 bg-emerald-500 shadow-emerald-500/45' },
   follow_up: { label: 'Follow up', color: 'border-amber-300/35 bg-amber-500/15 text-amber-100', pin: 'border-amber-100 bg-amber-500 shadow-amber-500/45' },
   not_interested: { label: 'Not interested', color: 'border-rose-300/35 bg-rose-500/15 text-rose-100', pin: 'border-rose-100 bg-rose-500 shadow-rose-500/40' },
@@ -65,15 +70,18 @@ const STATUS_META: Record<string, { label: string; color: string; pin: string }>
 }
 
 const PRIMARY_OUTCOMES = [
-  { status: 'knocked', label: 'Knocked' },
   { status: 'no_answer', label: 'No answer' },
-  { status: 'interested', label: 'Interested' },
-  { status: 'follow_up', label: 'Follow up' },
-]
-
-const PROPERTY_OUTCOMES = [
+  { status: 'conversation', label: 'Conversation' },
+  { status: 'not_interested', label: 'Not interested' },
+  { status: 'inspection_set', label: 'Inspection' },
   { status: 'renter', label: 'Renter' },
   { status: 'no_soliciting', label: 'No soliciting' },
+]
+
+const SECONDARY_OUTCOMES = [
+  { status: 'knocked', label: 'Knocked' },
+  { status: 'interested', label: 'Interested' },
+  { status: 'follow_up', label: 'Follow up' },
   { status: 'do_not_knock', label: 'Do not knock' },
   { status: 'new_roof', label: 'New roof' },
   { status: 'other_roofer', label: 'Other roofer' },
@@ -83,6 +91,7 @@ const STATUS_MARKER_COLORS: Record<string, { fill: string; stroke: string; glow:
   new: { fill: '#3b82f6', stroke: '#dbeafe', glow: 'rgba(59,130,246,.55)' },
   knocked: { fill: '#64748b', stroke: '#f8fafc', glow: 'rgba(148,163,184,.45)' },
   no_answer: { fill: '#52525b', stroke: '#fafafa', glow: 'rgba(161,161,170,.45)' },
+  conversation: { fill: '#14b8a6', stroke: '#ccfbf1', glow: 'rgba(20,184,166,.55)' },
   interested: { fill: '#10b981', stroke: '#d1fae5', glow: 'rgba(16,185,129,.6)' },
   follow_up: { fill: '#f59e0b', stroke: '#fef3c7', glow: 'rgba(245,158,11,.55)' },
   not_interested: { fill: '#f43f5e', stroke: '#ffe4e6', glow: 'rgba(244,63,94,.55)' },
@@ -110,10 +119,6 @@ function isValidLocation(loc: BrowserLocation | null): loc is BrowserLocation {
     && loc.lat <= 90
     && loc.lng >= -180
     && loc.lng <= 180
-}
-
-function externalMapUrl(loc: BrowserLocation) {
-  return `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`
 }
 
 function exitMapMode() {
@@ -218,11 +223,11 @@ function loadGoogleMaps(apiKey: string) {
 }
 
 export function CanvassingMapMode() {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
 
   if (!mounted) {
     return (
@@ -249,9 +254,8 @@ function CanvassingMapModeClient() {
   const [mapRefreshKey, setMapRefreshKey] = useState(0)
   const [mapData, setMapData] = useState<FieldMapPayload | null>(null)
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
-  const [showLeads, setShowLeads] = useState(true)
-  const [dropMode, setDropMode] = useState(true)
   const [googleMapUnavailable, setGoogleMapUnavailable] = useState(false)
+  const [mapChatOpen, setMapChatOpen] = useState(false)
 
   const leads = useMemo(() => mapData?.leads ?? [], [mapData?.leads])
   const pinnedLeads = useMemo(() => leads.filter(leadHasPin), [leads])
@@ -316,7 +320,6 @@ function CanvassingMapModeClient() {
       ? { lat: firstPinnedLead.latitude!, lng: firstPinnedLead.longitude!, accuracyMeters: null }
       : DEFAULT_FIELD_MAP_CENTER
   const useGoogleMap = Boolean(googleMapsApiKey && !googleMapUnavailable)
-  const directionsUrl = useMemo(() => isValidLocation(location) ? externalMapUrl(location) : null, [location])
 
   const handleGoogleMapUnavailable = useCallback((message?: string) => {
     setGoogleMapUnavailable(true)
@@ -335,10 +338,9 @@ function CanvassingMapModeClient() {
       leads: [lead, ...((prev?.leads ?? []).filter(existing => existing.id !== lead.id))],
     }))
     setSelectedLeadId(lead.id)
-    setShowLeads(true)
   }
 
-  async function createLeadAt(target: BrowserLocation, source: 'field_map_drop' | 'field_map_tap') {
+  async function createLeadAt(target: MapDropLocation, source: 'field_map_drop' | 'field_map_tap') {
     setSaving(true)
     setError(null)
     try {
@@ -350,9 +352,10 @@ function CanvassingMapModeClient() {
         body: JSON.stringify({
           status: 'new',
           source: 'field_map',
+          address: target.address || undefined,
           notes: droppedByTap
-            ? 'Dropped from map tap. Add homeowner, address, and door result from chat.'
-            : 'Dropped from current GPS. Add homeowner, address, and door result from chat.',
+            ? 'Dropped from map tap. Add homeowner, door result, and notes.'
+            : 'Dropped from current GPS. Add homeowner, door result, and notes.',
           location: { lat: target.lat, lng: target.lng, accuracyMeters: target.accuracyMeters, source },
           metadata: { droppedFromMap: true, droppedByTap },
         }),
@@ -376,7 +379,7 @@ function CanvassingMapModeClient() {
     await createLeadAt(location, 'field_map_drop')
   }
 
-  async function dropLeadAtLocation(target: BrowserLocation) {
+  async function dropLeadAtLocation(target: MapDropLocation) {
     if (!isValidLocation(target)) return
     await createLeadAt(target, 'field_map_tap')
   }
@@ -422,6 +425,26 @@ function CanvassingMapModeClient() {
       await loadMapData()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove this pin from the map.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function updateLeadNotes(lead: FieldLead, notes: string) {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/canvassing/leads/${lead.id}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      })
+      if (!res.ok) throw new Error('Could not save this note.')
+      await loadMapData()
+      setSelectedLeadId(lead.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save this note.')
     } finally {
       setSaving(false)
     }
@@ -479,9 +502,9 @@ function CanvassingMapModeClient() {
                 <span className="hidden sm:inline">Map</span>
               </Button>
             ) : null}
-            <Button size="sm" className="rounded-full px-3" onClick={exitMapMode}>
+            <Button size="sm" className="rounded-full px-3" onClick={() => setMapChatOpen(open => !open)}>
               <MessageCircle className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden sm:inline">Chat</span>
+              <span className="hidden sm:inline">Map chat</span>
             </Button>
           </div>
         </div>
@@ -505,7 +528,7 @@ function CanvassingMapModeClient() {
                   currentLocation={location}
                   leads={pinnedLeads}
                   selectedLeadId={selectedLeadId}
-                  dropMode={dropMode}
+                  dropMode
                   refreshKey={mapRefreshKey}
                   onSelectLead={setSelectedLeadId}
                   onMapTap={dropLeadAtLocation}
@@ -526,7 +549,7 @@ function CanvassingMapModeClient() {
                 />
               )}
             </div>
-            {!useGoogleMap && dropMode ? (
+            {!useGoogleMap ? (
               <div className="absolute left-1/2 top-5 z-[15] max-w-[92vw] -translate-x-1/2 rounded-2xl border border-amber-300/35 bg-slate-950/95 px-4 py-2 text-center text-xs font-semibold text-amber-100 shadow-2xl backdrop-blur">
                 Tap-to-drop needs Google Maps. Use Drop here for your current GPS until the map provider is configured.
               </div>
@@ -576,6 +599,7 @@ function CanvassingMapModeClient() {
 
         {selectedLead ? (
           <LeadCard
+            key={`${selectedLead.id}:${selectedLead.notes ?? ''}`}
             lead={selectedLead}
             saving={saving}
             hasLocation={isValidLocation(location)}
@@ -583,113 +607,25 @@ function CanvassingMapModeClient() {
             onStatus={status => { void updateLeadStatus(selectedLead, status) }}
             onAttachLocation={() => { void attachCurrentLocation(selectedLead) }}
             onArchive={() => { void archiveLead(selectedLead) }}
+            onSaveNotes={notes => { void updateLeadNotes(selectedLead, notes) }}
             onPrompt={promptInMainChat}
           />
         ) : null}
 
-        {showLeads && !selectedLead ? (
-          <div className="max-h-[32dvh] overflow-hidden rounded-3xl border border-white/10 bg-slate-950/90 shadow-2xl backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/60">Nearby pins</div>
-                <div className="text-[11px] text-white/45">
-                  {pinnedLeads.length ? 'Tap a pin or lead to work it.' : unpinnedLeads.length ? 'Some leads need GPS before they can pin.' : 'No saved pins yet.'}
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full text-white/70 hover:bg-white/10 hover:text-white" onClick={() => { void loadMapData() }} disabled={loadingMap}>
-                  {loadingMap ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full text-white/70 hover:bg-white/10 hover:text-white" onClick={() => setShowLeads(false)}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="flex gap-2 overflow-x-auto px-3 py-3">
-              {pinnedLeads.slice(0, 20).map(lead => {
-                const meta = statusMeta(lead.status)
-                return (
-                  <button
-                    key={lead.id}
-                    type="button"
-                    onClick={() => setSelectedLeadId(lead.id)}
-                    className="min-w-[210px] rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left shadow-lg transition hover:bg-white/10"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{shortLabelForLead(lead)}</div>
-                        <div className="truncate text-xs text-white/50">{lead.address || lead.phone || 'No address yet'}</div>
-                      </div>
-                      <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
-                    </div>
-                  </button>
-                )
-              })}
-              {unpinnedLeads.slice(0, 12).map(lead => {
-                const meta = statusMeta(lead.status)
-                return (
-                  <button
-                    key={lead.id}
-                    type="button"
-                    onClick={() => setSelectedLeadId(lead.id)}
-                    className="min-w-[230px] rounded-2xl border border-amber-300/20 bg-amber-500/[0.08] p-3 text-left shadow-lg transition hover:bg-amber-500/15"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{shortLabelForLead(lead)}</div>
-                        <div className="truncate text-xs text-amber-100/65">{lead.address || lead.phone || 'Needs map location'}</div>
-                      </div>
-                      <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${meta.color}`}>{meta.label}</span>
-                    </div>
-                    <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-300/20 px-2 py-1 text-[10px] text-amber-100/80">
-                      <Link2 className="h-3 w-3" />
-                      Attach GPS
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+        {mapChatOpen ? (
+          <MapChatCard
+            selectedLead={selectedLead}
+            onClose={() => setMapChatOpen(false)}
+            onPrompt={promptInMainChat}
+            onExitMap={exitMapMode}
+          />
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-3xl border border-white/10 bg-slate-950/90 p-2 text-xs text-white/70 shadow-2xl backdrop-blur-xl">
-          <div className="px-2">
-            {isValidLocation(location)
-              ? <>GPS ready{location.accuracyMeters ? ` · ±${Math.round(location.accuracyMeters)}m` : ''}</>
-              : error || 'Waiting for location…'}
+        {!selectedLead && !mapChatOpen && isValidLocation(location) ? (
+          <div className="pointer-events-none ml-auto inline-flex rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[11px] text-white/60 shadow-2xl backdrop-blur-xl">
+            GPS ready{location.accuracyMeters ? ` · ±${Math.round(location.accuracyMeters)}m` : ''} · tap map to drop
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="rounded-full bg-emerald-600 px-3 hover:bg-emerald-500" onClick={dropLeadHere} disabled={saving || locating || !isValidLocation(location)}>
-              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
-              Drop here
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="rounded-full bg-cyan-500/20 px-3 text-cyan-50 ring-1 ring-cyan-300/35 hover:bg-cyan-500/30"
-              onClick={() => setDropMode(true)}
-              disabled={saving || locating || !isValidLocation(location) || !useGoogleMap}
-              title={useGoogleMap ? 'Tap anywhere on the Google field map to drop a lead.' : 'Tap-to-drop needs the Google Maps provider.'}
-            >
-              <MapPin className="mr-1.5 h-4 w-4" />
-              Tap anywhere
-            </Button>
-            {!showLeads ? (
-              <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" onClick={() => setShowLeads(true)}>
-                <MapPin className="mr-1.5 h-4 w-4" />
-                Pins
-              </Button>
-            ) : null}
-            {directionsUrl ? (
-              <Button size="sm" variant="secondary" className="rounded-full bg-white/10 px-3 text-white hover:bg-white/15" asChild>
-                <a href={directionsUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink className="mr-1.5 h-4 w-4" />
-                  Maps
-                </a>
-              </Button>
-            ) : null}
-          </div>
-        </div>
+        ) : null}
       </div>
     </main>
   )
@@ -790,6 +726,59 @@ const GOOGLE_FIELD_MAP_STYLE = [
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ]
 
+type LeadMapCluster = {
+  id: string
+  leads: FieldLead[]
+  lat: number
+  lng: number
+}
+
+function clusterPrecisionForZoom(zoom: number) {
+  if (zoom >= 18) return null
+  if (zoom >= 16) return 4
+  if (zoom >= 13) return 3
+  return 2
+}
+
+function clusterPinnedLeads(leads: FieldLead[], zoom: number): LeadMapCluster[] {
+  const precision = clusterPrecisionForZoom(zoom)
+  if (precision === null) {
+    return leads.map(lead => ({
+      id: lead.id,
+      leads: [lead],
+      lat: lead.latitude!,
+      lng: lead.longitude!,
+    }))
+  }
+  const groups = new Map<string, FieldLead[]>()
+  for (const lead of leads) {
+    const key = `${lead.latitude!.toFixed(precision)},${lead.longitude!.toFixed(precision)}`
+    groups.set(key, [...(groups.get(key) ?? []), lead])
+  }
+  return Array.from(groups.entries()).map(([key, group]) => ({
+    id: key,
+    leads: group,
+    lat: group.reduce((sum, lead) => sum + lead.latitude!, 0) / group.length,
+    lng: group.reduce((sum, lead) => sum + lead.longitude!, 0) / group.length,
+  }))
+}
+
+async function reverseGeocodeMapAddress(google: any, lat: number, lng: number): Promise<string | null> {
+  if (!google?.maps?.Geocoder) return null
+  const geocoder = new google.maps.Geocoder()
+  return new Promise(resolve => {
+    geocoder.geocode({ location: { lat, lng } }, (results: any[] | null, status: string) => {
+      if (status !== 'OK' || !results?.length) {
+        resolve(null)
+        return
+      }
+      const streetAddress = results.find(result => result.types?.includes('street_address'))
+      const premise = results.find(result => result.types?.includes('premise'))
+      resolve((streetAddress ?? premise ?? results[0])?.formatted_address ?? null)
+    })
+  })
+}
+
 function GoogleFieldMap({
   apiKey,
   center,
@@ -810,7 +799,7 @@ function GoogleFieldMap({
   dropMode: boolean
   refreshKey: number
   onSelectLead: (leadId: string) => void
-  onMapTap: (location: BrowserLocation) => void
+  onMapTap: (location: MapDropLocation) => void
   onUnavailable: (message?: string) => void
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
@@ -820,8 +809,10 @@ function GoogleFieldMap({
   const currentMarkerRef = useRef<any>(null)
   const accuracyCircleRef = useRef<any>(null)
   const clickListenerRef = useRef<any>(null)
+  const zoomListenerRef = useRef<any>(null)
   const lastRefreshKeyRef = useRef<number | null>(null)
   const [mapReadyVersion, setMapReadyVersion] = useState(0)
+  const [mapZoom, setMapZoom] = useState(19)
 
   useEffect(() => {
     let cancelled = false
@@ -845,6 +836,10 @@ function GoogleFieldMap({
           styles: GOOGLE_FIELD_MAP_STYLE,
           backgroundColor: '#020617',
         })
+        setMapZoom(mapRef.current.getZoom?.() ?? 19)
+        zoomListenerRef.current = mapRef.current.addListener('zoom_changed', () => {
+          setMapZoom(mapRef.current?.getZoom?.() ?? 19)
+        })
         lastRefreshKeyRef.current = refreshKey
         setMapReadyVersion(version => version + 1)
       } catch (err) {
@@ -857,6 +852,7 @@ function GoogleFieldMap({
     return () => {
       cancelled = true
       clickListenerRef.current?.remove?.()
+      zoomListenerRef.current?.remove?.()
       markerRefs.current.forEach(marker => marker.setMap?.(null))
       currentMarkerRef.current?.setMap?.(null)
       accuracyCircleRef.current?.setMap?.(null)
@@ -928,32 +924,44 @@ function GoogleFieldMap({
     if (!google || !map) return
 
     markerRefs.current.forEach(marker => marker.setMap?.(null))
-    markerRefs.current = leads.map(lead => {
+    const clusters = clusterPinnedLeads(leads, mapZoom)
+    markerRefs.current = clusters.map(cluster => {
+      const lead = cluster.leads[0]
       const color = statusMarkerColor(lead.status)
-      const selected = lead.id === selectedLeadId
-      const position = { lat: lead.latitude!, lng: lead.longitude! }
+      const selected = cluster.leads.some(item => item.id === selectedLeadId)
+      const isCluster = cluster.leads.length > 1
+      const position = { lat: cluster.lat, lng: cluster.lng }
       const marker = new google.maps.Marker({
         map,
         position,
-        title: shortLabelForLead(lead),
-        zIndex: selected ? 700 : 500,
+        title: isCluster ? `${cluster.leads.length} field pins` : shortLabelForLead(lead),
+        zIndex: isCluster ? 650 : selected ? 700 : 500,
         optimized: false,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: selected ? 11 : 8,
-          fillColor: color.fill,
+          scale: isCluster ? Math.min(20, 12 + cluster.leads.length) : selected ? 11 : 8,
+          fillColor: isCluster ? '#0f172a' : color.fill,
           fillOpacity: 1,
-          strokeColor: selected ? '#ffffff' : color.stroke,
-          strokeWeight: selected ? 4 : 2,
+          strokeColor: isCluster ? '#67e8f9' : selected ? '#ffffff' : color.stroke,
+          strokeWeight: isCluster ? 3 : selected ? 4 : 2,
         },
-        label: selected
-          ? { text: '•', color: '#ffffff', fontSize: '18px', fontWeight: '900' }
+        label: isCluster
+          ? { text: String(cluster.leads.length), color: '#ffffff', fontSize: '12px', fontWeight: '800' }
+          : selected
+            ? { text: '•', color: '#ffffff', fontSize: '18px', fontWeight: '900' }
           : undefined,
       })
-      marker.addListener('click', () => onSelectLead(lead.id))
+      marker.addListener('click', () => {
+        if (isCluster) {
+          map.panTo(position)
+          map.setZoom(Math.min(21, Math.max(map.getZoom?.() ?? 16, 16) + 2))
+          return
+        }
+        onSelectLead(lead.id)
+      })
       return marker
     })
-  }, [leads, mapReadyVersion, onSelectLead, selectedLeadId])
+  }, [leads, mapReadyVersion, mapZoom, onSelectLead, selectedLeadId])
 
   useEffect(() => {
     const map = mapRef.current
@@ -962,13 +970,17 @@ function GoogleFieldMap({
     clickListenerRef.current = null
     if (!dropMode) return
 
-    clickListenerRef.current = map.addListener('click', (event: any) => {
+    clickListenerRef.current = map.addListener('click', async (event: any) => {
       const latLng = event?.latLng
       if (!latLng) return
+      const lat = latLng.lat()
+      const lng = latLng.lng()
+      const address = await reverseGeocodeMapAddress(googleRef.current, lat, lng)
       onMapTap({
-        lat: latLng.lat(),
-        lng: latLng.lng(),
+        lat,
+        lng,
         accuracyMeters: currentLocation?.accuracyMeters ?? null,
+        address,
       })
     })
   }, [currentLocation?.accuracyMeters, dropMode, mapReadyVersion, onMapTap])
@@ -983,6 +995,59 @@ function GoogleFieldMap({
   )
 }
 
+function MapChatCard({
+  selectedLead,
+  onClose,
+  onPrompt,
+  onExitMap,
+}: {
+  selectedLead: FieldLead | null
+  onClose: () => void
+  onPrompt: (prompt: string) => void
+  onExitMap: () => void
+}) {
+  const [draft, setDraft] = useState('')
+  const context = selectedLead
+    ? `Lead ID: ${selectedLead.id}. Address: ${selectedLead.address || 'unknown'}. Status: ${selectedLead.status || 'new'}.`
+    : 'No field pin selected.'
+  const composedPrompt = `${draft.trim()}\n\nMap context: ${context}`.trim()
+
+  return (
+    <div className="rounded-[1.7rem] border border-cyan-300/15 bg-slate-950/94 p-3 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/60">Map chat</div>
+          <div className="text-sm font-semibold text-white">Talk through this area without losing the map.</div>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-full p-1 text-white/45 hover:bg-white/10 hover:text-white">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <textarea
+        value={draft}
+        onChange={event => setDraft(event.target.value)}
+        rows={2}
+        placeholder="Ask about this pin, add context, or tell Jobrolo what to update..."
+        className="mt-3 min-h-16 w-full resize-none rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none placeholder:text-white/35"
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          className="rounded-full"
+          disabled={!draft.trim()}
+          onClick={() => onPrompt(composedPrompt)}
+        >
+          <MessageCircle className="mr-1.5 h-4 w-4" />
+          Send to Jobrolo
+        </Button>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={onExitMap}>
+          Open full chat
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function LeadCard({
   lead,
   saving,
@@ -991,6 +1056,7 @@ function LeadCard({
   onStatus,
   onAttachLocation,
   onArchive,
+  onSaveNotes,
   onPrompt,
 }: {
   lead: FieldLead
@@ -1000,34 +1066,38 @@ function LeadCard({
   onStatus: (status: string) => void
   onAttachLocation: () => void
   onArchive: () => void
+  onSaveNotes: (notes: string) => void
   onPrompt: (prompt: string) => void
 }) {
   const [moreOpen, setMoreOpen] = useState(false)
+  const [notesDraft, setNotesDraft] = useState(lead.notes ?? '')
   const meta = statusMeta(lead.status)
   const label = shortLabelForLead(lead)
   const hasPin = leadHasPin(lead)
-  const details = lead.address || lead.phone || lead.notes || 'No address yet'
+  const details = lead.address || lead.phone || 'Address not found yet'
   const currentStatus = String(lead.status || 'new').toLowerCase()
   const primaryOutcomes = PRIMARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
+  const secondaryOutcomes = SECONDARY_OUTCOMES.filter(outcome => outcome.status !== currentStatus)
+
   return (
-    <div className="rounded-[1.7rem] border border-white/10 bg-slate-950/92 p-2.5 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
+    <div className="rounded-[1.7rem] border border-white/10 bg-slate-950/94 p-3 shadow-[0_18px_70px_rgba(0,0,0,.45)] backdrop-blur-xl">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Home className="h-4 w-4 text-emerald-200" />
-            <h2 className="truncate text-sm font-semibold">{label}</h2>
+            <h2 className="truncate text-sm font-semibold">Field pin</h2>
             <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${meta.color}`}>{meta.label}</span>
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-white/48">{details}</div>
+          <div className="mt-0.5 truncate text-[11px] text-white/48">{label === 'Field pin' ? details : label}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1 text-white/45 hover:bg-white/10 hover:text-white">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+      <div className="mt-3 grid grid-cols-2 gap-2">
         {hasPin ? (
-          <span className="shrink-0 rounded-full border border-cyan-300/20 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-100">
+          <span className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-center text-xs font-medium text-cyan-100">
             GPS saved
           </span>
         ) : null}
@@ -1037,23 +1107,24 @@ function LeadCard({
             type="button"
             onClick={() => onStatus(outcome.status)}
             disabled={saving}
-            className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+            className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white/90 hover:bg-white/10"
           >
             {outcome.label}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => setMoreOpen(open => !open)}
-          className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/75 hover:bg-white/10"
-        >
-          More <ChevronDown className={`ml-1 inline h-3.5 w-3.5 transition ${moreOpen ? 'rotate-180' : ''}`} />
-        </button>
       </div>
 
+      <button
+        type="button"
+        onClick={() => setMoreOpen(open => !open)}
+        className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/65 hover:bg-white/10"
+      >
+        {moreOpen ? 'Hide sub options' : 'Show sub options'}
+      </button>
+
       {moreOpen ? (
-        <div className="mt-1.5 flex gap-1.5 overflow-x-auto rounded-2xl border border-white/8 bg-white/[0.035] p-1.5">
-          {PROPERTY_OUTCOMES.map(outcome => {
+        <div className="mt-2 flex gap-1.5 overflow-x-auto rounded-2xl border border-white/8 bg-white/[0.035] p-1.5">
+          {secondaryOutcomes.map(outcome => {
             const outcomeMeta = statusMeta(outcome.status)
             return (
               <button
@@ -1070,6 +1141,27 @@ function LeadCard({
         </div>
       ) : null}
 
+      <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.04] p-2">
+        <textarea
+          value={notesDraft}
+          onChange={event => setNotesDraft(event.target.value)}
+          rows={2}
+          placeholder="Add note: spoke with homeowner, renter, roof looked new, no soliciting sign..."
+          className="min-h-16 w-full resize-none bg-transparent text-sm text-white outline-none placeholder:text-white/35"
+        />
+        <div className="mt-2 flex justify-end">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="rounded-full bg-emerald-500/15 text-emerald-50 hover:bg-emerald-500/25"
+            onClick={() => onSaveNotes(notesDraft)}
+            disabled={saving || notesDraft.trim() === (lead.notes ?? '').trim()}
+          >
+            Save note
+          </Button>
+        </div>
+      </div>
+
       {!hasPin ? (
         <button
           type="button"
@@ -1082,9 +1174,9 @@ function LeadCard({
         </button>
       ) : null}
       <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
-        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Edit this field map pin using update_canvassing_lead. Lead ID: ${lead.id}. Current label: ${label}. Add or correct homeowner, phone, address, door outcome, notes, and next step.`)}>
+        <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Work this field map pin. Lead ID: ${lead.id}. Address: ${lead.address || 'unknown'}. Current status: ${lead.status || 'new'}. Help me update homeowner, phone, notes, next step, or convert it when ready.`)}>
           <MessageCircle className="mr-1.5 h-4 w-4" />
-          Edit in chat
+          Ask
         </Button>
         <Button size="sm" variant="secondary" className="rounded-full bg-white/10 text-white hover:bg-white/15" onClick={() => onPrompt(`Research this field map pin/property. Lead ID: ${lead.id}. Tell me what is missing before converting it into a customer, job, or follow-up.`)}>
           <Search className="mr-1.5 h-4 w-4" />
